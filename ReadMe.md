@@ -127,6 +127,29 @@ data modeling.
 - Goal progress summary across all active goals
 - Dashboard links into the main MVP workflows
 
+## Phase 16: Testing Foundation
+
+- Node test runner with TypeScript compilation
+- Unit tests for risk profile scoring and band behavior
+- Unit tests for goal monthly investment math
+- Unit tests for CSV import validation
+- Unit tests for CSV export escaping
+
+## Phase 17: API Input Hardening
+
+- Extracted risk profile request normalization into a reusable library
+- Defaults invalid enum values before scoring
+- Defaults non-finite numeric inputs before scoring
+- Keeps the API route thin and focused on request/response handling
+- Unit tests for untrusted risk profile request payloads
+
+## Phase 18: CI Quality Gate
+
+- GitHub Actions runs install, lint, tests, and production build
+- Pull request template includes validation checklist
+- Keeps rule-based logic, API hardening, and build health visible before deploys
+- Uses only the free GitHub Actions and Vercel-friendly workflow path
+
 ## Run Locally
 
 ```bash
@@ -135,6 +158,14 @@ npm run dev
 ```
 
 Then open `http://localhost:3000`.
+
+Run checks with:
+
+```bash
+npm run lint
+npm test
+npm run build
+```
 
 The app also runs without Supabase keys. In that mode, data autosaves in
 `localStorage` so the MVP remains portfolio-demo friendly.
