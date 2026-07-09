@@ -214,6 +214,62 @@ data modeling.
 - Removed mentor-rule imports from the main app shell
 - Preserved the future AI swap point without changing the current free MVP behavior
 
+## Phase 27: Academy Component Split
+
+- Moved Investment Academy into `components/wealth/academy.tsx`
+- Kept investment category and comparison data with the Academy screen
+- Kept comparison selection state local to the Academy tab
+- Removed Academy-only types and icons from the main app shell
+- Preserved the beginner education and comparator experience
+
+## Phase 28: Portfolio Component Split
+
+- Moved manual Portfolio Tracker into `components/wealth/portfolio.tsx`
+- Moved shared form controls into `components/wealth/form-fields.tsx`
+- Moved reusable check rows into `components/wealth/health-check.tsx`
+- Kept CSV import/export, inline editing, allocation chart, and health checks together
+- Reduced the main app shell to orchestration for portfolio state
+
+## Phase 29: Goals Component Split
+
+- Moved Goal Planner into `components/wealth/goals.tsx`
+- Moved compact metric rows into `components/wealth/metric-mini.tsx`
+- Kept goal editor fields, monthly split chart, and planning checks together
+- Reused shared form controls and check rows from earlier splits
+- Reduced the main app shell to orchestration for goal state
+
+## Phase 30: Onboarding Component Split
+
+- Moved beginner onboarding into `components/wealth/onboarding.tsx`
+- Kept questionnaire step state local to the Onboarding screen
+- Moved risk result chart, score, next actions, and recommendation rendering together
+- Removed onboarding-only chart imports and goal labels from the main app shell
+- Reduced the main app shell to orchestration for risk-answer state
+
+## Phase 31: Risk History Component Split
+
+- Moved Risk History into `components/wealth/risk-history.tsx`
+- Kept saved profile snapshot rendering with the history screen
+- Moved history date formatting out of the main app shell
+- Preserved the empty state for users without saved risk snapshots
+- Reduced the main app shell to orchestration for risk-history state
+
+## Phase 32: Settings Component Split
+
+- Moved Settings and Data Controls into `components/wealth/data-settings.tsx`
+- Kept workspace export, import, reset controls, and export preview together
+- Moved settings-only browser clipboard/download handlers out of the main app shell
+- Reused compact metric rows for the data snapshot
+- Reduced the main app shell to orchestration for settings callbacks
+
+## Phase 33: App Shell Layout Split
+
+- Moved sidebar navigation into `components/wealth/app-sidebar.tsx`
+- Moved command-center header into `components/wealth/app-header.tsx`
+- Centralized the active-view type with the sidebar navigation definition
+- Kept screen selection and state orchestration in the main app shell
+- Reduced `wealth-compass-app.tsx` to mostly state, sync, and screen wiring
+
 ## Run Locally
 
 ```bash
