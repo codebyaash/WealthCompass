@@ -59,7 +59,9 @@ export function Portfolio({
     gain: 0,
   });
   const [csvText, setCsvText] = useState(samplePortfolioCsv);
-  const [csvMessage, setCsvMessage] = useState("Paste CSV with name, type, value, gain.");
+  const [csvMessage, setCsvMessage] = useState(
+    "Paste or upload portfolio exports, email statements, or broker spreadsheets.",
+  );
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingAsset, setEditingAsset] = useState<PortfolioAsset | null>(null);
   const exportedCsv = useMemo(() => portfolioAssetsToCsv(assets), [assets]);
@@ -218,7 +220,8 @@ export function Portfolio({
               <div>
                 <p className="text-sm font-medium">CSV import</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Columns: name, type, value, gain. Values stay local unless Supabase sync is active.
+                  Supports CSV/TSV, pasted email text, HTML tables, scheme/security name,
+                  current value, invested value, returns %, units, NAV, and LTP.
                 </p>
               </div>
               <Button type="button" variant="outline" onClick={handleCsvImport}>
@@ -227,7 +230,7 @@ export function Portfolio({
               </Button>
             </div>
             <Input
-              accept=".csv,text/csv"
+              accept=".csv,.tsv,.txt,.html,text/csv,text/tab-separated-values,text/plain,text/html"
               type="file"
               onChange={(event) => void handleCsvFileUpload(event.target.files?.[0] ?? null)}
             />

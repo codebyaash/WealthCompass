@@ -270,6 +270,15 @@ data modeling.
 - Kept screen selection and state orchestration in the main app shell
 - Reduced `wealth-compass-app.tsx` to mostly state, sync, and screen wiring
 
+## Phase 34: Universal Portfolio and Statement Import
+
+- Expanded portfolio CSV/TSV import for app and broker exports
+- Added support for pasted email statements and HTML statement tables
+- Added aliases for scheme name, security name, asset class, market value, invested value, units, NAV, LTP, XIRR, and P&L
+- Made asset type and gain optional with sensible inference and defaults
+- Added value calculation from units and NAV/LTP when market value is missing
+- Added tests for Paytm Money-style, Jupiter-style, broker-style, email-text, and HTML-table imports
+
 ## Run Locally
 
 ```bash
