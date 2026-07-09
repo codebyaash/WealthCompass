@@ -95,6 +95,38 @@ data modeling.
 - Personalized notes using current onboarding answers and risk profile
 - Designed so OpenAI can replace the answer engine later without changing the UI
 
+## Phase 12: Settings and Data Controls
+
+- Dedicated Settings tab
+- Local and Supabase sync status summary
+- Full workspace export as readable JSON
+- Copy and download controls for account portability
+- Portfolio and full demo workspace reset actions
+
+## Phase 13: Data Import and Portfolio Editing
+
+- Import full workspace JSON exports from Settings
+- Defensive import validation for onboarding, portfolio, goals, and risk history data
+- Edit individual portfolio holdings inline
+- Delete portfolio holdings from the manual tracker
+- Load CSV files into the import preview before applying holdings
+
+## Phase 14: Multi-Goal Planning
+
+- Store and sync multiple financial goals
+- Add, edit, and delete goals from the planner
+- Priority labels for essential, important, and aspirational goals
+- Combined monthly investment target across all goals
+- Goal split chart and rule-based planning checks
+
+## Phase 15: Dashboard Command Center
+
+- Rule-based next best action on the dashboard
+- Quick action buttons for profile, portfolio, goals, and academy
+- Portfolio allocation snapshot from manual holdings
+- Goal progress summary across all active goals
+- Dashboard links into the main MVP workflows
+
 ## Run Locally
 
 ```bash

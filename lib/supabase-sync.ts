@@ -34,7 +34,9 @@ type PortfolioRow = {
 type GoalRow = {
   current_amount: number;
   expected_return: number;
+  id: string;
   name: string;
+  priority: WealthGoal["priority"] | null;
   target_amount: number;
   years: number;
 };
@@ -63,10 +65,9 @@ export async function loadCloudSnapshot(
       .returns<PortfolioRow[]>(),
     supabase
       .from("goals")
-      .select("name, target_amount, current_amount, years, expected_return")
+      .select("id, name, target_amount, current_amount, years, expected_return, priority")
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
-      .limit(1)
       .returns<GoalRow[]>(),
   ]);
 
@@ -81,9 +82,9 @@ export async function loadCloudSnapshot(
     assets: assetsResult.data.length
       ? assetsResult.data.map(mapPortfolioRowToAsset)
       : defaultSnapshot.assets,
-    goal: goalsResult.data[0]
-      ? mapGoalRowToGoal(goalsResult.data[0])
-      : defaultSnapshot.goal,
+    goals: goalsResult.data.length
+      ? goalsResult.data.map(mapGoalRowToGoal)
+      : defaultSnapshot.goals,
   };
 }
 
@@ -132,16 +133,21 @@ export async function saveCloudSnapshot({
 
   if (deleteGoalsResult.error) throw deleteGoalsResult.error;
 
-  const goalResult = await supabase.from("goals").insert({
-    current_amount: snapshot.goal.currentAmount,
-    expected_return: snapshot.goal.annualReturn,
-    name: snapshot.goal.name,
-    target_amount: snapshot.goal.targetAmount,
-    user_id: userId,
-    years: snapshot.goal.years,
-  });
+  if (snapshot.goals.length) {
+    const goalResult = await supabase.from("goals").insert(
+      snapshot.goals.map((goal) => ({
+        current_amount: goal.currentAmount,
+        expected_return: goal.annualReturn,
+        name: goal.name,
+        priority: goal.priority,
+        target_amount: goal.targetAmount,
+        user_id: userId,
+        years: goal.years,
+      })),
+    );
 
-  if (goalResult.error) throw goalResult.error;
+    if (goalResult.error) throw goalResult.error;
+  }
 }
 
 export async function saveRiskProfileHistory({
@@ -250,7 +256,9 @@ function mapGoalRowToGoal(row: GoalRow): WealthGoal {
   return {
     annualReturn: row.expected_return,
     currentAmount: row.current_amount,
+    id: row.id,
     name: row.name,
+    priority: row.priority ?? "important",
     targetAmount: row.target_amount,
     years: row.years,
   };

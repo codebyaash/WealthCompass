@@ -2,6 +2,7 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
+import Link from "next/link";
 import { ArrowLeft, LockKeyhole, Mail } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,10 +65,10 @@ export function AuthForm() {
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
         <Button asChild variant="ghost" className="mb-4">
-          <a href="/">
+          <Link href="/">
             <ArrowLeft className="h-4 w-4" />
             Back
-          </a>
+          </Link>
         </Button>
         <Card>
           <CardHeader>

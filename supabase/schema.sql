@@ -57,6 +57,9 @@ create table if not exists public.goals (
   current_amount numeric not null default 0,
   years integer not null,
   expected_return numeric not null default 8,
+  priority text not null default 'important' check (
+    priority in ('essential', 'important', 'aspirational')
+  ),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

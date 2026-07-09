@@ -18,6 +18,7 @@ import {
 import {
   BookOpen,
   Calculator,
+  Check,
   CheckCircle2,
   Cloud,
   Compass,
@@ -31,11 +32,15 @@ import {
   LogOut,
   MessageCircleQuestion,
   Newspaper,
+  Pencil,
   Plus,
+  RotateCcw,
   Save,
+  Settings,
   ShieldCheck,
   TrendingDown,
   TrendingUp,
+  Trash2,
   Upload,
   WalletCards,
 } from "lucide-react";
@@ -54,15 +59,19 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { defaultRiskAnswers, marketNotes, portfolioAssets } from "@/lib/sample-data";
 import {
-  defaultGoal,
   createRiskHistoryItem,
   loadSnapshot,
   loadRiskHistory,
+  parseWorkspaceImport,
   saveRiskHistory,
   saveSnapshot,
   type PortfolioAsset,
+  type GoalPriority,
   type RiskHistoryItem,
+  type WealthCompassImport,
   type WealthGoal,
+  createWealthGoal,
+  defaultGoals,
 } from "@/lib/local-storage";
 import {
   parsePortfolioCsv,
@@ -92,6 +101,7 @@ const navItems = [
   { id: "history", label: "History", icon: History },
   { id: "market", label: "Market", icon: Newspaper },
   { id: "mentor", label: "Mentor", icon: MessageCircleQuestion },
+  { id: "settings", label: "Settings", icon: Settings },
 ] as const;
 
 const categoryLibrary = [
@@ -364,6 +374,12 @@ const colors = [
   "var(--color-chart-5)",
 ];
 
+const goalPriorityLabels: Record<GoalPriority, string> = {
+  aspirational: "Aspirational",
+  essential: "Essential",
+  important: "Important",
+};
+
 type ActiveView = (typeof navItems)[number]["id"];
 type ComparisonId = (typeof comparisonLibrary)[number]["id"];
 type MentorQuestionId = (typeof mentorQuestions)[number]["id"];
@@ -381,7 +397,7 @@ export function WealthCompassApp() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [answers, setAnswers] = useState<RiskAnswers>(defaultRiskAnswers);
   const [assets, setAssets] = useState<PortfolioAsset[]>(portfolioAssets);
-  const [goal, setGoal] = useState<WealthGoal>(defaultGoal);
+  const [goals, setGoals] = useState<WealthGoal[]>(defaultGoals);
   const [riskHistory, setRiskHistory] = useState<RiskHistoryItem[]>([]);
   const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(
@@ -396,15 +412,15 @@ export function WealthCompassApp() {
     const snapshot = loadSnapshot();
     setAnswers(snapshot.answers);
     setAssets(snapshot.assets);
-    setGoal(snapshot.goal);
+    setGoals(snapshot.goals);
     setRiskHistory(loadRiskHistory());
     setHasLoadedSnapshot(true);
   }, []);
 
   useEffect(() => {
     if (!hasLoadedSnapshot) return;
-    saveSnapshot({ answers, assets, goal });
-  }, [answers, assets, goal, hasLoadedSnapshot]);
+    saveSnapshot({ answers, assets, goals });
+  }, [answers, assets, goals, hasLoadedSnapshot]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -428,7 +444,7 @@ export function WealthCompassApp() {
         if (!isMounted) return;
         setAnswers(snapshot.answers);
         setAssets(snapshot.assets);
-        setGoal(snapshot.goal);
+        setGoals(snapshot.goals);
         saveSnapshot(snapshot);
         const history = await loadRiskProfileHistory(client, user.id);
         if (!isMounted) return;
@@ -478,7 +494,7 @@ export function WealthCompassApp() {
     const timeoutId = window.setTimeout(async () => {
       try {
         await saveCloudSnapshot({
-          snapshot: { answers, assets, goal },
+          snapshot: { answers, assets, goals },
           supabase: client,
           userId,
         });
@@ -491,11 +507,14 @@ export function WealthCompassApp() {
     }, 900);
 
     return () => window.clearTimeout(timeoutId);
-  }, [answers, assets, goal, hasLoadedSnapshot, supabase, userId]);
+  }, [answers, assets, goals, hasLoadedSnapshot, supabase, userId]);
 
   const profile = useMemo(() => calculateRiskProfile(answers), [answers]);
   const portfolioTotal = assets.reduce((sum, asset) => sum + asset.value, 0);
-  const monthlyGoal = calculateGoalMonthlyInvestment(goal);
+  const monthlyGoal = goals.reduce(
+    (sum, goal) => sum + calculateGoalMonthlyInvestment(goal),
+    0,
+  );
   const healthScore = Math.round(
     (profile.score * 0.35) +
       (answers.emergencyMonths >= 6 ? 22 : answers.emergencyMonths * 3) +
@@ -539,6 +558,68 @@ export function WealthCompassApp() {
   async function handleSignOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
+  }
+
+  function handleResetPortfolio() {
+    setAssets(portfolioAssets);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Portfolio restored to demo holdings.");
+  }
+
+  function handleUpdateAsset(assetIndex: number, nextAsset: PortfolioAsset) {
+    setAssets((current) =>
+      current.map((asset, index) => (index === assetIndex ? nextAsset : asset)),
+    );
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Portfolio holding updated.");
+  }
+
+  function handleDeleteAsset(assetIndex: number) {
+    setAssets((current) => current.filter((_, index) => index !== assetIndex));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Portfolio holding removed.");
+  }
+
+  function handleRestoreDemoWorkspace() {
+    setAnswers(defaultRiskAnswers);
+    setAssets(portfolioAssets);
+    setGoals(defaultGoals);
+    setRiskHistory([]);
+    saveRiskHistory([]);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage(
+      userId
+        ? "Demo workspace restored. Profile, portfolio, and goal changes will sync; cloud history is retained."
+        : "Demo workspace restored in this browser.",
+    );
+  }
+
+  function handleImportWorkspace(workspace: WealthCompassImport) {
+    setAnswers(workspace.answers);
+    setAssets(workspace.assets);
+    setGoals(workspace.goals);
+    setRiskHistory(workspace.riskHistory);
+    saveRiskHistory(workspace.riskHistory);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Imported workspace data.");
+  }
+
+  function handleAddGoal() {
+    setGoals((current) => [createWealthGoal(), ...current]);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Goal added.");
+  }
+
+  function handleUpdateGoal(goalId: string, nextGoal: WealthGoal) {
+    setGoals((current) => current.map((goal) => (goal.id === goalId ? nextGoal : goal)));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Goal updated.");
+  }
+
+  function handleDeleteGoal(goalId: string) {
+    setGoals((current) => current.filter((goal) => goal.id !== goalId));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Goal removed.");
   }
 
   return (
@@ -595,8 +676,11 @@ export function WealthCompassApp() {
           />
           {activeView === "dashboard" && (
             <Dashboard
+              assets={assets}
+              goals={goals}
               healthScore={healthScore}
               monthlyGoal={monthlyGoal}
+              onNavigate={setActiveView}
               portfolioTotal={portfolioTotal}
               profile={profile}
             />
@@ -609,16 +693,24 @@ export function WealthCompassApp() {
             <Portfolio
               assets={assets}
               onAddAsset={(asset) => setAssets((current) => [asset, ...current])}
+              onDeleteAsset={handleDeleteAsset}
               onImportAssets={(importedAssets) =>
                 setAssets((current) => [...importedAssets, ...current])
               }
-              onResetAssets={() => setAssets(portfolioAssets)}
+              onResetAssets={handleResetPortfolio}
+              onUpdateAsset={handleUpdateAsset}
               portfolioTotal={portfolioTotal}
               profile={profile}
             />
           )}
           {activeView === "goals" && (
-            <Goals goal={goal} monthlyGoal={monthlyGoal} onChange={setGoal} />
+            <Goals
+              goals={goals}
+              monthlyGoal={monthlyGoal}
+              onAddGoal={handleAddGoal}
+              onDeleteGoal={handleDeleteGoal}
+              onUpdateGoal={handleUpdateGoal}
+            />
           )}
           {activeView === "history" && (
             <RiskHistory history={riskHistory} profile={profile} />
@@ -626,6 +718,21 @@ export function WealthCompassApp() {
           {activeView === "market" && <MarketDashboard />}
           {activeView === "mentor" && (
             <MentorPanel answers={answers} profile={profile} />
+          )}
+          {activeView === "settings" && (
+            <DataSettings
+              answers={answers}
+              assets={assets}
+              goals={goals}
+              onImportWorkspace={handleImportWorkspace}
+              onResetPortfolio={handleResetPortfolio}
+              onRestoreDemoWorkspace={handleRestoreDemoWorkspace}
+              profile={profile}
+              riskHistory={riskHistory}
+              syncMessage={syncMessage}
+              syncStatus={syncStatus}
+              userEmail={userEmail}
+            />
           )}
         </section>
       </div>
@@ -699,16 +806,45 @@ function Header({
 }
 
 function Dashboard({
+  assets,
+  goals,
   healthScore,
   monthlyGoal,
+  onNavigate,
   portfolioTotal,
   profile,
 }: {
+  assets: PortfolioAsset[];
+  goals: WealthGoal[];
   healthScore: number;
   monthlyGoal: number;
+  onNavigate: (view: ActiveView) => void;
   portfolioTotal: number;
   profile: ReturnType<typeof calculateRiskProfile>;
 }) {
+  const totalGoalTarget = goals.reduce((sum, goal) => sum + goal.targetAmount, 0);
+  const totalGoalCurrent = goals.reduce((sum, goal) => sum + goal.currentAmount, 0);
+  const goalProgress = totalGoalTarget > 0
+    ? Math.round((totalGoalCurrent / totalGoalTarget) * 100)
+    : 0;
+  const allocationData = assets.reduce<Array<{ name: string; value: number }>>((items, asset) => {
+    const existingItem = items.find((item) => item.name === asset.type);
+    if (existingItem) {
+      existingItem.value += asset.value;
+      return items;
+    }
+
+    return [...items, { name: asset.type, value: asset.value }];
+  }, []);
+  const action = getDashboardAction({
+    assets,
+    goalProgress,
+    goals,
+    healthScore,
+    monthlyGoal,
+    profile,
+  });
+
   return (
     <div className="grid gap-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -718,7 +854,63 @@ function Dashboard({
         <MetricCard icon={Calculator} label="Goal SIP" value={formatMoney(monthlyGoal)} detail="Monthly target" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Next best action</CardTitle>
+            <CardDescription>{action.reason}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="rounded-md border bg-muted/40 p-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{action.badge}</Badge>
+                <Badge variant="outline">{profile.confidence}</Badge>
+              </div>
+              <p className="mt-3 text-lg font-semibold">{action.title}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{action.detail}</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button type="button" onClick={() => onNavigate(action.view)}>
+                {action.cta}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => onNavigate("mentor")}>
+                Ask Mentor
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick actions</CardTitle>
+            <CardDescription>Jump into the most common MVP workflows.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <QuickAction
+              icon={Compass}
+              label="Update profile"
+              onClick={() => onNavigate("onboarding")}
+            />
+            <QuickAction
+              icon={WalletCards}
+              label="Track holdings"
+              onClick={() => onNavigate("portfolio")}
+            />
+            <QuickAction
+              icon={Goal}
+              label="Plan goals"
+              onClick={() => onNavigate("goals")}
+            />
+            <QuickAction
+              icon={BookOpen}
+              label="Keep learning"
+              onClick={() => onNavigate("academy")}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <Card>
           <CardHeader>
             <CardTitle>Portfolio trajectory</CardTitle>
@@ -745,6 +937,75 @@ function Dashboard({
 
         <Card>
           <CardHeader>
+            <CardTitle>Current allocation</CardTitle>
+            <CardDescription>Manual holdings grouped by asset type.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-5 md:grid-cols-[0.9fr_1.1fr]">
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={allocationData} dataKey="value" innerRadius={54} outerRadius={86} paddingAngle={3}>
+                    {allocationData.map((entry, index) => (
+                      <Cell key={entry.name} fill={colors[index % colors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid content-center gap-3">
+              {allocationData.map((item, index) => (
+                <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 rounded-sm"
+                      style={{ backgroundColor: colors[index % colors.length] }}
+                    />
+                    <span className="text-sm font-medium">{item.name}</span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">{formatMoney(item.value)}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Goal progress</CardTitle>
+            <CardDescription>{goals.length} active goals in the planner.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div>
+              <div className="mb-2 flex justify-between text-sm">
+                <span>{formatMoney(totalGoalCurrent)}</span>
+                <span>{formatMoney(totalGoalTarget)}</span>
+              </div>
+              <Progress value={goalProgress} />
+            </div>
+            <div className="grid gap-3">
+              {goals.slice(0, 3).map((goal) => (
+                <div key={goal.id} className="rounded-md border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">{goal.name}</p>
+                    <Badge variant="outline">{goalPriorityLabels[goal.priority]}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {formatMoney(calculateGoalMonthlyInvestment(goal))} monthly target
+                  </p>
+                </div>
+              ))}
+            </div>
+            <Button type="button" variant="outline" onClick={() => onNavigate("goals")}>
+              Open Goals
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Today in plain English</CardTitle>
             <CardDescription>Beginner market context without noise.</CardDescription>
           </CardHeader>
@@ -761,6 +1022,86 @@ function Dashboard({
       <Roadmap profile={profile} />
     </div>
   );
+}
+
+function QuickAction({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: typeof Compass;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="h-20 flex-col gap-2 whitespace-normal text-center"
+      onClick={onClick}
+    >
+      <Icon className="h-4 w-4" />
+      <span>{label}</span>
+    </Button>
+  );
+}
+
+function getDashboardAction({
+  assets,
+  goalProgress,
+  goals,
+  healthScore,
+  monthlyGoal,
+  profile,
+}: {
+  assets: PortfolioAsset[];
+  goalProgress: number;
+  goals: WealthGoal[];
+  healthScore: number;
+  monthlyGoal: number;
+  profile: ReturnType<typeof calculateRiskProfile>;
+}) {
+  if (profile.confidence === "Needs foundation") {
+    return {
+      badge: "Foundation",
+      cta: "Review Profile",
+      detail: "Emergency savings or debt risk is still limiting how much market risk makes sense.",
+      reason: "Risk capacity comes before product selection.",
+      title: "Strengthen your foundation first",
+      view: "onboarding" as const,
+    };
+  }
+
+  if (goals.length === 0 || goalProgress < 10) {
+    return {
+      badge: "Planning",
+      cta: "Plan Goals",
+      detail: `Your current goal plan needs more funding clarity. The combined monthly target is ${formatMoney(monthlyGoal)}.`,
+      reason: "Goals make portfolio decisions easier to evaluate.",
+      title: "Define the next funding milestone",
+      view: "goals" as const,
+    };
+  }
+
+  if (assets.length < 4 || healthScore < 70) {
+    return {
+      badge: "Tracking",
+      cta: "Review Portfolio",
+      detail: "Add or refine holdings so allocation and concentration checks become more useful.",
+      reason: "Better tracking creates better recommendations.",
+      title: "Improve portfolio visibility",
+      view: "portfolio" as const,
+    };
+  }
+
+  return {
+    badge: "Learning",
+    cta: "Open Academy",
+    detail: "Your foundation is in good shape. Keep building product knowledge before adding complexity.",
+    reason: "The next edge is consistency and understanding.",
+    title: "Continue the learning roadmap",
+    view: "academy" as const,
+  };
 }
 
 function MarketDashboard() {
@@ -1240,6 +1581,35 @@ function TextField({
   );
 }
 
+function SelectField({
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  options: Array<[string, string]>;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label>{label}</Label>
+      <select
+        className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map(([optionValue, labelText]) => (
+          <option key={optionValue} value={optionValue}>
+            {labelText}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function SegmentedControl({
   label,
   onChange,
@@ -1384,15 +1754,19 @@ function ComparisonMetric({ label, value }: { label: string; value: string }) {
 function Portfolio({
   assets,
   onAddAsset,
+  onDeleteAsset,
   onImportAssets,
   onResetAssets,
+  onUpdateAsset,
   portfolioTotal,
   profile,
 }: {
   assets: PortfolioAsset[];
   onAddAsset: (asset: PortfolioAsset) => void;
+  onDeleteAsset: (assetIndex: number) => void;
   onImportAssets: (assets: PortfolioAsset[]) => void;
   onResetAssets: () => void;
+  onUpdateAsset: (assetIndex: number, asset: PortfolioAsset) => void;
   portfolioTotal: number;
   profile: ReturnType<typeof calculateRiskProfile>;
 }) {
@@ -1404,6 +1778,8 @@ function Portfolio({
   });
   const [csvText, setCsvText] = useState(samplePortfolioCsv);
   const [csvMessage, setCsvMessage] = useState("Paste CSV with name, type, value, gain.");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingAsset, setEditingAsset] = useState<PortfolioAsset | null>(null);
   const exportedCsv = useMemo(() => portfolioAssetsToCsv(assets), [assets]);
 
   const chartData = assets.map((asset) => ({
@@ -1433,6 +1809,45 @@ function Portfolio({
         ? `Imported ${result.assets.length} holdings. ${result.errors.join(" ")}`
         : `Imported ${result.assets.length} holdings.`,
     );
+  }
+
+  function handleStartEdit(asset: PortfolioAsset, assetIndex: number) {
+    setEditingIndex(assetIndex);
+    setEditingAsset(asset);
+  }
+
+  function handleSaveEdit() {
+    if (editingIndex === null || !editingAsset) return;
+    if (!editingAsset.name.trim() || editingAsset.value < 0) {
+      setCsvMessage("Edited holding needs a name and non-negative value.");
+      return;
+    }
+
+    onUpdateAsset(editingIndex, editingAsset);
+    setEditingIndex(null);
+    setEditingAsset(null);
+    setCsvMessage("Holding updated.");
+  }
+
+  function handleCancelEdit() {
+    setEditingIndex(null);
+    setEditingAsset(null);
+  }
+
+  function handleDelete(assetIndex: number) {
+    onDeleteAsset(assetIndex);
+    if (editingIndex === assetIndex) {
+      handleCancelEdit();
+    }
+    setCsvMessage("Holding removed.");
+  }
+
+  async function handleCsvFileUpload(file: File | null) {
+    if (!file) return;
+
+    const text = await file.text();
+    setCsvText(text);
+    setCsvMessage(`${file.name} loaded. Review the preview, then import.`);
   }
 
   async function handleCopyCsv() {
@@ -1532,6 +1947,11 @@ function Portfolio({
                 Import
               </Button>
             </div>
+            <Input
+              accept=".csv,text/csv"
+              type="file"
+              onChange={(event) => void handleCsvFileUpload(event.target.files?.[0] ?? null)}
+            />
             <textarea
               className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={csvText}
@@ -1548,15 +1968,74 @@ function Portfolio({
           {assets.map((asset, index) => (
             <div
               key={`${asset.name}-${asset.type}-${index}`}
-              className="flex items-center justify-between gap-4 rounded-md border p-3"
+              className="grid gap-3 rounded-md border p-3"
             >
-              <div>
-                <p className="font-medium">{asset.name}</p>
-                <p className="text-sm text-muted-foreground">{asset.type}</p>
-              </div>
-              <div className="text-right">
-                <p className="font-semibold">{formatMoney(asset.value)}</p>
-                <p className="text-sm text-primary">+{asset.gain}%</p>
+              {editingIndex === index && editingAsset ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <TextField
+                    label="Asset name"
+                    value={editingAsset.name}
+                    onChange={(value) => setEditingAsset({ ...editingAsset, name: value })}
+                  />
+                  <TextField
+                    label="Type"
+                    value={editingAsset.type}
+                    onChange={(value) => setEditingAsset({ ...editingAsset, type: value })}
+                  />
+                  <NumberField
+                    label="Current value"
+                    value={editingAsset.value}
+                    onChange={(value) => setEditingAsset({ ...editingAsset, value })}
+                  />
+                  <NumberField
+                    label="Gain %"
+                    value={editingAsset.gain}
+                    onChange={(value) => setEditingAsset({ ...editingAsset, gain: value })}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-medium">{asset.name}</p>
+                    <p className="text-sm text-muted-foreground">{asset.type}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold">{formatMoney(asset.value)}</p>
+                    <p className="text-sm text-primary">+{asset.gain}%</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                {editingIndex === index ? (
+                  <>
+                    <Button type="button" size="sm" onClick={handleSaveEdit}>
+                      <Check className="h-4 w-4" />
+                      Save
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleStartEdit(asset, index)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleDelete(index)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </Button>
               </div>
             </div>
           ))}
@@ -1631,60 +2110,206 @@ function HealthCheck({
 }
 
 function Goals({
-  goal,
+  goals,
   monthlyGoal,
-  onChange,
+  onAddGoal,
+  onDeleteGoal,
+  onUpdateGoal,
 }: {
-  goal: WealthGoal;
+  goals: WealthGoal[];
   monthlyGoal: number;
-  onChange: (goal: WealthGoal) => void;
+  onAddGoal: () => void;
+  onDeleteGoal: (goalId: string) => void;
+  onUpdateGoal: (goalId: string, goal: WealthGoal) => void;
 }) {
-  const progress = Math.round((goal.currentAmount / goal.targetAmount) * 100);
+  const totalTarget = goals.reduce((sum, goal) => sum + goal.targetAmount, 0);
+  const totalCurrent = goals.reduce((sum, goal) => sum + goal.currentAmount, 0);
+  const totalProgress = totalTarget > 0 ? Math.round((totalCurrent / totalTarget) * 100) : 0;
+  const priorityCount = goals.filter((goal) => goal.priority === "essential").length;
+  const chartData = goals.map((goal) => ({
+    name: goal.name,
+    monthly: calculateGoalMonthlyInvestment(goal),
+  }));
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+    <div className="grid gap-5">
       <Card>
         <CardHeader>
-          <CardTitle>Goal planner</CardTitle>
-          <CardDescription>Turn a life goal into a monthly investing target.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-2">
-            <Label>Goal name</Label>
-            <Input value={goal.name} onChange={(event) => onChange({ ...goal, name: event.target.value })} />
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div>
+              <CardTitle>Multi-goal planner</CardTitle>
+              <CardDescription>Plan emergency, lifestyle, and long-term goals together.</CardDescription>
+            </div>
+            <Button type="button" onClick={onAddGoal}>
+              <Plus className="h-4 w-4" />
+              Add Goal
+            </Button>
           </div>
-          <NumberField label="Current amount" value={goal.currentAmount} onChange={(value) => onChange({ ...goal, currentAmount: value })} />
-          <NumberField label="Target amount" value={goal.targetAmount} onChange={(value) => onChange({ ...goal, targetAmount: value })} />
-          <NumberField label="Years remaining" value={goal.years} onChange={(value) => onChange({ ...goal, years: value })} />
-          <NumberField label="Expected annual return %" value={goal.annualReturn} onChange={(value) => onChange({ ...goal, annualReturn: value })} />
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-4">
+          <MetricMini label="Monthly target" value={formatMoney(monthlyGoal)} />
+          <MetricMini label="Total target" value={formatMoney(totalTarget)} />
+          <MetricMini label="Progress" value={`${totalProgress}%`} />
+          <MetricMini label="Essential goals" value={`${priorityCount}`} />
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{goal.name}</CardTitle>
-          <CardDescription>{progress}% funded today</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-6">
-          <div>
-            <div className="mb-2 flex justify-between text-sm">
-              <span>{formatMoney(goal.currentAmount)}</span>
-              <span>{formatMoney(goal.targetAmount)}</span>
-            </div>
-            <Progress value={progress} />
-          </div>
-          <div className="rounded-lg border bg-muted/40 p-5">
-            <p className="text-sm text-muted-foreground">Required monthly investment</p>
-            <p className="mt-2 text-3xl font-semibold">{formatMoney(monthlyGoal)}</p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <MetricMini label="Timeline" value={`${goal.years} years`} />
-            <MetricMini label="Return assumption" value={`${goal.annualReturn}%`} />
-            <MetricMini label="Funding gap" value={formatMoney(Math.max(0, goal.targetAmount - goal.currentAmount))} />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-5 xl:grid-cols-[1fr_0.75fr]">
+        <div className="grid gap-4">
+          {goals.length === 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>No goals yet</CardTitle>
+                <CardDescription>Add a goal to calculate monthly investing targets.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button type="button" onClick={onAddGoal}>
+                  <Plus className="h-4 w-4" />
+                  Add Goal
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            goals.map((goal) => (
+              <GoalEditor
+                key={goal.id}
+                goal={goal}
+                onDelete={() => onDeleteGoal(goal.id)}
+                onUpdate={(nextGoal) => onUpdateGoal(goal.id, nextGoal)}
+              />
+            ))
+          )}
+        </div>
+
+        <div className="grid gap-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly split</CardTitle>
+              <CardDescription>Required monthly investment by goal.</CardDescription>
+            </CardHeader>
+            <CardContent className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${Number(value) / 1000}k`} />
+                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                  <Bar dataKey="monthly" radius={[6, 6, 0, 0]} fill="var(--color-chart-2)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Planning checks</CardTitle>
+              <CardDescription>Rule-based warnings for unrealistic timelines.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <HealthCheck
+                label="Monthly commitment"
+                value={formatMoney(monthlyGoal)}
+                status={monthlyGoal > 100000 ? "Review assumptions" : "Looks workable"}
+              />
+              <HealthCheck
+                label="Funded today"
+                value={`${totalProgress}%`}
+                status={totalProgress < 10 ? "Early stage" : "Building momentum"}
+              />
+              <HealthCheck
+                label="Priority coverage"
+                value={`${priorityCount}`}
+                status={priorityCount ? "Essentials included" : "Add an essential goal"}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function GoalEditor({
+  goal,
+  onDelete,
+  onUpdate,
+}: {
+  goal: WealthGoal;
+  onDelete: () => void;
+  onUpdate: (goal: WealthGoal) => void;
+}) {
+  const progress = goal.targetAmount > 0
+    ? Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100))
+    : 0;
+  const monthlyInvestment = calculateGoalMonthlyInvestment(goal);
+  const fundingGap = Math.max(0, goal.targetAmount - goal.currentAmount);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+          <div>
+            <div className="mb-2 flex flex-wrap gap-2">
+              <Badge variant="secondary">{goalPriorityLabels[goal.priority]}</Badge>
+              <Badge variant="outline">{progress}% funded</Badge>
+            </div>
+            <CardTitle>{goal.name}</CardTitle>
+            <CardDescription>{formatMoney(monthlyInvestment)} required monthly</CardDescription>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={onDelete}>
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-5">
+        <div>
+          <div className="mb-2 flex justify-between text-sm">
+            <span>{formatMoney(goal.currentAmount)}</span>
+            <span>{formatMoney(goal.targetAmount)}</span>
+          </div>
+          <Progress value={progress} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <TextField
+            label="Goal name"
+            value={goal.name}
+            onChange={(value) => onUpdate({ ...goal, name: value })}
+          />
+          <SelectField
+            label="Priority"
+            value={goal.priority}
+            options={Object.entries(goalPriorityLabels)}
+            onChange={(value) => onUpdate({ ...goal, priority: value as GoalPriority })}
+          />
+          <NumberField
+            label="Current amount"
+            value={goal.currentAmount}
+            onChange={(value) => onUpdate({ ...goal, currentAmount: value })}
+          />
+          <NumberField
+            label="Target amount"
+            value={goal.targetAmount}
+            onChange={(value) => onUpdate({ ...goal, targetAmount: value })}
+          />
+          <NumberField
+            label="Years remaining"
+            value={goal.years}
+            onChange={(value) => onUpdate({ ...goal, years: value })}
+          />
+          <NumberField
+            label="Expected annual return %"
+            value={goal.annualReturn}
+            onChange={(value) => onUpdate({ ...goal, annualReturn: value })}
+          />
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <MetricMini label="Monthly SIP" value={formatMoney(monthlyInvestment)} />
+          <MetricMini label="Funding gap" value={formatMoney(fundingGap)} />
+          <MetricMini label="Timeline" value={`${goal.years} years`} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1701,7 +2326,7 @@ function RiskHistory({
         <CardHeader>
           <CardTitle>Risk profile history</CardTitle>
           <CardDescription>
-            Saved snapshots help show how a user's plan changes as their life changes.
+            Saved snapshots help show how a user&apos;s plan changes as their life changes.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -1744,6 +2369,207 @@ function RiskHistory({
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function DataSettings({
+  answers,
+  assets,
+  goals,
+  onImportWorkspace,
+  onResetPortfolio,
+  onRestoreDemoWorkspace,
+  profile,
+  riskHistory,
+  syncMessage,
+  syncStatus,
+  userEmail,
+}: {
+  answers: RiskAnswers;
+  assets: PortfolioAsset[];
+  goals: WealthGoal[];
+  onImportWorkspace: (workspace: WealthCompassImport) => void;
+  onResetPortfolio: () => void;
+  onRestoreDemoWorkspace: () => void;
+  profile: ReturnType<typeof calculateRiskProfile>;
+  riskHistory: RiskHistoryItem[];
+  syncMessage: string;
+  syncStatus: SyncStatus;
+  userEmail: string;
+}) {
+  const [actionMessage, setActionMessage] = useState("Full workspace export is ready.");
+  const [importJson, setImportJson] = useState("");
+  const exportedSnapshot = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          answers,
+          assets,
+          exportedAt: new Date().toISOString(),
+          goals,
+          profile,
+          riskHistory,
+          version: 1,
+        },
+        null,
+        2,
+      ),
+    [answers, assets, goals, profile, riskHistory],
+  );
+
+  async function handleCopySnapshot() {
+    if (!navigator.clipboard) {
+      setActionMessage("Clipboard is unavailable in this browser.");
+      return;
+    }
+
+    await navigator.clipboard.writeText(exportedSnapshot);
+    setActionMessage("Workspace JSON copied.");
+  }
+
+  function handleDownloadSnapshot() {
+    const blob = new Blob([exportedSnapshot], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "wealthcompass-data.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setActionMessage("Downloaded wealthcompass-data.json.");
+  }
+
+  function handleResetPortfolio() {
+    onResetPortfolio();
+    setActionMessage("Portfolio restored to demo holdings.");
+  }
+
+  function handleRestoreDemoWorkspace() {
+    onRestoreDemoWorkspace();
+    setActionMessage("Demo workspace restored.");
+  }
+
+  function handleImportWorkspace() {
+    const result = parseWorkspaceImport(importJson);
+
+    if (!result.data) {
+      setActionMessage(result.errors.join(" "));
+      return;
+    }
+
+    onImportWorkspace(result.data);
+    setImportJson("");
+    setActionMessage("Imported workspace JSON.");
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+      <Card>
+        <CardHeader>
+          <CardTitle>Settings and data</CardTitle>
+          <CardDescription>Manage the free MVP workspace without broker or AI integrations.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="rounded-md border bg-muted/30 p-4">
+            <div className="flex items-center gap-2">
+              <Cloud className="h-4 w-4 text-primary" />
+              <p className="text-sm font-medium">Sync status</p>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Badge variant="secondary">{syncStatus}</Badge>
+              <Badge variant="outline">{userEmail || "Browser workspace"}</Badge>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">{syncMessage}</p>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div>
+              <p className="text-sm font-medium">Workspace export</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Includes onboarding answers, risk profile, portfolio, goals, and saved risk snapshots.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={handleCopySnapshot}>
+                <Copy className="h-4 w-4" />
+                Copy JSON
+              </Button>
+              <Button type="button" variant="outline" onClick={handleDownloadSnapshot}>
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">{actionMessage}</p>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div>
+                <p className="text-sm font-medium">Workspace import</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Paste a `wealthcompass-data.json` export to restore onboarding, portfolio, goals, and history.
+                </p>
+              </div>
+              <Button type="button" variant="outline" onClick={handleImportWorkspace}>
+                <Upload className="h-4 w-4" />
+                Import JSON
+              </Button>
+            </div>
+            <textarea
+              className="min-h-36 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="{ ... }"
+              value={importJson}
+              onChange={(event) => setImportJson(event.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div>
+              <p className="text-sm font-medium">Reset controls</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Demo resets are useful for walkthroughs, screenshots, and portfolio reviews.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={handleResetPortfolio}>
+                <RotateCcw className="h-4 w-4" />
+                Portfolio
+              </Button>
+              <Button type="button" variant="secondary" onClick={handleRestoreDemoWorkspace}>
+                <RotateCcw className="h-4 w-4" />
+                Demo workspace
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-5">
+        <Card>
+          <CardHeader>
+            <CardTitle>Data snapshot</CardTitle>
+            <CardDescription>Current local state prepared for future import and account portability.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <MetricMini label="Portfolio holdings" value={`${assets.length}`} />
+            <MetricMini label="Risk snapshots" value={`${riskHistory.length}`} />
+            <MetricMini label="Goals" value={`${goals.length}`} />
+            <MetricMini label="Risk score" value={`${profile.score}/100`} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Export preview</CardTitle>
+            <CardDescription>Readable backup format for demos and debugging.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-[420px] overflow-auto rounded-md border bg-muted/40 p-4 text-xs leading-5">
+              {exportedSnapshot}
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
