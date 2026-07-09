@@ -13,7 +13,14 @@
   "include": [
     "lib/wealth-rules.ts",
     "lib/csv-import.ts",
+    "lib/dashboard-rules.ts",
+    "lib/goal-rules.ts",
+    "lib/local-storage.ts",
+    "lib/mentor-rules.ts",
+    "lib/portfolio-rules.ts",
     "lib/risk-profile-api.ts",
+    "lib/sample-data.ts",
+    "lib/supabase-mappers.ts",
     "tests/**/*.ts"
   ]
 }

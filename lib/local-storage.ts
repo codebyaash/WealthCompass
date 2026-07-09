@@ -1,5 +1,5 @@
-import { defaultRiskAnswers, portfolioAssets } from "@/lib/sample-data";
-import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
+import { defaultRiskAnswers, portfolioAssets } from "./sample-data";
+import type { RiskAnswers, RiskProfile } from "./wealth-rules";
 
 export type PortfolioAsset = {
   name: string;

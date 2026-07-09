@@ -1,4 +1,4 @@
-import { calculateRiskProfile, type RiskAnswers } from "@/lib/wealth-rules";
+import { calculateRiskProfile, type RiskAnswers } from "./wealth-rules";
 
 export const defaultRiskAnswers: RiskAnswers = {
   age: 29,

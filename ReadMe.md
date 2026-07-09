@@ -150,6 +150,70 @@ data modeling.
 - Keeps rule-based logic, API hardening, and build health visible before deploys
 - Uses only the free GitHub Actions and Vercel-friendly workflow path
 
+## Phase 19: Rule Engine Extraction
+
+- Moved dashboard next-action rules into `lib/dashboard-rules.ts`
+- Moved mentor question and answer rules into `lib/mentor-rules.ts`
+- Kept UI components focused on rendering and interaction
+- Added tests for dashboard action priority
+- Added tests for mentor personalization rules
+
+## Phase 20: Workspace Import Test Coverage
+
+- Added tests for full workspace JSON import
+- Added tests for legacy single-goal export migration
+- Added tests for invalid JSON and missing import sections
+- Added tests for default goal creation
+- Kept storage utilities runnable in the plain Node test environment
+
+## Phase 21: Supabase Mapping Test Coverage
+
+- Extracted Supabase row mapping into `lib/supabase-mappers.ts`
+- Kept cloud sync focused on Supabase reads and writes
+- Added tests for profile answer mapping
+- Added tests for portfolio and goal insert payloads
+- Added tests for risk history fallback mapping
+
+## Phase 22: Portfolio Health Rules
+
+- Extracted portfolio health checks into `lib/portfolio-rules.ts`
+- Added largest-holding concentration calculation
+- Added suggested index fund core lookup
+- Kept portfolio tracker rendering separate from recommendation logic
+- Added tests for portfolio health statuses
+
+## Phase 23: Goal Planning Rules
+
+- Extracted goal progress and funding-gap logic into `lib/goal-rules.ts`
+- Added multi-goal summary helpers
+- Added monthly split chart data helper
+- Added planning check helper for goal warnings
+- Added tests for goal planner rule outputs
+
+## Phase 24: Dashboard Component Split
+
+- Moved Dashboard into `components/wealth/dashboard.tsx`
+- Moved shared Roadmap into `components/wealth/roadmap.tsx`
+- Moved money and date formatting into `lib/formatters.ts`
+- Reduced the main app component without changing dashboard behavior
+- Kept dashboard navigation wired into the existing app shell
+
+## Phase 25: Market Component Split
+
+- Moved Market Dashboard into `components/wealth/market-dashboard.tsx`
+- Kept the manual market snapshot and beginner sentiment UI together
+- Removed market-only constants and trend icons from the main app shell
+- Preserved the free-data-ready market tab behavior
+- Continued reducing `wealth-compass-app.tsx` toward screen-level ownership
+
+## Phase 26: Mentor Component Split
+
+- Moved Investment Mentor into `components/wealth/mentor-panel.tsx`
+- Kept mentor question state local to the Mentor tab
+- Kept rule-based mentor answers in `lib/mentor-rules.ts`
+- Removed mentor-rule imports from the main app shell
+- Preserved the future AI swap point without changing the current free MVP behavior
+
 ## Run Locally
 
 ```bash

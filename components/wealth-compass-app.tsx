@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -17,14 +15,12 @@ import {
 } from "recharts";
 import {
   BookOpen,
-  Calculator,
   Check,
   CheckCircle2,
   Cloud,
   Compass,
   Copy,
   Download,
-  Gauge,
   Goal,
   History,
   LayoutDashboard,
@@ -38,12 +34,14 @@ import {
   Save,
   Settings,
   ShieldCheck,
-  TrendingDown,
-  TrendingUp,
   Trash2,
   Upload,
   WalletCards,
 } from "lucide-react";
+import { Dashboard } from "@/components/wealth/dashboard";
+import { MarketDashboard } from "@/components/wealth/market-dashboard";
+import { MentorPanel } from "@/components/wealth/mentor-panel";
+import { Roadmap } from "@/components/wealth/roadmap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,7 +55,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { defaultRiskAnswers, marketNotes, portfolioAssets } from "@/lib/sample-data";
+import { defaultRiskAnswers, portfolioAssets } from "@/lib/sample-data";
 import {
   createRiskHistoryItem,
   loadSnapshot,
@@ -78,6 +76,15 @@ import {
   portfolioAssetsToCsv,
   samplePortfolioCsv,
 } from "@/lib/csv-import";
+import { formatDate, formatMoney } from "@/lib/formatters";
+import {
+  calculateGoalFundingGap,
+  calculateGoalProgress,
+  getGoalMonthlySplit,
+  getGoalPlanningChecks,
+  getGoalSummary,
+} from "@/lib/goal-rules";
+import { getPortfolioHealthChecks } from "@/lib/portfolio-rules";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
   loadCloudSnapshot,
@@ -268,104 +275,6 @@ const comparisonLibrary = [
   },
 ] as const;
 
-const performanceData = [
-  { month: "Jan", value: 380000 },
-  { month: "Feb", value: 392000 },
-  { month: "Mar", value: 386000 },
-  { month: "Apr", value: 415000 },
-  { month: "May", value: 432000 },
-  { month: "Jun", value: 464000 },
-];
-
-const marketSnapshot = [
-  {
-    change: 0.72,
-    name: "Nifty 50",
-    signal: "Broad market strength",
-    value: "24,860",
-  },
-  {
-    change: -0.28,
-    name: "Bank Nifty",
-    signal: "Rate-sensitive pause",
-    value: "52,140",
-  },
-  {
-    change: 0.18,
-    name: "Gold",
-    signal: "Defensive demand steady",
-    value: "74,200",
-  },
-  {
-    change: -0.12,
-    name: "10Y Bond",
-    signal: "Yield stable",
-    value: "6.91%",
-  },
-];
-
-const sectorSnapshot = [
-  { name: "Banks", value: -0.2 },
-  { name: "IT", value: 0.9 },
-  { name: "FMCG", value: 0.4 },
-  { name: "Energy", value: 1.1 },
-  { name: "Pharma", value: 0.6 },
-];
-
-const marketExplainers = [
-  {
-    headline: "Why indexes can rise while some stocks fall",
-    explanation:
-      "Large indexes are weighted. If a few heavy companies move up, the index can look healthy even when many smaller holdings are flat.",
-    action: "Check diversification before reacting to one headline.",
-  },
-  {
-    headline: "What stable bond yields usually mean",
-    explanation:
-      "A calm yield environment often means debt funds may feel steadier, but credit quality and duration still matter.",
-    action: "Match debt investments to goal timing.",
-  },
-  {
-    headline: "Why gold is not a replacement for an emergency fund",
-    explanation:
-      "Gold can diversify a portfolio, but its price moves. Emergency money should prioritize reliability and access.",
-    action: "Keep emergency reserves separate from long-term allocation.",
-  },
-];
-
-const mentorQuestions = [
-  {
-    id: "etf",
-    label: "What is an ETF?",
-    title: "ETF basics",
-  },
-  {
-    id: "sip",
-    label: "What is SIP?",
-    title: "SIP discipline",
-  },
-  {
-    id: "emergency",
-    label: "Emergency fund first?",
-    title: "Emergency fund",
-  },
-  {
-    id: "crash",
-    label: "What if markets crash?",
-    title: "Market crash plan",
-  },
-  {
-    id: "gold",
-    label: "Should I buy gold?",
-    title: "Gold allocation",
-  },
-  {
-    id: "risk",
-    label: "Why this risk score?",
-    title: "Your risk profile",
-  },
-] as const;
-
 const colors = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -382,7 +291,6 @@ const goalPriorityLabels: Record<GoalPriority, string> = {
 
 type ActiveView = (typeof navItems)[number]["id"];
 type ComparisonId = (typeof comparisonLibrary)[number]["id"];
-type MentorQuestionId = (typeof mentorQuestions)[number]["id"];
 type ComparisonOptionData = {
   bestFor: string;
   effort: string;
@@ -680,7 +588,7 @@ export function WealthCompassApp() {
               goals={goals}
               healthScore={healthScore}
               monthlyGoal={monthlyGoal}
-              onNavigate={setActiveView}
+              onNavigate={(view) => setActiveView(view)}
               portfolioTotal={portfolioTotal}
               profile={profile}
             />
@@ -802,529 +710,6 @@ function Header({
         {userEmail && <Badge variant="outline">{userEmail}</Badge>}
       </div>
     </div>
-  );
-}
-
-function Dashboard({
-  assets,
-  goals,
-  healthScore,
-  monthlyGoal,
-  onNavigate,
-  portfolioTotal,
-  profile,
-}: {
-  assets: PortfolioAsset[];
-  goals: WealthGoal[];
-  healthScore: number;
-  monthlyGoal: number;
-  onNavigate: (view: ActiveView) => void;
-  portfolioTotal: number;
-  profile: ReturnType<typeof calculateRiskProfile>;
-}) {
-  const totalGoalTarget = goals.reduce((sum, goal) => sum + goal.targetAmount, 0);
-  const totalGoalCurrent = goals.reduce((sum, goal) => sum + goal.currentAmount, 0);
-  const goalProgress = totalGoalTarget > 0
-    ? Math.round((totalGoalCurrent / totalGoalTarget) * 100)
-    : 0;
-  const allocationData = assets.reduce<Array<{ name: string; value: number }>>((items, asset) => {
-    const existingItem = items.find((item) => item.name === asset.type);
-    if (existingItem) {
-      existingItem.value += asset.value;
-      return items;
-    }
-
-    return [...items, { name: asset.type, value: asset.value }];
-  }, []);
-  const action = getDashboardAction({
-    assets,
-    goalProgress,
-    goals,
-    healthScore,
-    monthlyGoal,
-    profile,
-  });
-
-  return (
-    <div className="grid gap-5">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Gauge} label="Risk Score" value={`${profile.score}/100`} detail={profile.band} />
-        <MetricCard icon={ShieldCheck} label="Health Score" value={`${healthScore}/100`} detail="Foundation check" />
-        <MetricCard icon={WalletCards} label="Tracked Value" value={formatMoney(portfolioTotal)} detail="Manual entries" />
-        <MetricCard icon={Calculator} label="Goal SIP" value={formatMoney(monthlyGoal)} detail="Monthly target" />
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Next best action</CardTitle>
-            <CardDescription>{action.reason}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="rounded-md border bg-muted/40 p-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{action.badge}</Badge>
-                <Badge variant="outline">{profile.confidence}</Badge>
-              </div>
-              <p className="mt-3 text-lg font-semibold">{action.title}</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{action.detail}</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button type="button" onClick={() => onNavigate(action.view)}>
-                {action.cta}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => onNavigate("mentor")}>
-                Ask Mentor
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick actions</CardTitle>
-            <CardDescription>Jump into the most common MVP workflows.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <QuickAction
-              icon={Compass}
-              label="Update profile"
-              onClick={() => onNavigate("onboarding")}
-            />
-            <QuickAction
-              icon={WalletCards}
-              label="Track holdings"
-              onClick={() => onNavigate("portfolio")}
-            />
-            <QuickAction
-              icon={Goal}
-              label="Plan goals"
-              onClick={() => onNavigate("goals")}
-            />
-            <QuickAction
-              icon={BookOpen}
-              label="Keep learning"
-              onClick={() => onNavigate("academy")}
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Portfolio trajectory</CardTitle>
-            <CardDescription>Manual tracking today, broker and CSV import later.</CardDescription>
-          </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={performanceData}>
-                <defs>
-                  <linearGradient id="wealth" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="var(--color-chart-1)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${value / 1000}k`} />
-                <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                <Area type="monotone" dataKey="value" stroke="var(--color-chart-1)" fill="url(#wealth)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Current allocation</CardTitle>
-            <CardDescription>Manual holdings grouped by asset type.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5 md:grid-cols-[0.9fr_1.1fr]">
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={allocationData} dataKey="value" innerRadius={54} outerRadius={86} paddingAngle={3}>
-                    {allocationData.map((entry, index) => (
-                      <Cell key={entry.name} fill={colors[index % colors.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid content-center gap-3">
-              {allocationData.map((item, index) => (
-                <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-3 w-3 rounded-sm"
-                      style={{ backgroundColor: colors[index % colors.length] }}
-                    />
-                    <span className="text-sm font-medium">{item.name}</span>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{formatMoney(item.value)}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Goal progress</CardTitle>
-            <CardDescription>{goals.length} active goals in the planner.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div>
-              <div className="mb-2 flex justify-between text-sm">
-                <span>{formatMoney(totalGoalCurrent)}</span>
-                <span>{formatMoney(totalGoalTarget)}</span>
-              </div>
-              <Progress value={goalProgress} />
-            </div>
-            <div className="grid gap-3">
-              {goals.slice(0, 3).map((goal) => (
-                <div key={goal.id} className="rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{goal.name}</p>
-                    <Badge variant="outline">{goalPriorityLabels[goal.priority]}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {formatMoney(calculateGoalMonthlyInvestment(goal))} monthly target
-                  </p>
-                </div>
-              ))}
-            </div>
-            <Button type="button" variant="outline" onClick={() => onNavigate("goals")}>
-              Open Goals
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Today in plain English</CardTitle>
-            <CardDescription>Beginner market context without noise.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {marketNotes.map((note) => (
-              <div key={note} className="rounded-md border bg-muted/40 p-3 text-sm leading-6">
-                {note}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Roadmap profile={profile} />
-    </div>
-  );
-}
-
-function QuickAction({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: typeof Compass;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      className="h-20 flex-col gap-2 whitespace-normal text-center"
-      onClick={onClick}
-    >
-      <Icon className="h-4 w-4" />
-      <span>{label}</span>
-    </Button>
-  );
-}
-
-function getDashboardAction({
-  assets,
-  goalProgress,
-  goals,
-  healthScore,
-  monthlyGoal,
-  profile,
-}: {
-  assets: PortfolioAsset[];
-  goalProgress: number;
-  goals: WealthGoal[];
-  healthScore: number;
-  monthlyGoal: number;
-  profile: ReturnType<typeof calculateRiskProfile>;
-}) {
-  if (profile.confidence === "Needs foundation") {
-    return {
-      badge: "Foundation",
-      cta: "Review Profile",
-      detail: "Emergency savings or debt risk is still limiting how much market risk makes sense.",
-      reason: "Risk capacity comes before product selection.",
-      title: "Strengthen your foundation first",
-      view: "onboarding" as const,
-    };
-  }
-
-  if (goals.length === 0 || goalProgress < 10) {
-    return {
-      badge: "Planning",
-      cta: "Plan Goals",
-      detail: `Your current goal plan needs more funding clarity. The combined monthly target is ${formatMoney(monthlyGoal)}.`,
-      reason: "Goals make portfolio decisions easier to evaluate.",
-      title: "Define the next funding milestone",
-      view: "goals" as const,
-    };
-  }
-
-  if (assets.length < 4 || healthScore < 70) {
-    return {
-      badge: "Tracking",
-      cta: "Review Portfolio",
-      detail: "Add or refine holdings so allocation and concentration checks become more useful.",
-      reason: "Better tracking creates better recommendations.",
-      title: "Improve portfolio visibility",
-      view: "portfolio" as const,
-    };
-  }
-
-  return {
-    badge: "Learning",
-    cta: "Open Academy",
-    detail: "Your foundation is in good shape. Keep building product knowledge before adding complexity.",
-    reason: "The next edge is consistency and understanding.",
-    title: "Continue the learning roadmap",
-    view: "academy" as const,
-  };
-}
-
-function MarketDashboard() {
-  const sentimentScore = Math.round(
-    50 + marketSnapshot.reduce((sum, item) => sum + item.change, 0) * 8,
-  );
-  const sentiment =
-    sentimentScore >= 58 ? "Constructive" : sentimentScore <= 44 ? "Cautious" : "Neutral";
-
-  return (
-    <div className="grid gap-5">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-            <div>
-              <CardTitle>Market Dashboard</CardTitle>
-              <CardDescription>
-                Manual snapshot with beginner explanations. Live/free APIs can plug in later.
-              </CardDescription>
-            </div>
-            <Badge variant="secondary">{sentiment}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {marketSnapshot.map((item) => (
-            <MarketTile key={item.name} item={item} />
-          ))}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_0.85fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Sector movement</CardTitle>
-            <CardDescription>What moved most in this sample snapshot.</CardDescription>
-          </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={sectorSnapshot}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `${Number(value).toFixed(1)}%`}
-                />
-                <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="var(--color-chart-2)" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Beginner sentiment</CardTitle>
-            <CardDescription>Rule-based interpretation of market breadth.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div>
-              <div className="mb-2 flex justify-between text-sm">
-                <span>Market mood</span>
-                <span>{sentimentScore}/100</span>
-              </div>
-              <Progress value={sentimentScore} />
-            </div>
-            <div className="rounded-md border bg-muted/40 p-4 text-sm leading-6">
-              {sentiment === "Constructive"
-                ? "Markets look broadly positive, but this is not a signal to abandon your plan. Continue goal-based investing."
-                : sentiment === "Cautious"
-                  ? "Markets look soft. Beginners should avoid panic selling and revisit asset allocation before acting."
-                  : "Markets look mixed. This is a good day to learn, rebalance only if your plan already says so, and avoid impulse trades."}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Market explained simply</CardTitle>
-          <CardDescription>Short notes that translate market noise into useful context.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          {marketExplainers.map((item) => (
-            <div key={item.headline} className="rounded-md border bg-background p-4">
-              <p className="font-semibold">{item.headline}</p>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                {item.explanation}
-              </p>
-              <div className="mt-4 rounded-md bg-muted/50 p-3 text-sm">
-                {item.action}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function MarketTile({
-  item,
-}: {
-  item: (typeof marketSnapshot)[number];
-}) {
-  const isPositive = item.change >= 0;
-  const Icon = isPositive ? TrendingUp : TrendingDown;
-
-  return (
-    <div className="rounded-md border bg-background p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">{item.name}</p>
-          <p className="mt-2 text-2xl font-semibold">{item.value}</p>
-        </div>
-        <Icon className={isPositive ? "h-4 w-4 text-primary" : "h-4 w-4 text-destructive"} />
-      </div>
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <Badge variant={isPositive ? "secondary" : "outline"}>
-          {isPositive ? "+" : ""}
-          {item.change.toFixed(2)}%
-        </Badge>
-        <span className="text-right text-xs text-muted-foreground">{item.signal}</span>
-      </div>
-    </div>
-  );
-}
-
-function MentorPanel({
-  answers,
-  profile,
-}: {
-  answers: RiskAnswers;
-  profile: ReturnType<typeof calculateRiskProfile>;
-}) {
-  const [activeQuestionId, setActiveQuestionId] = useState<MentorQuestionId>(
-    mentorQuestions[0].id,
-  );
-  const activeQuestion =
-    mentorQuestions.find((question) => question.id === activeQuestionId) ??
-    mentorQuestions[0];
-  const answer = getMentorAnswer(activeQuestion.id, answers, profile);
-
-  return (
-    <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-      <Card>
-        <CardHeader>
-          <CardTitle>Investment Mentor</CardTitle>
-          <CardDescription>
-            Rule-based explanations now, AI-powered personalization later.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2">
-          {mentorQuestions.map((question) => (
-            <Button
-              key={question.id}
-              type="button"
-              variant={activeQuestion.id === question.id ? "default" : "outline"}
-              className="h-auto min-h-11 justify-start whitespace-normal text-left leading-5"
-              onClick={() => setActiveQuestionId(question.id)}
-            >
-              <MessageCircleQuestion className="h-4 w-4 shrink-0" />
-              {question.label}
-            </Button>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">{profile.personality}</Badge>
-            <Badge variant="outline">{profile.band}</Badge>
-          </div>
-          <CardTitle>{activeQuestion.title}</CardTitle>
-          <CardDescription>{answer.summary}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="rounded-md border bg-muted/40 p-4 text-sm leading-6">
-            {answer.explanation}
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {answer.steps.map((step) => (
-              <div key={step} className="rounded-md border bg-background p-3">
-                <CheckCircle2 className="mb-3 h-4 w-4 text-primary" />
-                <p className="text-sm leading-6">{step}</p>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-md border bg-background p-4">
-            <p className="text-sm font-medium">Personal note</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {answer.personalNote}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function MetricCard({
-  detail,
-  icon: Icon,
-  label,
-  value,
-}: {
-  detail: string;
-  icon: typeof Gauge;
-  label: string;
-  value: string;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardDescription>{label}</CardDescription>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <p className="text-2xl font-semibold">{value}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -1786,14 +1171,11 @@ function Portfolio({
     name: asset.type,
     value: asset.value,
   }));
-  const largestHolding = assets.reduce(
-    (largest, asset) => (asset.value > largest.value ? asset : largest),
-    assets[0],
-  );
-  const concentration =
-    portfolioTotal > 0 && largestHolding ? Math.round((largestHolding.value / portfolioTotal) * 100) : 0;
-  const suggestedEquity =
-    profile.allocation.find((item) => item.name === "Index Funds")?.value ?? 0;
+  const portfolioChecks = getPortfolioHealthChecks({
+    assets,
+    portfolioTotal,
+    profile,
+  });
 
   function handleCsvImport() {
     const result = parsePortfolioCsv(csvText);
@@ -2066,21 +1448,9 @@ function Portfolio({
             <CardDescription>Rule-based review before AI review exists.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <HealthCheck
-              label="Largest holding"
-              value={`${concentration}%`}
-              status={concentration > 40 ? "Needs attention" : "Healthy"}
-            />
-            <HealthCheck
-              label="Suggested index fund core"
-              value={`${suggestedEquity}%`}
-              status={suggestedEquity >= 40 ? "On track" : "Conservative"}
-            />
-            <HealthCheck
-              label="Tracking habit"
-              value={`${assets.length} assets`}
-              status={assets.length >= 4 ? "Good start" : "Add more detail"}
-            />
+            {portfolioChecks.map((check) => (
+              <HealthCheck key={check.label} {...check} />
+            ))}
           </CardContent>
         </Card>
         <Roadmap profile={profile} compact />
@@ -2122,14 +1492,14 @@ function Goals({
   onDeleteGoal: (goalId: string) => void;
   onUpdateGoal: (goalId: string, goal: WealthGoal) => void;
 }) {
-  const totalTarget = goals.reduce((sum, goal) => sum + goal.targetAmount, 0);
-  const totalCurrent = goals.reduce((sum, goal) => sum + goal.currentAmount, 0);
-  const totalProgress = totalTarget > 0 ? Math.round((totalCurrent / totalTarget) * 100) : 0;
-  const priorityCount = goals.filter((goal) => goal.priority === "essential").length;
-  const chartData = goals.map((goal) => ({
-    name: goal.name,
-    monthly: calculateGoalMonthlyInvestment(goal),
-  }));
+  const { priorityCount, totalProgress, totalTarget } = getGoalSummary(goals);
+  const chartData = getGoalMonthlySplit(goals);
+  const planningChecks = getGoalPlanningChecks({
+    formatMoney,
+    monthlyGoal,
+    priorityCount,
+    totalProgress,
+  });
 
   return (
     <div className="grid gap-5">
@@ -2204,25 +1574,13 @@ function Goals({
             <CardHeader>
               <CardTitle>Planning checks</CardTitle>
               <CardDescription>Rule-based warnings for unrealistic timelines.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <HealthCheck
-                label="Monthly commitment"
-                value={formatMoney(monthlyGoal)}
-                status={monthlyGoal > 100000 ? "Review assumptions" : "Looks workable"}
-              />
-              <HealthCheck
-                label="Funded today"
-                value={`${totalProgress}%`}
-                status={totalProgress < 10 ? "Early stage" : "Building momentum"}
-              />
-              <HealthCheck
-                label="Priority coverage"
-                value={`${priorityCount}`}
-                status={priorityCount ? "Essentials included" : "Add an essential goal"}
-              />
-            </CardContent>
-          </Card>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {planningChecks.map((check) => (
+              <HealthCheck key={check.label} {...check} />
+            ))}
+          </CardContent>
+        </Card>
         </div>
       </div>
     </div>
@@ -2238,11 +1596,9 @@ function GoalEditor({
   onDelete: () => void;
   onUpdate: (goal: WealthGoal) => void;
 }) {
-  const progress = goal.targetAmount > 0
-    ? Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100))
-    : 0;
+  const progress = calculateGoalProgress(goal);
   const monthlyInvestment = calculateGoalMonthlyInvestment(goal);
-  const fundingGap = Math.max(0, goal.targetAmount - goal.currentAmount);
+  const fundingGap = calculateGoalFundingGap(goal);
 
   return (
     <Card>
@@ -2581,145 +1937,6 @@ function MetricMini({ label, value }: { label: string; value: string }) {
       <p className="mt-2 font-semibold">{value}</p>
     </div>
   );
-}
-
-function Roadmap({
-  compact = false,
-  profile,
-}: {
-  compact?: boolean;
-  profile: ReturnType<typeof calculateRiskProfile>;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Learning roadmap</CardTitle>
-        <CardDescription>Personalized from onboarding answers.</CardDescription>
-      </CardHeader>
-      <CardContent className={compact ? "grid gap-3" : "grid gap-3 md:grid-cols-4"}>
-        {profile.roadmap.map((item) => (
-          <div key={item.week} className="rounded-md border bg-background p-4">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{item.week}</Badge>
-              <Badge variant="outline">{item.format}</Badge>
-            </div>
-            <p className="mt-3 font-semibold">{item.topic}</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.outcome}</p>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-IN", {
-    currency: "INR",
-    maximumFractionDigits: 0,
-    style: "currency",
-  }).format(value);
-}
-
-function getMentorAnswer(
-  questionId: (typeof mentorQuestions)[number]["id"],
-  answers: RiskAnswers,
-  profile: ReturnType<typeof calculateRiskProfile>,
-) {
-  const goal = goalLabels[answers.primaryGoal].toLowerCase();
-  const emergencyReady = answers.emergencyMonths >= 6;
-
-  const answersById = {
-    crash: {
-      explanation:
-        "A market crash is a temporary fall in prices, not automatically a reason to sell. The right response depends on your goal timeline, emergency fund, debt, and risk capacity.",
-      personalNote:
-        profile.band === "Growth"
-          ? "Your profile can handle more volatility, but only if your goal timeline remains long and your emergency fund is separate."
-          : "Your profile benefits from slower decisions during crashes. Protect cash needs first, then rebalance only if your plan says so.",
-      steps: [
-        "Do not sell just because prices fell.",
-        "Check whether your goal timeline changed.",
-        "Rebalance gradually instead of making one emotional trade.",
-      ],
-      summary: "Crashes test behavior more than knowledge.",
-    },
-    emergency: {
-      explanation:
-        "An emergency fund is money kept for job loss, medical needs, family support, or urgent repairs. It should be boring, accessible, and separate from investments.",
-      personalNote: emergencyReady
-        ? "You already have a stronger base than many beginners, so your plan can focus more on consistent investing."
-        : `You currently have ${answers.emergencyMonths} months saved. Build toward 6 months before increasing risk for ${goal}.`,
-      steps: [
-        "Keep it in cash-like or low-risk instruments.",
-        "Do not count stocks, gold, or crypto as emergency money.",
-        "Review the target whenever expenses change.",
-      ],
-      summary: "Emergency money protects your investment plan from forced selling.",
-    },
-    etf: {
-      explanation:
-        "An ETF is a basket of securities that trades like a stock. Many ETFs track an index, so one purchase can give exposure to many companies.",
-      personalNote:
-        answers.experience === "new"
-          ? "Since you marked yourself as new, mutual funds may be easier first. ETFs are useful once order placement feels comfortable."
-          : "Your experience level makes ETFs worth comparing, especially for low-cost index exposure.",
-      steps: [
-        "Use ETFs for diversified exposure, not quick excitement.",
-        "Check liquidity and tracking difference.",
-        "Avoid placing orders without understanding market price versus NAV.",
-      ],
-      summary: "ETFs can be simple, but buying them still requires market-order awareness.",
-    },
-    gold: {
-      explanation:
-        "Gold can diversify a portfolio because it may behave differently from stocks and bonds. It does not produce business earnings, so it is usually a stabilizer, not the main growth engine.",
-      personalNote:
-        profile.band === "Conservative"
-          ? "A small gold allocation can fit your stability preference, but emergency reserves still come first."
-          : "For your profile, gold is better treated as a small diversifier while growth assets do the long-term heavy lifting.",
-      steps: [
-        "Keep gold allocation modest.",
-        "Prefer transparent formats over emotional purchases.",
-        "Do not use gold as a replacement for cash reserves.",
-      ],
-      summary: "Gold is a diversifier, not a complete plan.",
-    },
-    risk: {
-      explanation:
-        "Your score combines age, emergency fund, debt, goal horizon, crash response, experience, learning time, and investing rate. It is a planning signal, not a permanent label.",
-      personalNote: `Your current result is ${profile.score}/100: ${profile.band}, ${profile.personality}. The biggest practical next step is: ${profile.nextActions[0].toLowerCase()}.`,
-      steps: [
-        "Improve foundation before increasing risk.",
-        "Match risk to goal timeline.",
-        "Recalculate after big life changes.",
-      ],
-      summary: "Risk capacity is personal and changes with your life.",
-    },
-    sip: {
-      explanation:
-        "A SIP is a recurring investment habit. It helps you invest through different market conditions instead of trying to guess the perfect day.",
-      personalNote:
-        answers.monthlyInvestment > 0
-          ? `Your current monthly investment input is ${formatMoney(answers.monthlyInvestment)}, which can become the anchor for your plan.`
-          : "Start with a small amount you can sustain, then increase it as savings become predictable.",
-      steps: [
-        "Choose the goal first.",
-        "Automate a monthly amount.",
-        "Increase contributions when income rises.",
-      ],
-      summary: "SIP is more about discipline than market timing.",
-    },
-  };
-
-  return answersById[questionId];
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
 }
 
 function getErrorMessage(error: unknown) {
