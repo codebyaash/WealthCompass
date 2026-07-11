@@ -37,6 +37,7 @@ import type {
   MarketPreferences,
   PortfolioAsset,
 } from "@/lib/local-storage";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const marketExplainers = [
   {
@@ -136,9 +137,15 @@ export function MarketDashboard({
 
     async function loadMarketSnapshot() {
       try {
+        const supabase = getSupabaseBrowserClient();
+        const session = supabase ? await supabase.auth.getSession() : null;
+        const accessToken = session?.data.session?.access_token;
         const response = await fetch(
           `/api/market-snapshot?source=${marketPreferences.preferredSource}&refresh=${refreshNonce > 0 ? "force" : "auto"}`,
-          { cache: "no-store" },
+          {
+            cache: "no-store",
+            headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          },
         );
         const data = normalizeMarketSnapshotResponse(await response.json());
         const watchData = marketPreferences.includeHoldingsWatch

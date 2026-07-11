@@ -5,12 +5,68 @@ import {
   buildFallbackMarketResponse,
   fetchMarketSnapshot,
 } from "@/lib/market-data";
+import {
+  loadStoredMarketSnapshot,
+  refreshStoredMarketSnapshot,
+} from "@/lib/market-snapshot-store";
+import { getSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
+import { loadCloudSnapshot } from "@/lib/supabase-sync";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const preferredSource = url.searchParams.get("source");
   const forceRefresh = url.searchParams.get("refresh") === "force";
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+  const accessToken = getBearerToken(request.headers.get("authorization"));
+
+  if (isSupabaseConfigured() && accessToken) {
+    try {
+      const supabase = getSupabaseServerClient(accessToken);
+      const { data, error } = await supabase.auth.getUser(accessToken);
+
+      if (!error && data.user) {
+        const cloudSnapshot = await loadCloudSnapshot(supabase, data.user.id);
+        const effectivePreferences = {
+          ...cloudSnapshot.marketPreferences,
+          preferredSource:
+            preferredSource === "fallback"
+              ? "fallback"
+              : cloudSnapshot.marketPreferences.preferredSource,
+        };
+
+        if (forceRefresh) {
+          const refreshed = await refreshStoredMarketSnapshot({
+            apiKey,
+            assets: cloudSnapshot.assets,
+            forceRefresh: true,
+            marketPreferences: effectivePreferences,
+            supabase,
+            userId: data.user.id,
+          });
+
+          return NextResponse.json(refreshed);
+        }
+
+        const stored = await loadStoredMarketSnapshot(supabase, data.user.id);
+
+        if (stored && stored.snapshot.length > 0) {
+          return NextResponse.json(stored);
+        }
+
+        const refreshed = await refreshStoredMarketSnapshot({
+          apiKey,
+          assets: cloudSnapshot.assets,
+          marketPreferences: effectivePreferences,
+          supabase,
+          userId: data.user.id,
+        });
+
+        return NextResponse.json(refreshed);
+      }
+    } catch {
+      // Fall back to stateless market snapshots.
+    }
+  }
 
   if (preferredSource === "fallback") {
     return NextResponse.json(
@@ -59,4 +115,11 @@ export async function POST(request: Request) {
     const watch = await buildHoldingsWatch(assets);
     return NextResponse.json({ holdingsWatch: watch });
   }
+}
+
+function getBearerToken(header: string | null) {
+  if (!header) return null;
+
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
 }

@@ -218,6 +218,31 @@ data modeling.
 
 - Moved Investment Academy into `components/wealth/academy.tsx`
 - Kept investment category and comparison data with the Academy screen
+
+## Demo Readiness
+
+- Supabase email/password sign-in is wired through `/auth`
+- Signed-in users sync profile, goals, imports, and portfolio state to Supabase
+- Live market snapshots work when `ALPHA_VANTAGE_API_KEY` is added
+- Zerodha is the only direct broker API lane currently implemented in this codebase
+- Paytm Money is currently supported through statement, CSV, email, and PDF import flows rather than live account OAuth
+
+## Required `.env.local` for a Real Demo
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+```
+
+## Current Gap Before a Paytm Money Live-Account Demo
+
+- Sign-in is ready
+- Supabase sync is ready
+- Live market polling is ready once the Alpha Vantage key is configured
+- Paytm Money direct account linking is not yet implemented in this codebase
+- The current Paytm Money path is import-first: CSV, statement text, forwarded email, and PDF attachments
 - Kept comparison selection state local to the Academy tab
 - Removed Academy-only types and icons from the main app shell
 - Preserved the beginner education and comparator experience

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Cloud,
   Copy,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   NumberField,
+  SelectField,
   SegmentedControl,
   TextField,
 } from "@/components/wealth/form-fields";
@@ -34,9 +35,20 @@ import {
   describeReadiness,
   importSourceDescriptors,
 } from "@/lib/import-sources";
+import {
+  brokerProviderDescriptors,
+  type BrokerConnection,
+} from "@/lib/broker-connections";
+import {
+  inboxProviderDescriptors,
+  type InboxConnection,
+  type InboxProvider,
+} from "@/lib/inbox-connections";
 import type {
+  EmailIngestionApiResponse,
   EmailIngestionResult,
 } from "@/lib/email-ingestion";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
 import {
   buildIntegrationSchedulerPlan,
@@ -69,6 +81,7 @@ export function DataSettings({
   goals,
   integrations,
   importJobs,
+  onImportBrokerAssets,
   onImportWorkspace,
   onAddIntegration,
   onDeleteIntegration,
@@ -93,6 +106,7 @@ export function DataSettings({
   goals: WealthGoal[];
   integrations: IntegrationConnection[];
   importJobs: ImportJob[];
+  onImportBrokerAssets: (assets: PortfolioAsset[], job: ImportJob) => void;
   onImportWorkspace: (workspace: WealthCompassImport) => void;
   onAddIntegration: (connection: IntegrationConnection) => void;
   onDeleteIntegration: (connectionId: string) => void;
@@ -124,11 +138,18 @@ export function DataSettings({
   );
   const [editingIntegrationId, setEditingIntegrationId] = useState<string | null>(null);
   const [emailAttachmentFileName, setEmailAttachmentFileName] = useState("statement-attachment.txt");
+  const [emailAttachmentContentType, setEmailAttachmentContentType] = useState("text/plain");
+  const [emailAttachmentPageCount, setEmailAttachmentPageCount] = useState(1);
   const [emailAttachmentText, setEmailAttachmentText] = useState("");
   const [emailBodyText, setEmailBodyText] = useState("");
   const [emailFrom, setEmailFrom] = useState(userEmail || "statements@example.com");
   const [emailIntakeResult, setEmailIntakeResult] = useState<EmailIngestionResult | null>(null);
+  const [emailAttachmentOcrMode, setEmailAttachmentOcrMode] = useState("not-needed");
   const [emailSubject, setEmailSubject] = useState("Monthly statement attached");
+  const [brokerConnections, setBrokerConnections] = useState<BrokerConnection[]>([]);
+  const [isBrokerLoading, setIsBrokerLoading] = useState(false);
+  const [inboxConnections, setInboxConnections] = useState<InboxConnection[]>([]);
+  const [isInboxLoading, setIsInboxLoading] = useState(false);
   const [importJson, setImportJson] = useState("");
   const [syncInputFileName, setSyncInputFileName] = useState("");
   const [syncInputText, setSyncInputText] = useState("");
@@ -154,6 +175,20 @@ export function DataSettings({
   const schedulerPlan = useMemo(
     () => buildIntegrationSchedulerPlan(integrations),
     [integrations],
+  );
+  const inboxConnectionMap = useMemo(
+    () =>
+      new Map(
+        inboxConnections.map((connection) => [connection.provider, connection]),
+      ),
+    [inboxConnections],
+  );
+  const brokerConnectionMap = useMemo(
+    () =>
+      new Map(
+        brokerConnections.map((connection) => [connection.provider, connection]),
+      ),
+    [brokerConnections],
   );
   const exportedSnapshot = useMemo(
     () =>
@@ -278,13 +313,24 @@ export function DataSettings({
 
   async function handleIngestEmail() {
     try {
+      const supabase = getSupabaseBrowserClient();
+      const sessionResult = supabase ? await supabase.auth.getSession() : null;
+      const accessToken = sessionResult?.data.session?.access_token;
       const response = await fetch("/api/email-ingest", {
         body: JSON.stringify({
           attachments: emailAttachmentText.trim()
             ? [
                 {
+                  contentType: emailAttachmentContentType,
+                  extractedText: emailAttachmentText,
+                  extractionWarnings: buildEmailAttachmentWarnings({
+                    contentType: emailAttachmentContentType,
+                    pageCount: emailAttachmentPageCount,
+                    usedOcr: emailAttachmentOcrMode === "used",
+                  }),
                   fileName: emailAttachmentFileName.trim() || "statement-attachment.txt",
-                  text: emailAttachmentText,
+                  pageCount: emailAttachmentPageCount,
+                  usedOcr: emailAttachmentOcrMode === "used",
                 },
               ]
             : [],
@@ -292,7 +338,10 @@ export function DataSettings({
           from: emailFrom.trim() || "statements@example.com",
           subject: emailSubject.trim() || "Forwarded statement",
         }),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         method: "POST",
       });
 
@@ -300,13 +349,254 @@ export function DataSettings({
         throw new Error("Email intake route unavailable.");
       }
 
-      const result = (await response.json()) as EmailIngestionResult;
+      const data = (await response.json()) as EmailIngestionApiResponse;
+      const result: EmailIngestionResult = data.result;
       setEmailIntakeResult(result);
       onLogImportJob(result.job);
-      setActionMessage(`Email intake captured through ${result.sourceType} input.`);
+      setActionMessage(
+        data.persistedToCloud
+          ? `Email intake captured through ${result.sourceType} input and saved to cloud history.`
+          : data.persistenceMessage ?? `Email intake captured through ${result.sourceType} input.`,
+      );
     } catch {
       setEmailIntakeResult(null);
       setActionMessage("Could not ingest the email payload right now.");
+    }
+  }
+
+  useEffect(() => {
+    void loadInboxConnections();
+  }, [userEmail]);
+
+  async function loadInboxConnections() {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setInboxConnections([]);
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setInboxConnections([]);
+      return;
+    }
+
+    setIsInboxLoading(true);
+
+    try {
+      const response = await fetch("/api/inbox/connections", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not load inbox connections.");
+      }
+
+      const data = (await response.json()) as {
+        connections: InboxConnection[];
+      };
+      setInboxConnections(data.connections ?? []);
+    } catch {
+      setInboxConnections([]);
+    } finally {
+      setIsInboxLoading(false);
+    }
+  }
+
+  async function handleConnectInbox(provider: InboxProvider) {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setActionMessage("Add Supabase configuration before starting inbox OAuth.");
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setActionMessage("Sign in first to connect Gmail or Outlook.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/inbox/connect", {
+        body: JSON.stringify({
+          provider,
+          returnPath: "/auth",
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Inbox OAuth could not be started.");
+      }
+
+      const data = (await response.json()) as {
+        authUrl?: string;
+        status?: string;
+      };
+
+      if (data.status === "needs_configuration") {
+        setActionMessage(`${provider === "gmail" ? "Gmail" : "Outlook"} OAuth environment variables are not configured yet.`);
+        return;
+      }
+
+      if (!data.authUrl) {
+        throw new Error("Inbox OAuth did not return an authorization URL.");
+      }
+
+      window.location.href = data.authUrl;
+    } catch {
+      setActionMessage("Could not start the inbox connection flow right now.");
+    }
+  }
+
+  useEffect(() => {
+    void loadBrokerConnections();
+  }, [userEmail]);
+
+  async function loadBrokerConnections() {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setBrokerConnections([]);
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setBrokerConnections([]);
+      return;
+    }
+
+    setIsBrokerLoading(true);
+
+    try {
+      const response = await fetch("/api/broker/connections", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not load broker connections.");
+      }
+
+      const data = (await response.json()) as {
+        connections: BrokerConnection[];
+      };
+      setBrokerConnections(data.connections ?? []);
+    } catch {
+      setBrokerConnections([]);
+    } finally {
+      setIsBrokerLoading(false);
+    }
+  }
+
+  async function handleConnectBroker() {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setActionMessage("Add Supabase configuration before starting broker OAuth.");
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setActionMessage("Sign in first to connect Zerodha.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/broker/connect", {
+        body: JSON.stringify({
+          provider: "zerodha",
+          returnPath: "/auth",
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Broker OAuth could not be started.");
+      }
+
+      const data = (await response.json()) as {
+        authUrl?: string;
+        status?: string;
+      };
+
+      if (data.status === "needs_configuration") {
+        setActionMessage("Kite Connect environment variables are not configured yet.");
+        return;
+      }
+
+      if (!data.authUrl) {
+        throw new Error("Broker OAuth did not return an authorization URL.");
+      }
+
+      window.location.href = data.authUrl;
+    } catch {
+      setActionMessage("Could not start the Zerodha connection flow right now.");
+    }
+  }
+
+  async function handleSyncZerodha() {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setActionMessage("Add Supabase configuration before running broker sync.");
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setActionMessage("Sign in first to sync broker holdings.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/broker/sync/zerodha", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Broker sync route unavailable.");
+      }
+
+      const data = (await response.json()) as {
+        assets: PortfolioAsset[];
+        job: ImportJob;
+        providerAccountLabel: string;
+      };
+
+      onImportBrokerAssets(data.assets, data.job);
+      await loadBrokerConnections();
+      setActionMessage(`Synced ${data.assets.length} holding${data.assets.length === 1 ? "" : "s"} from ${data.providerAccountLabel}.`);
+    } catch {
+      setActionMessage("Could not sync Zerodha holdings right now.");
     }
   }
 
@@ -447,6 +737,112 @@ export function DataSettings({
             <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
+                  <p className="text-sm font-medium">Broker API connectors</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Start with Zerodha Kite so live holdings can be synced into the portfolio without manual exports.
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void loadBrokerConnections()}>
+                  <Database className="h-4 w-4" />
+                  {isBrokerLoading ? "Loading..." : "Refresh"}
+                </Button>
+              </div>
+              {brokerProviderDescriptors.map((provider) => {
+                const connection = brokerConnectionMap.get(provider.id);
+
+                return (
+                  <div key={provider.id} className="grid gap-3 rounded-md border bg-background p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{provider.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {provider.description}
+                        </p>
+                      </div>
+                      <Badge variant={connection?.status === "connected" ? "secondary" : "outline"}>
+                        {connection?.status ?? "needs_auth"}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground">
+                      <span>Scopes {provider.scopes.length}</span>
+                      <span>Account {connection?.accountLabel ?? "not connected"}</span>
+                      <span>Last sync {connection?.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "not yet"}</span>
+                      {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" onClick={() => void handleConnectBroker()}>
+                        <Database className="h-4 w-4" />
+                        {connection?.status === "connected" ? "Reconnect Zerodha" : provider.connectLabel}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={connection?.status !== "connected"}
+                        onClick={() => void handleSyncZerodha()}
+                      >
+                        <Cloud className="h-4 w-4" />
+                        Sync holdings
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <p className="text-sm font-medium">Inbox OAuth connectors</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Connect Gmail or Outlook so statement emails can move into the import pipeline without manual forwarding payloads.
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void loadInboxConnections()}>
+                  <Mail className="h-4 w-4" />
+                  {isInboxLoading ? "Loading..." : "Refresh"}
+                </Button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {inboxProviderDescriptors.map((provider) => {
+                  const connection = inboxConnectionMap.get(provider.id);
+
+                  return (
+                    <div key={provider.id} className="grid gap-3 rounded-md border bg-background p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{provider.name}</p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {provider.description}
+                          </p>
+                        </div>
+                        <Badge variant={connection?.status === "connected" ? "secondary" : "outline"}>
+                          {connection?.status ?? "needs_auth"}
+                        </Badge>
+                      </div>
+                      <div className="grid gap-1 text-xs text-muted-foreground">
+                        <span>Scopes {provider.scopes.length}</span>
+                        <span>
+                          Account {connection?.providerAccountEmail ?? "not connected"}
+                        </span>
+                        <span>
+                          Last sync {connection?.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "not yet"}
+                        </span>
+                        {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
+                      </div>
+                      <Button type="button" size="sm" onClick={() => void handleConnectInbox(provider.id)}>
+                        <Mail className="h-4 w-4" />
+                        {connection?.status === "connected" ? `Reconnect ${provider.name}` : provider.connectLabel}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
                   <p className="text-sm font-medium">Email ingestion simulator</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Mirror the future forwarding webhook path by sending sender, subject, body text, and one extracted attachment payload through the email intake route.
@@ -466,6 +862,31 @@ export function DataSettings({
                 value={emailAttachmentFileName}
                 onChange={setEmailAttachmentFileName}
               />
+              <div className="grid gap-3 md:grid-cols-3">
+                <SelectField
+                  label="Attachment type"
+                  value={emailAttachmentContentType}
+                  onChange={setEmailAttachmentContentType}
+                  options={[
+                    ["text/plain", "Plain text"],
+                    ["application/pdf", "PDF statement"],
+                  ]}
+                />
+                <NumberField
+                  label="Attachment pages"
+                  value={emailAttachmentPageCount}
+                  onChange={(value) => setEmailAttachmentPageCount(Math.max(1, value))}
+                />
+                <SegmentedControl
+                  label="OCR status"
+                  value={emailAttachmentOcrMode}
+                  onChange={setEmailAttachmentOcrMode}
+                  options={[
+                    ["not-needed", "Text layer"],
+                    ["used", "OCR used"],
+                  ]}
+                />
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="grid gap-2">
                   <p className="text-sm font-medium">Email body</p>
@@ -480,7 +901,11 @@ export function DataSettings({
                   <p className="text-sm font-medium">Attachment text</p>
                   <textarea
                     className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    placeholder="Scheme Name&#9;Current Value&#9;Invested Value&#9;Units"
+                    placeholder={
+                      emailAttachmentContentType === "application/pdf"
+                        ? "Paste extracted PDF text after OCR or text-layer parsing"
+                        : "Scheme Name&#9;Current Value&#9;Invested Value&#9;Units"
+                    }
                     value={emailAttachmentText}
                     onChange={(event) => setEmailAttachmentText(event.target.value)}
                   />
@@ -493,6 +918,7 @@ export function DataSettings({
                     <Badge variant="outline">{emailIntakeResult.sourceType}</Badge>
                     <Badge variant="outline">{emailIntakeResult.review.documentKind}</Badge>
                     <Badge variant="outline">{emailIntakeResult.review.parseReadiness}</Badge>
+                    {emailIntakeResult.job.usedOcr ? <Badge variant="outline">ocr</Badge> : null}
                   </div>
                   <p className="text-sm text-muted-foreground">{emailIntakeResult.review.summary}</p>
                   <div className="grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
@@ -501,6 +927,13 @@ export function DataSettings({
                     <span>Warnings {emailIntakeResult.job.rowWarnings.length}</span>
                     <span>Document {emailIntakeResult.job.documentId}</span>
                   </div>
+                  {emailIntakeResult.job.rowWarnings.length ? (
+                    <div className="grid gap-1 text-xs text-muted-foreground">
+                      {emailIntakeResult.job.rowWarnings.slice(0, 3).map((warning) => (
+                        <span key={warning}>- {warning}</span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1008,6 +1441,30 @@ export function DataSettings({
       </div>
     </div>
   );
+}
+
+function buildEmailAttachmentWarnings({
+  contentType,
+  pageCount,
+  usedOcr,
+}: {
+  contentType: string;
+  pageCount: number;
+  usedOcr: boolean;
+}) {
+  if (contentType !== "application/pdf") return [];
+
+  const warnings: string[] = [];
+
+  if (usedOcr) {
+    warnings.push("OCR was used on the PDF attachment, so scheme names and numeric fields should be reviewed carefully.");
+  }
+
+  if (pageCount > 3) {
+    warnings.push("The attachment spans more than 3 pages, so longer statements may need a cleaner export or multi-pass extraction.");
+  }
+
+  return warnings;
 }
 
 function ImportJobCard({

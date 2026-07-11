@@ -313,6 +313,13 @@ export function WealthCompassApp() {
     setSyncMessage("Portfolio import applied.");
   }
 
+  function handleImportBrokerAssets(nextAssets: PortfolioAsset[], job: ImportJob) {
+    setAssets(nextAssets);
+    setImportJobs((current) => [job, ...current].slice(0, 20));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Broker holdings sync applied.");
+  }
+
   function handleDeleteAsset(assetIndex: number) {
     setAssets((current) => current.filter((_, index) => index !== assetIndex));
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
@@ -673,6 +680,7 @@ export function WealthCompassApp() {
               goals={goals}
               integrations={safeIntegrations}
               importJobs={importJobs}
+              onImportBrokerAssets={handleImportBrokerAssets}
               onImportWorkspace={handleImportWorkspace}
               onAddIntegration={handleAddIntegration}
               onDeleteIntegration={handleDeleteIntegration}

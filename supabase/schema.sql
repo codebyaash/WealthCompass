@@ -150,6 +150,64 @@ create table if not exists public.market_preferences (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.inbox_connections (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  provider text not null check (provider in ('gmail', 'outlook')),
+  provider_account_email text,
+  status text not null default 'needs_auth' check (
+    status in ('connected', 'needs_auth', 'error', 'paused')
+  ),
+  scopes text[] not null default '{}',
+  external_account_id text,
+  access_token text,
+  refresh_token text,
+  access_token_expires_at timestamptz,
+  sync_cursor text,
+  last_synced_at timestamptz,
+  last_message_at timestamptz,
+  error_message text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  primary key (user_id, provider)
+);
+
+create table if not exists public.market_snapshots (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  source text not null,
+  preferred_source text not null default 'alpha-vantage' check (
+    preferred_source in ('alpha-vantage', 'fallback')
+  ),
+  message text,
+  sentiment text,
+  sentiment_score integer,
+  snapshot_tiles jsonb not null default '[]',
+  sectors jsonb not null default '[]',
+  holdings_watch jsonb not null default '[]',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.broker_connections (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  provider text not null check (provider in ('zerodha')),
+  account_label text,
+  status text not null default 'needs_auth' check (
+    status in ('connected', 'needs_auth', 'error', 'paused')
+  ),
+  scopes text[] not null default '{}',
+  external_account_id text,
+  access_token text,
+  refresh_token text,
+  access_token_expires_at timestamptz,
+  last_synced_at timestamptz,
+  error_message text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  primary key (user_id, provider)
+);
+
 create index if not exists portfolio_assets_user_id_idx
 on public.portfolio_assets(user_id);
 
@@ -164,6 +222,15 @@ on public.import_documents(user_id, created_at desc);
 
 create index if not exists import_jobs_user_id_started_at_idx
 on public.import_jobs(user_id, started_at desc);
+
+create index if not exists inbox_connections_user_id_updated_at_idx
+on public.inbox_connections(user_id, updated_at desc);
+
+create index if not exists market_snapshots_updated_at_idx
+on public.market_snapshots(updated_at desc);
+
+create index if not exists broker_connections_user_id_updated_at_idx
+on public.broker_connections(user_id, updated_at desc);
 
 create index if not exists goals_user_id_updated_at_idx
 on public.goals(user_id, updated_at desc);
@@ -180,6 +247,9 @@ alter table public.import_sources enable row level security;
 alter table public.import_documents enable row level security;
 alter table public.import_jobs enable row level security;
 alter table public.market_preferences enable row level security;
+alter table public.inbox_connections enable row level security;
+alter table public.market_snapshots enable row level security;
+alter table public.broker_connections enable row level security;
 
 create policy "Users can read own profile"
 on public.profiles for select
@@ -231,5 +301,20 @@ with check (auth.uid() = user_id);
 
 create policy "Users can manage own market preferences"
 on public.market_preferences for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "Users can manage own inbox connections"
+on public.inbox_connections for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "Users can manage own market snapshots"
+on public.market_snapshots for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "Users can manage own broker connections"
+on public.broker_connections for all
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);

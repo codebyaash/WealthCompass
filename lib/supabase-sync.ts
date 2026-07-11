@@ -1,5 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type { RiskHistoryItem, WealthCompassSnapshot } from "./local-storage";
+import type { ImportJob, RiskHistoryItem, WealthCompassSnapshot } from "./local-storage";
 import { defaultSnapshot } from "./local-storage";
 import {
   mapAnswersToProfile,
@@ -284,4 +284,51 @@ export async function loadRiskProfileHistory(
   if (result.error) throw result.error;
 
   return result.data.map(mapRiskProfileHistoryRow);
+}
+
+export async function persistCloudImportJob({
+  job,
+  supabase,
+  userId,
+}: {
+  job: ImportJob;
+  supabase: SupabaseClient;
+  userId: User["id"];
+}) {
+  const profileResult = await supabase.from("profiles").upsert({
+    id: userId,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (profileResult.error) throw profileResult.error;
+
+  let importSourceId: string | null = null;
+
+  if (job.providerId) {
+    const importSourceResult = await supabase
+      .from("import_sources")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("provider_id", job.providerId)
+      .maybeSingle<{ id: string }>();
+
+    if (importSourceResult.error) throw importSourceResult.error;
+    importSourceId = importSourceResult.data?.id ?? null;
+  }
+
+  const importDocumentPayload = {
+    ...mapImportJobToDocumentInsert(job, userId),
+    import_source_id: importSourceId,
+  };
+  const importDocumentResult = await supabase
+    .from("import_documents")
+    .upsert(importDocumentPayload);
+
+  if (importDocumentResult.error) throw importDocumentResult.error;
+
+  const importJobResult = await supabase
+    .from("import_jobs")
+    .upsert(mapImportJobToInsert(job, userId));
+
+  if (importJobResult.error) throw importJobResult.error;
 }

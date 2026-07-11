@@ -24,6 +24,26 @@ export function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseAnonKey);
 }
 
+export function getSupabaseServerClient(accessToken?: string) {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Missing Supabase environment variables.");
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    global: accessToken
+      ? {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      : undefined,
+  });
+}
+
 export function isSupabaseAdminConfigured() {
   return Boolean(supabaseUrl && supabaseServiceRoleKey);
 }
