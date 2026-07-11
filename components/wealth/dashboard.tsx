@@ -16,6 +16,7 @@ import {
   Compass,
   Gauge,
   Goal,
+  PlugZap,
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
@@ -30,18 +31,18 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Roadmap } from "@/components/wealth/roadmap";
-import { getDashboardAction } from "@/lib/dashboard-rules";
+import {
+  getDashboardAction,
+  getGoalPortfolioInsight,
+} from "@/lib/dashboard-rules";
 import { formatMoney } from "@/lib/formatters";
+import { getConnectorAttentionSummary } from "@/lib/integration-sync";
 import { marketNotes } from "@/lib/sample-data";
 import { calculateGoalMonthlyInvestment, type RiskProfile } from "@/lib/wealth-rules";
-import type { PortfolioAsset, WealthGoal } from "@/lib/local-storage";
+import type { IntegrationConnection, PortfolioAsset, WealthGoal } from "@/lib/local-storage";
+import type { ActiveView } from "@/components/wealth/app-sidebar";
 
-export type DashboardNavigationTarget =
-  | "academy"
-  | "goals"
-  | "mentor"
-  | "onboarding"
-  | "portfolio";
+export type DashboardNavigationTarget = ActiveView;
 
 const performanceData = [
   { month: "Jan", value: 380000 },
@@ -70,6 +71,7 @@ export function Dashboard({
   assets,
   goals,
   healthScore,
+  integrations,
   monthlyGoal,
   onNavigate,
   portfolioTotal,
@@ -78,6 +80,7 @@ export function Dashboard({
   assets: PortfolioAsset[];
   goals: WealthGoal[];
   healthScore: number;
+  integrations: IntegrationConnection[];
   monthlyGoal: number;
   onNavigate: (view: DashboardNavigationTarget) => void;
   portfolioTotal: number;
@@ -106,6 +109,12 @@ export function Dashboard({
     monthlyGoal,
     profile,
   });
+  const goalInsight = getGoalPortfolioInsight({
+    goals,
+    monthlyGoal,
+    portfolioTotal,
+  });
+  const connectorAttention = getConnectorAttentionSummary(integrations);
 
   return (
     <div className="grid gap-5">
@@ -176,7 +185,7 @@ export function Dashboard({
         <Card>
           <CardHeader>
             <CardTitle>Portfolio trajectory</CardTitle>
-            <CardDescription>Manual tracking today, broker and CSV import later.</CardDescription>
+            <CardDescription>Manual tracking with CSV, statement, and PDF import support.</CardDescription>
           </CardHeader>
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -260,6 +269,10 @@ export function Dashboard({
                 </div>
               ))}
             </div>
+            <div className="rounded-md border bg-muted/40 p-3">
+              <p className="text-sm font-medium">{goalInsight.title}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{goalInsight.detail}</p>
+            </div>
             <Button type="button" variant="outline" onClick={() => onNavigate("goals")}>
               Open Goals
             </Button>
@@ -268,11 +281,31 @@ export function Dashboard({
 
         <Card>
           <CardHeader>
-            <CardTitle>Today in plain English</CardTitle>
-            <CardDescription>Beginner market context without noise.</CardDescription>
+            <CardTitle>Connector health</CardTitle>
+            <CardDescription>Keep imports reliable before stale data turns into bad decisions.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
-            {marketNotes.map((note) => (
+            <div className="rounded-md border bg-muted/40 p-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={connectorAttention.severity === "healthy" ? "secondary" : "outline"}>
+                  {connectorAttention.badge}
+                </Badge>
+              </div>
+              <p className="mt-3 text-base font-semibold">{connectorAttention.title}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {connectorAttention.detail}
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button type="button" onClick={() => onNavigate(connectorAttention.actionView)}>
+                <PlugZap className="h-4 w-4" />
+                {connectorAttention.actionLabel}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => onNavigate("portfolio")}>
+                Review Imports
+              </Button>
+            </div>
+            {marketNotes.slice(0, 2).map((note) => (
               <div key={note} className="rounded-md border bg-muted/40 p-3 text-sm leading-6">
                 {note}
               </div>

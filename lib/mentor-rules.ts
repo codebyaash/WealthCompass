@@ -1,3 +1,8 @@
+import type { PortfolioAsset } from "./local-storage";
+import {
+  calculateLargestHoldingConcentration,
+  calculatePortfolioInvestedValue,
+} from "./portfolio-rules";
 import type { RiskAnswers, RiskProfile } from "./wealth-rules";
 import { goalLabels } from "./wealth-rules";
 
@@ -45,26 +50,38 @@ export type MentorAnswer = {
 
 export function getMentorAnswer({
   answers,
+  assets = [],
   formatMoney,
   profile,
   questionId,
 }: {
   answers: RiskAnswers;
+  assets?: PortfolioAsset[];
   formatMoney: (value: number) => string;
   profile: RiskProfile;
   questionId: MentorQuestionId;
 }): MentorAnswer {
   const goal = goalLabels[answers.primaryGoal].toLowerCase();
   const emergencyReady = answers.emergencyMonths >= 6;
+  const portfolioTotal = assets.reduce((sum, asset) => sum + asset.value, 0);
+  const investedValue = calculatePortfolioInvestedValue(assets);
+  const concentration = calculateLargestHoldingConcentration({
+    assets,
+    portfolioTotal,
+  });
+  const gainPercent =
+    investedValue > 0 ? Math.round(((portfolioTotal - investedValue) / investedValue) * 100) : 0;
 
   const answersById: Record<MentorQuestionId, MentorAnswer> = {
     crash: {
       explanation:
         "A market crash is a temporary fall in prices, not automatically a reason to sell. The right response depends on your goal timeline, emergency fund, debt, and risk capacity.",
       personalNote:
-        profile.band === "Growth"
-          ? "Your profile can handle more volatility, but only if your goal timeline remains long and your emergency fund is separate."
-          : "Your profile benefits from slower decisions during crashes. Protect cash needs first, then rebalance only if your plan says so.",
+        concentration >= 45
+          ? `One holding is about ${concentration}% of your tracked portfolio, so a crash would feel bigger than the headline. Reduce concentration before taking more risk.`
+          : profile.band === "Growth"
+            ? "Your profile can handle more volatility, but only if your goal timeline remains long and your emergency fund is separate."
+            : "Your profile benefits from slower decisions during crashes. Protect cash needs first, then rebalance only if your plan says so.",
       steps: [
         "Do not sell just because prices fell.",
         "Check whether your goal timeline changed.",
@@ -91,7 +108,9 @@ export function getMentorAnswer({
       personalNote:
         answers.experience === "new"
           ? "Since you marked yourself as new, mutual funds may be easier first. ETFs are useful once order placement feels comfortable."
-          : "Your experience level makes ETFs worth comparing, especially for low-cost index exposure.",
+          : concentration >= 45
+            ? "Your holdings look concentrated, which makes broad-market ETFs especially worth comparing for diversification."
+            : "Your experience level makes ETFs worth comparing, especially for low-cost index exposure.",
       steps: [
         "Use ETFs for diversified exposure, not quick excitement.",
         "Check liquidity and tracking difference.",
@@ -116,7 +135,11 @@ export function getMentorAnswer({
     risk: {
       explanation:
         "Your score combines age, emergency fund, debt, goal horizon, crash response, experience, learning time, and investing rate. It is a planning signal, not a permanent label.",
-      personalNote: `Your current result is ${profile.score}/100: ${profile.band}, ${profile.personality}. The biggest practical next step is: ${profile.nextActions[0].toLowerCase()}.`,
+      personalNote: `Your current result is ${profile.score}/100: ${profile.band}, ${profile.personality}. ${
+        portfolioTotal > 0
+          ? `Your tracked portfolio is ${formatMoney(portfolioTotal)} with roughly ${gainPercent}% overall gain. `
+          : ""
+      }The biggest practical next step is: ${profile.nextActions[0].toLowerCase()}.`,
       steps: [
         "Improve foundation before increasing risk.",
         "Match risk to goal timeline.",
@@ -129,7 +152,9 @@ export function getMentorAnswer({
         "A SIP is a recurring investment habit. It helps you invest through different market conditions instead of trying to guess the perfect day.",
       personalNote:
         answers.monthlyInvestment > 0
-          ? `Your current monthly investment input is ${formatMoney(answers.monthlyInvestment)}, which can become the anchor for your plan.`
+          ? `Your current monthly investment input is ${formatMoney(answers.monthlyInvestment)}, which can become the anchor for your plan${
+              portfolioTotal > 0 ? ` alongside your existing ${formatMoney(portfolioTotal)} portfolio` : ""
+            }.`
           : "Start with a small amount you can sustain, then increase it as savings become predictable.",
       steps: [
         "Choose the goal first.",

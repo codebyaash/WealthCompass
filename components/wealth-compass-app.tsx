@@ -12,14 +12,25 @@ import { MentorPanel } from "@/components/wealth/mentor-panel";
 import { Onboarding } from "@/components/wealth/onboarding";
 import { Portfolio } from "@/components/wealth/portfolio";
 import { RiskHistory } from "@/components/wealth/risk-history";
-import { defaultRiskAnswers, portfolioAssets } from "@/lib/sample-data";
 import {
+  defaultRiskAnswers,
+  portfolioAssets,
+  portfolioTransactions,
+} from "@/lib/sample-data";
+import {
+  createIntegrationConnection,
+  coerceIntegrations,
+  coercePortfolioAssets,
+  type ImportJob,
   createRiskHistoryItem,
   loadSnapshot,
   loadRiskHistory,
   saveRiskHistory,
   saveSnapshot,
+  type IntegrationConnection,
+  type MarketPreferences,
   type PortfolioAsset,
+  type PortfolioTransaction,
   type RiskHistoryItem,
   type WealthCompassImport,
   type WealthGoal,
@@ -27,12 +38,27 @@ import {
   defaultGoals,
 } from "@/lib/local-storage";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
+import { createImportJobFromReview } from "@/lib/import-jobs";
+import { previewPortfolioImport } from "@/lib/csv-import";
+import { buildImportDiagnostics } from "@/lib/import-diagnostics";
+import {
+  appendIntegrationSyncEvent,
+  buildIntegrationSyncTelemetry,
+  getConnectorAttentionSummary,
+  createIntegrationSyncEvent,
+  createSyncImportJob,
+} from "@/lib/integration-sync";
+import { executeProviderSync } from "@/lib/provider-sync-adapters";
+import { detectImportSource } from "@/lib/import-sources";
+import { analyzeImportDocument } from "@/lib/import-review";
+import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
 import {
   loadCloudSnapshot,
   loadRiskProfileHistory,
   saveCloudSnapshot,
   saveRiskProfileHistory,
 } from "@/lib/supabase-sync";
+import { derivePortfolioAssetsFromTransactions } from "@/lib/portfolio-rules";
 import {
   calculateGoalMonthlyInvestment,
   calculateRiskProfile,
@@ -46,6 +72,15 @@ export function WealthCompassApp() {
   const [answers, setAnswers] = useState<RiskAnswers>(defaultRiskAnswers);
   const [assets, setAssets] = useState<PortfolioAsset[]>(portfolioAssets);
   const [goals, setGoals] = useState<WealthGoal[]>(defaultGoals);
+  const [integrations, setIntegrations] = useState<IntegrationConnection[]>([]);
+  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+  const [marketPreferences, setMarketPreferences] = useState<MarketPreferences>({
+    autoRefresh: true,
+    includeHoldingsWatch: true,
+    pollingIntervalSeconds: 60,
+    preferredSource: "alpha-vantage",
+  });
+  const [transactions, setTransactions] = useState<PortfolioTransaction[]>([]);
   const [riskHistory, setRiskHistory] = useState<RiskHistoryItem[]>([]);
   const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(
@@ -58,17 +93,32 @@ export function WealthCompassApp() {
 
   useEffect(() => {
     const snapshot = loadSnapshot();
+    const derivedAssets = snapshot.transactions.length
+      ? derivePortfolioAssetsFromTransactions(snapshot.transactions, snapshot.assets)
+      : snapshot.assets;
     setAnswers(snapshot.answers);
-    setAssets(snapshot.assets);
+    setAssets(derivedAssets);
     setGoals(snapshot.goals);
+    setIntegrations(snapshot.integrations);
+    setImportJobs(snapshot.importJobs);
+    setMarketPreferences(snapshot.marketPreferences);
+    setTransactions(snapshot.transactions);
     setRiskHistory(loadRiskHistory());
     setHasLoadedSnapshot(true);
   }, []);
 
   useEffect(() => {
     if (!hasLoadedSnapshot) return;
-    saveSnapshot({ answers, assets, goals });
-  }, [answers, assets, goals, hasLoadedSnapshot]);
+    saveSnapshot({
+      answers,
+      assets,
+      goals,
+      integrations,
+      importJobs,
+      marketPreferences,
+      transactions,
+    });
+  }, [answers, assets, goals, integrations, importJobs, marketPreferences, transactions, hasLoadedSnapshot]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -90,10 +140,17 @@ export function WealthCompassApp() {
       try {
         const snapshot = await loadCloudSnapshot(client, user.id);
         if (!isMounted) return;
+        const derivedAssets = snapshot.transactions.length
+          ? derivePortfolioAssetsFromTransactions(snapshot.transactions, snapshot.assets)
+          : snapshot.assets;
         setAnswers(snapshot.answers);
-        setAssets(snapshot.assets);
+        setAssets(derivedAssets);
         setGoals(snapshot.goals);
-        saveSnapshot(snapshot);
+        setIntegrations(snapshot.integrations);
+        setImportJobs(snapshot.importJobs);
+        setMarketPreferences(snapshot.marketPreferences);
+        setTransactions(snapshot.transactions);
+        saveSnapshot({ ...snapshot, assets: derivedAssets });
         const history = await loadRiskProfileHistory(client, user.id);
         if (!isMounted) return;
         setRiskHistory(history);
@@ -142,7 +199,15 @@ export function WealthCompassApp() {
     const timeoutId = window.setTimeout(async () => {
       try {
         await saveCloudSnapshot({
-          snapshot: { answers, assets, goals },
+          snapshot: {
+            answers,
+            assets,
+            goals,
+            integrations,
+            importJobs,
+            marketPreferences,
+            transactions,
+          },
           supabase: client,
           userId,
         });
@@ -155,10 +220,27 @@ export function WealthCompassApp() {
     }, 900);
 
     return () => window.clearTimeout(timeoutId);
-  }, [answers, assets, goals, hasLoadedSnapshot, supabase, userId]);
+  }, [
+    answers,
+    assets,
+    goals,
+    hasLoadedSnapshot,
+    integrations,
+    importJobs,
+    marketPreferences,
+    supabase,
+    transactions,
+    userId,
+  ]);
 
+  const safeAssets = useMemo(() => coercePortfolioAssets(assets, []), [assets]);
+  const safeIntegrations = useMemo(() => coerceIntegrations(integrations, []), [integrations]);
   const profile = useMemo(() => calculateRiskProfile(answers), [answers]);
-  const portfolioTotal = assets.reduce((sum, asset) => sum + asset.value, 0);
+  const connectorAttention = useMemo(
+    () => getConnectorAttentionSummary(safeIntegrations),
+    [safeIntegrations],
+  );
+  const portfolioTotal = safeAssets.reduce((sum, asset) => sum + asset.value, 0);
   const monthlyGoal = goals.reduce(
     (sum, goal) => sum + calculateGoalMonthlyInvestment(goal),
     0,
@@ -209,7 +291,8 @@ export function WealthCompassApp() {
   }
 
   function handleResetPortfolio() {
-    setAssets(portfolioAssets);
+    setAssets(derivePortfolioAssetsFromTransactions(portfolioTransactions, portfolioAssets));
+    setTransactions(portfolioTransactions);
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
     setSyncMessage("Portfolio restored to demo holdings.");
   }
@@ -222,16 +305,86 @@ export function WealthCompassApp() {
     setSyncMessage("Portfolio holding updated.");
   }
 
+  function handleAddAsset(nextAsset: PortfolioAsset) {
+    setAssets((current) => [nextAsset, ...current]);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Portfolio holding added.");
+  }
+
+  function handleImportAssets(nextAssets: PortfolioAsset[]) {
+    setAssets(nextAssets);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Portfolio import applied.");
+  }
+
   function handleDeleteAsset(assetIndex: number) {
     setAssets((current) => current.filter((_, index) => index !== assetIndex));
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
     setSyncMessage("Portfolio holding removed.");
   }
 
+  function handleAddTransaction(nextTransaction: PortfolioTransaction) {
+    setTransactions((current) => {
+      const nextTransactions = [nextTransaction, ...current];
+      setAssets((assetsState) =>
+        derivePortfolioAssetsFromTransactions(nextTransactions, assetsState),
+      );
+      return nextTransactions;
+    });
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Transaction recorded.");
+  }
+
+  function handleDeleteTransaction(transactionId: string) {
+    setTransactions((current) => {
+      const nextTransactions = current.filter(
+        (transaction) => transaction.id !== transactionId,
+      );
+      setAssets((assetsState) =>
+        derivePortfolioAssetsFromTransactions(nextTransactions, assetsState),
+      );
+      return nextTransactions;
+    });
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Transaction removed.");
+  }
+
   function handleRestoreDemoWorkspace() {
     setAnswers(defaultRiskAnswers);
-    setAssets(portfolioAssets);
+    setAssets(derivePortfolioAssetsFromTransactions(portfolioTransactions, portfolioAssets));
     setGoals(defaultGoals);
+    setIntegrations([
+      createIntegrationConnection({
+        channel: "broker",
+        id: "integration-paytm-money",
+        importStrategy: "statement-upload",
+        notes: "Primary broker workflow for guided statement imports.",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        sourceHint: "Upload account statements or CSV exports first.",
+        status: "active",
+        syncCadenceMinutes: 720,
+      }),
+      createIntegrationConnection({
+        channel: "email",
+        id: "integration-email-forward",
+        importStrategy: "email-forward",
+        notes: "Use forwarded statements and PDF attachments until inbox OAuth is added.",
+        providerId: "email-forward",
+        providerName: "Email Forward",
+        sourceHint: "Forward broker statements to yourself and paste or upload them here.",
+        status: "active",
+        syncCadenceMinutes: 1440,
+      }),
+    ]);
+    setImportJobs([]);
+    setMarketPreferences({
+      autoRefresh: true,
+      includeHoldingsWatch: true,
+      pollingIntervalSeconds: 60,
+      preferredSource: "alpha-vantage",
+    });
+    setTransactions(portfolioTransactions);
     setRiskHistory([]);
     saveRiskHistory([]);
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
@@ -243,9 +396,16 @@ export function WealthCompassApp() {
   }
 
   function handleImportWorkspace(workspace: WealthCompassImport) {
+    const derivedAssets = workspace.transactions.length
+      ? derivePortfolioAssetsFromTransactions(workspace.transactions, workspace.assets)
+      : workspace.assets;
     setAnswers(workspace.answers);
-    setAssets(workspace.assets);
+    setAssets(derivedAssets);
     setGoals(workspace.goals);
+    setIntegrations(workspace.integrations);
+    setImportJobs(workspace.importJobs);
+    setMarketPreferences(workspace.marketPreferences);
+    setTransactions(workspace.transactions);
     setRiskHistory(workspace.riskHistory);
     saveRiskHistory(workspace.riskHistory);
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
@@ -270,6 +430,167 @@ export function WealthCompassApp() {
     setSyncMessage("Goal removed.");
   }
 
+  function handleAddIntegration(connection: IntegrationConnection) {
+    setIntegrations((current) => [connection, ...current]);
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Integration connection added.");
+  }
+
+  function handleUpdateIntegration(connectionId: string, nextConnection: IntegrationConnection) {
+    setIntegrations((current) =>
+      current.map((connection) =>
+        connection.id === connectionId ? nextConnection : connection,
+      ),
+    );
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Integration updated.");
+  }
+
+  function handleDeleteIntegration(connectionId: string) {
+    setIntegrations((current) =>
+      current.filter((connection) => connection.id !== connectionId),
+    );
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Integration removed.");
+  }
+
+  function handleRunIntegrationSync(connectionId?: string) {
+    const syncAt = new Date().toISOString();
+    const targetIds = new Set(
+      connectionId
+        ? [connectionId]
+        : safeIntegrations
+            .filter((connection) => connection.status === "active")
+            .map((connection) => connection.id),
+    );
+
+    const syncedConnections = safeIntegrations.filter((connection) => targetIds.has(connection.id));
+
+    if (!syncedConnections.length) {
+      setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+      setSyncMessage("No active integration sources were available to sync.");
+      return;
+    }
+
+    setIntegrations((current) =>
+      current.map((connection) =>
+        targetIds.has(connection.id)
+          ? (() => {
+              const execution = executeProviderSync(connection);
+              const event = createIntegrationSyncEvent(
+                connection,
+                new Date(syncAt),
+                execution,
+              );
+              return {
+                ...connection,
+                ...buildIntegrationSyncTelemetry(
+                  connection,
+                  new Date(syncAt),
+                  execution,
+                ),
+                syncHistory: appendIntegrationSyncEvent(connection, event),
+              };
+            })()
+          : connection,
+      ),
+    );
+    setImportJobs((current) => [
+      ...syncedConnections.map((connection) =>
+        createSyncImportJob(
+          connection,
+          new Date(syncAt),
+          executeProviderSync(connection),
+        ),
+      ),
+      ...current,
+    ].slice(0, 20));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage(
+      syncedConnections.length === 1
+        ? `${syncedConnections[0].providerName} sync checkpoint recorded.`
+        : `${syncedConnections.length} integration sync checkpoints recorded.`,
+    );
+  }
+
+  function handleLogImportJob(job: ImportJob) {
+    setImportJobs((current) => [job, ...current].slice(0, 20));
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Import job saved.");
+  }
+
+  function handleUpdateImportJob(jobId: string, nextJob: ImportJob) {
+    setImportJobs((current) =>
+      current.map((job) => (job.id === jobId ? nextJob : job)),
+    );
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Import job updated.");
+  }
+
+  function handleReprocessImportJob(jobId: string) {
+    setImportJobs((current) =>
+      current.map((job) => {
+        if (job.id !== jobId) return job;
+
+        const sourceText = job.rawText || job.normalizedText;
+
+        if (!sourceText.trim()) {
+          return {
+            ...job,
+            attemptCount: job.attemptCount + 1,
+            lastActionAt: new Date().toISOString(),
+            notes: "Reprocess requested, but no saved import payload was available.",
+            status: "failed",
+            summary: `${job.providerName} import could not be reprocessed without saved text.`,
+          };
+        }
+
+        const detectedSource = detectImportSource({
+          fileName: job.fileName,
+          text: sourceText,
+        });
+        const normalized = normalizeImportTextForProvider({
+          providerId: detectedSource?.id ?? job.providerId,
+          text: sourceText,
+        });
+        const review = analyzeImportDocument({
+          fileName: job.fileName,
+          normalizationApplied: normalized.applied,
+          text: normalized.text,
+          usedOcr: job.usedOcr,
+        });
+        const preview = previewPortfolioImport(normalized.text, assets);
+        const diagnostics = buildImportDiagnostics({
+          normalizedText: normalized.text,
+          preview,
+          rawText: sourceText,
+        });
+        const nextJob = createImportJobFromReview({
+          assetCount: preview.assets.length,
+          duplicateCount: preview.duplicates.length,
+          fileName: job.fileName,
+          notes: "Job reprocessed from saved payload.",
+          normalizationApplied: normalized.applied,
+          normalizedText: normalized.text,
+          rawText: sourceText,
+          reviewedCorrections: job.reviewedCorrections,
+          review,
+          rowWarnings: diagnostics.rowWarnings,
+          status: "reviewed",
+        });
+
+        return {
+          ...nextJob,
+          attemptCount: job.attemptCount + 1,
+          createdAt: job.createdAt,
+          id: job.id,
+        };
+      }),
+    );
+    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage("Import job reprocessed.");
+  }
+
   return (
     <main className="min-h-screen">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-4 sm:px-6 lg:flex-row lg:py-6">
@@ -277,6 +598,7 @@ export function WealthCompassApp() {
 
         <section className="min-w-0 flex-1">
           <AppHeader
+            connectorAttention={connectorAttention}
             onSaveRiskHistory={handleSaveRiskHistory}
             onSignOut={handleSignOut}
             profile={profile}
@@ -286,9 +608,10 @@ export function WealthCompassApp() {
           />
           {activeView === "dashboard" && (
             <Dashboard
-              assets={assets}
+              assets={safeAssets}
               goals={goals}
               healthScore={healthScore}
+              integrations={safeIntegrations}
               monthlyGoal={monthlyGoal}
               onNavigate={(view) => setActiveView(view)}
               portfolioTotal={portfolioTotal}
@@ -301,16 +624,18 @@ export function WealthCompassApp() {
           {activeView === "academy" && <Academy />}
           {activeView === "portfolio" && (
             <Portfolio
-              assets={assets}
-              onAddAsset={(asset) => setAssets((current) => [asset, ...current])}
+              assets={safeAssets}
+              onAddAsset={handleAddAsset}
+              onAddTransaction={handleAddTransaction}
               onDeleteAsset={handleDeleteAsset}
-              onImportAssets={(importedAssets) =>
-                setAssets((current) => [...importedAssets, ...current])
-              }
+              onDeleteTransaction={handleDeleteTransaction}
+              onImportAssets={handleImportAssets}
+              onLogImportJob={handleLogImportJob}
               onResetAssets={handleResetPortfolio}
               onUpdateAsset={handleUpdateAsset}
               portfolioTotal={portfolioTotal}
               profile={profile}
+              transactions={transactions}
             />
           )}
           {activeView === "goals" && (
@@ -325,22 +650,41 @@ export function WealthCompassApp() {
           {activeView === "history" && (
             <RiskHistory history={riskHistory} profile={profile} />
           )}
-          {activeView === "market" && <MarketDashboard />}
+          {activeView === "market" && (
+            <MarketDashboard
+              assets={safeAssets}
+              integrations={safeIntegrations}
+              marketPreferences={marketPreferences}
+              onRunIntegrationSync={handleRunIntegrationSync}
+              onUpdatePreferences={setMarketPreferences}
+            />
+          )}
           {activeView === "mentor" && (
-            <MentorPanel answers={answers} profile={profile} />
+            <MentorPanel answers={answers} assets={safeAssets} profile={profile} />
           )}
           {activeView === "settings" && (
             <DataSettings
               answers={answers}
-              assets={assets}
+              assets={safeAssets}
               goals={goals}
+              integrations={safeIntegrations}
+              importJobs={importJobs}
               onImportWorkspace={handleImportWorkspace}
+              onAddIntegration={handleAddIntegration}
+              onDeleteIntegration={handleDeleteIntegration}
+              onReprocessImportJob={handleReprocessImportJob}
               onResetPortfolio={handleResetPortfolio}
               onRestoreDemoWorkspace={handleRestoreDemoWorkspace}
+              onRunIntegrationSync={handleRunIntegrationSync}
+              onUpdateImportJob={handleUpdateImportJob}
+              onUpdateIntegration={handleUpdateIntegration}
+              onUpdateMarketPreferences={setMarketPreferences}
               profile={profile}
               riskHistory={riskHistory}
+              marketPreferences={marketPreferences}
               syncMessage={syncMessage}
               syncStatus={syncStatus}
+              transactions={transactions}
               userEmail={userEmail}
             />
           )}

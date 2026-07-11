@@ -258,6 +258,14 @@ data modeling.
 
 - Moved Settings and Data Controls into `components/wealth/data-settings.tsx`
 - Kept workspace export, import, reset controls, and export preview together
+
+## Phase 33: Import Review Layer
+
+- Added provider-aware import review for uploaded statements and pasted email text
+- Detects likely sources like CAMS, KFintech, Paytm Money, Zerodha, Groww, and Jupiter
+- Classifies uploads as broker exports, email statements, PDF statements, or unclassified text
+- Scores statement readiness and shows guidance before holdings are merged
+- Added a server route for import review so future email and connector sync can reuse the same intake logic
 - Moved settings-only browser clipboard/download handlers out of the main app shell
 - Reused compact metric rows for the data snapshot
 - Reduced the main app shell to orchestration for settings callbacks
@@ -274,10 +282,29 @@ data modeling.
 
 - Expanded portfolio CSV/TSV import for app and broker exports
 - Added support for pasted email statements and HTML statement tables
+- Added client-side PDF statement text extraction before import parsing
 - Added aliases for scheme name, security name, asset class, market value, invested value, units, NAV, LTP, XIRR, and P&L
 - Made asset type and gain optional with sensible inference and defaults
 - Added value calculation from units and NAV/LTP when market value is missing
 - Added tests for Paytm Money-style, Jupiter-style, broker-style, email-text, and HTML-table imports
+
+## Phase 35: Rich Holdings, Import Preview, and Live Market Fallback
+
+- Expanded portfolio holdings to track invested value, units, current price, and source
+- Added duplicate-aware import preview with merge-or-keep controls before applying imports
+- Kept CSV export aligned with the richer holding model for portability
+- Upgraded portfolio health rules to score return quality and cost-basis coverage
+- Personalized mentor notes using current portfolio value and concentration
+- Added a Market Snapshot API route with Alpha Vantage support and built-in fallback data
+- Added tests for market sentiment helpers and richer portfolio mapper behavior
+
+## Phase 36: Transaction Journal Foundation
+
+- Added first-class portfolio transaction records to workspace storage and import/export
+- Added a transaction journal to the portfolio screen for buys, sells, dividends, and transfers
+- Included transaction persistence in the Supabase sync model and schema
+- Expanded settings export/import to include transaction history
+- Added transaction mapper coverage to the test suite
 
 ## Run Locally
 
@@ -309,9 +336,13 @@ The app also runs without Supabase keys. In that mode, data autosaves in
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+ALPHA_VANTAGE_API_KEY=optional-free-market-key
 ```
 
 5. Restart `npm run dev`.
+
+Leave `ALPHA_VANTAGE_API_KEY` blank to keep the Market page in fallback demo
+mode. Add a free Alpha Vantage key when you want live market snapshots.
 
 After signing in, WealthCompass syncs local demo data into the user's Supabase
 rows and keeps the dashboard state saved.

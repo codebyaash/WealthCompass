@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import type { RiskProfile } from "@/lib/wealth-rules";
 
 export function AppHeader({
+  connectorAttention,
   onSaveRiskHistory,
   onSignOut,
   profile,
@@ -11,6 +12,11 @@ export function AppHeader({
   syncStatus,
   userEmail,
 }: {
+  connectorAttention?: {
+    badge: string;
+    detail: string;
+    severity: "healthy" | "warning";
+  };
   onSaveRiskHistory: () => void;
   onSignOut: () => void;
   profile: RiskProfile;
@@ -25,6 +31,13 @@ export function AppHeader({
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{profile.band}</Badge>
             <Badge variant="outline">{profile.personality}</Badge>
+            {connectorAttention && (
+              <Badge
+                variant={connectorAttention.severity === "healthy" ? "secondary" : "outline"}
+              >
+                {connectorAttention.badge}
+              </Badge>
+            )}
           </div>
           <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">
             Your investment command center
@@ -60,6 +73,11 @@ export function AppHeader({
           <div>
             <p className="text-sm font-medium">{syncStatus}</p>
             <p className="text-xs leading-5 text-muted-foreground">{syncMessage}</p>
+            {connectorAttention && (
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {connectorAttention.detail}
+              </p>
+            )}
           </div>
         </div>
         {userEmail && <Badge variant="outline">{userEmail}</Badge>}

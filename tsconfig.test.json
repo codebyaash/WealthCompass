@@ -15,12 +15,21 @@
     "lib/csv-import.ts",
     "lib/dashboard-rules.ts",
     "lib/goal-rules.ts",
+    "lib/formatters.ts",
+    "lib/import-jobs.ts",
+    "lib/import-sources.ts",
+    "lib/provider-import-normalizers.ts",
+    "lib/provider-parser-profiles.ts",
+    "lib/import-review.ts",
     "lib/local-storage.ts",
+    "lib/market-data.ts",
     "lib/mentor-rules.ts",
+    "lib/pdf-import.ts",
     "lib/portfolio-rules.ts",
     "lib/risk-profile-api.ts",
     "lib/sample-data.ts",
     "lib/supabase-mappers.ts",
+    "types/**/*.d.ts",
     "tests/**/*.ts"
   ]
 }

@@ -17,13 +17,16 @@ import {
   mentorQuestions,
   type MentorQuestionId,
 } from "@/lib/mentor-rules";
+import type { PortfolioAsset } from "@/lib/local-storage";
 import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
 
 export function MentorPanel({
   answers,
+  assets,
   profile,
 }: {
   answers: RiskAnswers;
+  assets: PortfolioAsset[];
   profile: RiskProfile;
 }) {
   const [activeQuestionId, setActiveQuestionId] = useState<MentorQuestionId>(
@@ -34,6 +37,7 @@ export function MentorPanel({
     mentorQuestions[0];
   const answer = getMentorAnswer({
     answers,
+    assets,
     formatMoney,
     profile,
     questionId: activeQuestion.id,

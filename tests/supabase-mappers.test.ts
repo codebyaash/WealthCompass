@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  mapImportJobRowToJob,
+  mapImportDocumentRowToJob,
+  mapImportJobToDocumentInsert,
+  mapImportJobToInsert,
+  mapImportSourceRowToIntegration,
+  mapIntegrationToImportSourceInsert,
+  mapMarketPreferenceRowToSettings,
+  mapMarketPreferencesToInsert,
   mapAnswersToProfile,
   mapAssetToPortfolioInsert,
   mapGoalRowToGoal,
@@ -8,9 +16,16 @@ import {
   mapPortfolioRowToAsset,
   mapProfileToAnswers,
   mapRiskProfileHistoryRow,
+  mapTransactionRowToTransaction,
+  mapTransactionToInsert,
   type ProfileRow,
 } from "../lib/supabase-mappers";
-import { defaultSnapshot, type WealthGoal } from "../lib/local-storage";
+import {
+  defaultSnapshot,
+  type MarketPreferences,
+  type PortfolioTransaction,
+  type WealthGoal,
+} from "../lib/local-storage";
 import type { RiskAnswers } from "../lib/wealth-rules";
 
 const answers: RiskAnswers = {
@@ -80,23 +95,35 @@ describe("portfolio mappers", () => {
   it("maps portfolio rows and insert payloads", () => {
     const asset = mapPortfolioRowToAsset({
       asset_type: "Index Fund",
+      current_price: null,
       current_value: 150000,
       gain_percent: null,
+      invested_value: null,
       name: "Index Core",
+      quantity: null,
+      source_label: null,
     });
 
     assert.deepEqual(asset, {
       gain: 0,
+      investedValue: 0,
       name: "Index Core",
+      price: 0,
+      quantity: 0,
+      source: "Imported",
       type: "Index Fund",
       value: 150000,
     });
 
     assert.deepEqual(mapAssetToPortfolioInsert(asset, "user-1"), {
       asset_type: "Index Fund",
+      current_price: 0,
       current_value: 150000,
       gain_percent: 0,
+      invested_value: 0,
       name: "Index Core",
+      quantity: 0,
+      source_label: "Imported",
       user_id: "user-1",
     });
   });
@@ -142,6 +169,60 @@ describe("goal mappers", () => {
   });
 });
 
+describe("transaction mappers", () => {
+  const transaction: PortfolioTransaction = {
+    action: "buy",
+    amount: 25000,
+    assetName: "Index Core",
+    date: "2026-07-11",
+    id: "txn-1",
+    notes: "Starter lot",
+    price: 125,
+    quantity: 200,
+    source: "Manual",
+    type: "Index Fund",
+  };
+
+  it("maps transaction rows and insert payloads", () => {
+    assert.deepEqual(
+      mapTransactionRowToTransaction({
+        action_type: null,
+        amount: 25000,
+        asset_name: "Index Core",
+        asset_type: null,
+        created_at: "2026-07-11T00:00:00.000Z",
+        id: "txn-1",
+        notes: null,
+        price: 125,
+        quantity: 200,
+        source_label: null,
+        transaction_date: null,
+      }),
+      {
+        ...transaction,
+        action: "buy",
+        date: "2026-07-11",
+        notes: "",
+        source: "Imported",
+        type: "Other",
+      },
+    );
+
+    assert.deepEqual(mapTransactionToInsert(transaction, "user-1"), {
+      action_type: "buy",
+      amount: 25000,
+      asset_name: "Index Core",
+      asset_type: "Index Fund",
+      notes: "Starter lot",
+      price: 125,
+      quantity: 200,
+      source_label: "Manual",
+      transaction_date: "2026-07-11",
+      user_id: "user-1",
+    });
+  });
+});
+
 describe("risk history mappers", () => {
   it("maps nullable risk history fields to app defaults", () => {
     assert.deepEqual(
@@ -164,5 +245,228 @@ describe("risk history mappers", () => {
         summary: "Saved risk profile snapshot.",
       },
     );
+  });
+});
+
+describe("integration mappers", () => {
+  it("maps import source rows and insert payloads", () => {
+    const mapped = mapImportSourceRowToIntegration({
+      channel: "broker",
+      id: "integration-1",
+      last_synced_at: null,
+      metadata: {
+        importStrategy: "statement-upload",
+        lastDetectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+        lastImportedFileCount: 2,
+        lastSyncMessage: "Latest statement review completed.",
+        lastSyncStatus: "success",
+        notes: "Track broker statements",
+        sourceHint: "Upload monthly statement",
+        syncHistory: [
+          {
+            detectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+            id: "sync-1",
+            importedFileCount: 2,
+            message: "Latest statement review completed.",
+            status: "success",
+            syncedAt: "2026-07-10T00:00:00.000Z",
+          },
+        ],
+        syncCadenceMinutes: 120,
+      },
+      provider_id: "paytm-money",
+      provider_name: "Paytm Money",
+      status: "active",
+    });
+
+    assert.equal(mapped.providerName, "Paytm Money");
+    assert.equal(mapped.lastImportedFileCount, 2);
+    assert.equal(mapped.lastSyncStatus, "success");
+    assert.equal(mapped.syncHistory[0].status, "success");
+    assert.equal(mapped.syncCadenceMinutes, 120);
+
+    assert.deepEqual(mapIntegrationToImportSourceInsert(mapped, "user-1"), {
+      channel: "broker",
+      last_synced_at: null,
+      metadata: {
+        importStrategy: "statement-upload",
+        lastDetectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+        lastImportedFileCount: 2,
+        lastSyncMessage: "Latest statement review completed.",
+        lastSyncStatus: "success",
+        notes: "Track broker statements",
+        sourceHint: "Upload monthly statement",
+        syncHistory: [
+          {
+            detectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+            id: "sync-1",
+            importedFileCount: 2,
+            message: "Latest statement review completed.",
+            status: "success",
+            syncedAt: "2026-07-10T00:00:00.000Z",
+          },
+        ],
+        syncCadenceMinutes: 120,
+      },
+      provider_id: "paytm-money",
+      provider_name: "Paytm Money",
+      status: "active",
+      user_id: "user-1",
+    });
+  });
+});
+
+describe("market preference mappers", () => {
+  it("maps market preference rows and insert payloads", () => {
+    const preferences: MarketPreferences = {
+      autoRefresh: true,
+      includeHoldingsWatch: true,
+      pollingIntervalSeconds: 60,
+      preferredSource: "alpha-vantage",
+    };
+
+    assert.deepEqual(
+      mapMarketPreferenceRowToSettings({
+        auto_refresh: null,
+        include_holdings_watch: false,
+        polling_interval_seconds: 300,
+        preferred_source: null,
+      }),
+      {
+        autoRefresh: defaultSnapshot.marketPreferences.autoRefresh,
+        includeHoldingsWatch: false,
+        pollingIntervalSeconds: 300,
+        preferredSource: defaultSnapshot.marketPreferences.preferredSource,
+      },
+    );
+
+    assert.deepEqual(mapMarketPreferencesToInsert(preferences, "user-1"), {
+      auto_refresh: true,
+      include_holdings_watch: true,
+      polling_interval_seconds: 60,
+      preferred_source: "alpha-vantage",
+      user_id: "user-1",
+    });
+  });
+});
+
+describe("import job mappers", () => {
+  it("maps import job rows and insert payloads", () => {
+    const mapped = mapImportJobRowToJob({
+      created_assets: 4,
+      created_at: "2026-07-11T00:00:00.000Z",
+      created_transactions: 0,
+      error_message: null,
+      id: "job-1",
+      import_document_id: null,
+      job_payload: {
+        attemptCount: 2,
+        documentKind: "pdf-statement",
+        duplicateCount: 1,
+        fileName: "cams.pdf",
+        lastActionAt: "2026-07-11T01:00:00.000Z",
+        normalizationApplied: ["Removed common registrar footer and pagination text"],
+        normalizedText: "Scheme Name\tCurrent Value",
+        parserProfileId: "cams",
+        providerConfidence: "high",
+        providerId: "cams",
+        providerName: "CAMS",
+        rawText: "Page 1 of 2\nScheme Name\tCurrent Value",
+        reviewedCorrections: ["Merged duplicate folio rows."],
+        rowWarnings: ["Duplicate detected for Axis Bluechip Fund (Mutual Fund)."],
+        summary: "CAMS pdf statement looks import-ready (88/100).",
+        usedOcr: false,
+      },
+      status: "completed",
+    });
+
+    assert.equal(mapped.assetCount, 4);
+    assert.equal(mapped.attemptCount, 2);
+    assert.equal(mapped.fileName, "cams.pdf");
+    assert.equal(mapped.parserProfileId, "cams");
+    assert.equal(mapped.status, "completed");
+
+    assert.deepEqual(mapImportJobToInsert(mapped, "user-1"), {
+      created_assets: 4,
+      created_transactions: 0,
+      error_message: null,
+      import_document_id: null,
+      job_payload: {
+        attemptCount: 2,
+        documentKind: "pdf-statement",
+        duplicateCount: 1,
+        fileName: "cams.pdf",
+        lastActionAt: "2026-07-11T01:00:00.000Z",
+        normalizationApplied: ["Removed common registrar footer and pagination text"],
+        normalizedText: "Scheme Name\tCurrent Value",
+        parserProfileId: "cams",
+        providerConfidence: "high",
+        providerId: "cams",
+        providerName: "CAMS",
+        rawText: "Page 1 of 2\nScheme Name\tCurrent Value",
+        reviewedCorrections: ["Merged duplicate folio rows."],
+        rowWarnings: ["Duplicate detected for Axis Bluechip Fund (Mutual Fund)."],
+        summary: "CAMS pdf statement looks import-ready (88/100).",
+        usedOcr: false,
+      },
+      status: "completed",
+      user_id: "user-1",
+    });
+
+    assert.deepEqual(mapImportJobToDocumentInsert(mapped, "user-1"), {
+      detected_provider: "cams",
+      extracted_text: "Page 1 of 2\nScheme Name\tCurrent Value",
+      file_name: "cams.pdf",
+      file_type: "pdf-statement",
+      import_status: "parsed",
+      parse_summary: {
+        duplicateCount: 1,
+        normalizedText: "Scheme Name\tCurrent Value",
+        parserProfileId: "cams",
+        providerConfidence: "high",
+        providerId: "cams",
+        providerName: "CAMS",
+        reviewedCorrections: ["Merged duplicate folio rows."],
+        rowWarnings: ["Duplicate detected for Axis Bluechip Fund (Mutual Fund)."],
+        selectedAssetCount: 4,
+        summary: "CAMS pdf statement looks import-ready (88/100).",
+        usedOcr: false,
+      },
+      user_id: "user-1",
+    });
+  });
+
+  it("maps persisted import documents back to review jobs", () => {
+    const mapped = mapImportDocumentRowToJob({
+      created_at: "2026-07-11T00:00:00.000Z",
+      detected_provider: "paytm-money",
+      extracted_text: "raw statement text",
+      file_name: "paytm.pdf",
+      file_type: "pdf-statement",
+      id: "document-1",
+      import_status: "needs_review",
+      parse_summary: {
+        duplicateCount: 2,
+        normalizedText: "normalized statement text",
+        parserProfileId: "paytm-money",
+        providerConfidence: "medium",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        reviewedCorrections: ["Confirmed merged folios."],
+        rowWarnings: ["Units or price missing."],
+        selectedAssetCount: 3,
+        summary: "Paytm statement needs review.",
+        usedOcr: true,
+      },
+    });
+
+    assert.equal(mapped.id, "document-1");
+    assert.equal(mapped.fileName, "paytm.pdf");
+    assert.equal(mapped.status, "reviewed");
+    assert.equal(mapped.assetCount, 3);
+    assert.equal(mapped.duplicateCount, 2);
+    assert.equal(mapped.rawText, "raw statement text");
+    assert.equal(mapped.normalizedText, "normalized statement text");
+    assert.equal(mapped.usedOcr, true);
   });
 });

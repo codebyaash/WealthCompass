@@ -1,19 +1,31 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type {
-  RiskHistoryItem,
-  WealthCompassSnapshot,
-} from "./local-storage";
+import type { RiskHistoryItem, WealthCompassSnapshot } from "./local-storage";
 import { defaultSnapshot } from "./local-storage";
 import {
   mapAnswersToProfile,
   mapAssetToPortfolioInsert,
   mapGoalRowToGoal,
   mapGoalToInsert,
+  mapImportJobRowToJob,
+  mapImportDocumentRowToJob,
+  mapImportJobToDocumentInsert,
+  mapImportJobToInsert,
+  mapImportSourceRowToIntegration,
+  mapIntegrationToImportSourceInsert,
+  mapMarketPreferenceRowToSettings,
+  mapMarketPreferencesToInsert,
   mapPortfolioRowToAsset,
   mapProfileToAnswers,
   mapRiskProfileHistoryRow,
+  mapTransactionRowToTransaction,
+  mapTransactionToInsert,
   type GoalRow,
+  type ImportJobRow,
+  type ImportDocumentRow,
+  type ImportSourceRow,
+  type MarketPreferenceRow,
   type PortfolioRow,
+  type PortfolioTransactionRow,
   type ProfileRow,
   type RiskProfileHistoryRow,
 } from "./supabase-mappers";
@@ -23,11 +35,13 @@ export async function loadCloudSnapshot(
   supabase: SupabaseClient,
   userId: User["id"],
 ): Promise<WealthCompassSnapshot> {
-  const [profileResult, assetsResult, goalsResult] = await Promise.all([
+  const [profileResult, assetsResult, goalsResult, transactionsResult, integrationsResult, importJobsResult, importDocumentsResult, marketPreferencesResult] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", userId).maybeSingle<ProfileRow>(),
     supabase
       .from("portfolio_assets")
-      .select("name, asset_type, current_value, gain_percent")
+      .select(
+        "name, asset_type, current_value, current_price, invested_value, quantity, gain_percent, source_label",
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .returns<PortfolioRow[]>(),
@@ -37,11 +51,47 @@ export async function loadCloudSnapshot(
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .returns<GoalRow[]>(),
+    supabase
+      .from("portfolio_transactions")
+      .select(
+        "id, asset_name, asset_type, action_type, quantity, price, amount, source_label, notes, transaction_date, created_at",
+      )
+      .eq("user_id", userId)
+      .order("transaction_date", { ascending: false })
+      .returns<PortfolioTransactionRow[]>(),
+    supabase
+      .from("import_sources")
+      .select("id, provider_id, provider_name, channel, status, last_synced_at, metadata")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .returns<ImportSourceRow[]>(),
+    supabase
+      .from("import_jobs")
+      .select("id, status, error_message, created_assets, created_transactions, import_document_id, created_at, job_payload")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .returns<ImportJobRow[]>(),
+    supabase
+      .from("import_documents")
+      .select("id, file_name, file_type, detected_provider, import_status, extracted_text, parse_summary, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .returns<ImportDocumentRow[]>(),
+    supabase
+      .from("market_preferences")
+      .select("auto_refresh, include_holdings_watch, polling_interval_seconds, preferred_source")
+      .eq("user_id", userId)
+      .maybeSingle<MarketPreferenceRow>(),
   ]);
 
   if (profileResult.error) throw profileResult.error;
   if (assetsResult.error) throw assetsResult.error;
   if (goalsResult.error) throw goalsResult.error;
+  if (transactionsResult.error) throw transactionsResult.error;
+  if (integrationsResult.error) throw integrationsResult.error;
+  if (importJobsResult.error) throw importJobsResult.error;
+  if (importDocumentsResult.error) throw importDocumentsResult.error;
+  if (marketPreferencesResult.error) throw marketPreferencesResult.error;
 
   return {
     answers: profileResult.data
@@ -53,6 +103,20 @@ export async function loadCloudSnapshot(
     goals: goalsResult.data.length
       ? goalsResult.data.map(mapGoalRowToGoal)
       : defaultSnapshot.goals,
+    integrations: integrationsResult.data.length
+      ? integrationsResult.data.map(mapImportSourceRowToIntegration)
+      : defaultSnapshot.integrations,
+    importJobs: importJobsResult.data.length
+      ? importJobsResult.data.map(mapImportJobRowToJob)
+      : importDocumentsResult.data.length
+        ? importDocumentsResult.data.map(mapImportDocumentRowToJob)
+        : defaultSnapshot.importJobs,
+    marketPreferences: marketPreferencesResult.data
+      ? mapMarketPreferenceRowToSettings(marketPreferencesResult.data)
+      : defaultSnapshot.marketPreferences,
+    transactions: transactionsResult.data.length
+      ? transactionsResult.data.map(mapTransactionRowToTransaction)
+      : defaultSnapshot.transactions,
   };
 }
 
@@ -102,6 +166,79 @@ export async function saveCloudSnapshot({
 
     if (goalResult.error) throw goalResult.error;
   }
+
+  const deleteTransactionsResult = await supabase
+    .from("portfolio_transactions")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteTransactionsResult.error) throw deleteTransactionsResult.error;
+
+  if (snapshot.transactions.length) {
+    const transactionResult = await supabase.from("portfolio_transactions").insert(
+      snapshot.transactions.map((transaction) =>
+        mapTransactionToInsert(transaction, userId),
+      ),
+    );
+
+    if (transactionResult.error) throw transactionResult.error;
+  }
+
+  const deleteImportSourcesResult = await supabase
+    .from("import_sources")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteImportSourcesResult.error) throw deleteImportSourcesResult.error;
+
+  if (snapshot.integrations.length) {
+    const importSourceResult = await supabase.from("import_sources").insert(
+      snapshot.integrations.map((integration) =>
+        mapIntegrationToImportSourceInsert(integration, userId),
+      ),
+    );
+
+    if (importSourceResult.error) throw importSourceResult.error;
+  }
+
+  const deleteImportJobsResult = await supabase
+    .from("import_jobs")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteImportJobsResult.error) throw deleteImportJobsResult.error;
+
+  const deleteImportDocumentsResult = await supabase
+    .from("import_documents")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteImportDocumentsResult.error) throw deleteImportDocumentsResult.error;
+
+  if (snapshot.importJobs.length) {
+    const importDocumentsResult = await supabase.from("import_documents").insert(
+      snapshot.importJobs.map((job) => mapImportJobToDocumentInsert(job, userId)),
+    );
+
+    if (importDocumentsResult.error) throw importDocumentsResult.error;
+  }
+
+  if (snapshot.importJobs.length) {
+    const importJobsResult = await supabase.from("import_jobs").insert(
+      snapshot.importJobs.map((job) => mapImportJobToInsert(job, userId)),
+    );
+
+    if (importJobsResult.error) throw importJobsResult.error;
+  }
+
+  const marketPreferencesResult = await supabase
+    .from("market_preferences")
+    .upsert({
+      ...mapMarketPreferencesToInsert(snapshot.marketPreferences, userId),
+      updated_at: new Date().toISOString(),
+    });
+
+  if (marketPreferencesResult.error) throw marketPreferencesResult.error;
 }
 
 export async function saveRiskProfileHistory({

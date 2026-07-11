@@ -1,3 +1,9 @@
+import type {
+  IntegrationConnection,
+  ImportJob,
+  MarketPreferences,
+  PortfolioTransaction,
+} from "./local-storage";
 import { calculateRiskProfile, type RiskAnswers } from "./wealth-rules";
 
 export const defaultRiskAnswers: RiskAnswers = {
@@ -19,11 +25,174 @@ export const defaultRiskAnswers: RiskAnswers = {
 export const defaultProfile = calculateRiskProfile(defaultRiskAnswers);
 
 export const portfolioAssets = [
-  { name: "Nifty 50 Index", type: "Index Fund", value: 180000, gain: 14 },
-  { name: "Flexi Cap Fund", type: "Mutual Fund", value: 92000, gain: 8 },
-  { name: "Gold ETF", type: "Gold", value: 42000, gain: 5 },
-  { name: "Liquid Fund", type: "Debt", value: 65000, gain: 3 },
-  { name: "Cash Reserve", type: "Cash", value: 85000, gain: 0 },
+  {
+    gain: 14,
+    investedValue: 158000,
+    name: "Nifty 50 Index",
+    price: 245,
+    quantity: 734.69,
+    source: "Manual",
+    type: "Index Fund",
+    value: 180000,
+  },
+  {
+    gain: 8,
+    investedValue: 85185,
+    name: "Flexi Cap Fund",
+    price: 82,
+    quantity: 1121.95,
+    source: "Manual",
+    type: "Mutual Fund",
+    value: 92000,
+  },
+  {
+    gain: 5,
+    investedValue: 40000,
+    name: "Gold ETF",
+    price: 70,
+    quantity: 600,
+    source: "Manual",
+    type: "Gold",
+    value: 42000,
+  },
+  {
+    gain: 3,
+    investedValue: 63107,
+    name: "Liquid Fund",
+    price: 118,
+    quantity: 550.85,
+    source: "Manual",
+    type: "Debt",
+    value: 65000,
+  },
+  {
+    gain: 0,
+    investedValue: 85000,
+    name: "Cash Reserve",
+    price: 1,
+    quantity: 85000,
+    source: "Manual",
+    type: "Cash",
+    value: 85000,
+  },
+];
+
+export const portfolioTransactions: PortfolioTransaction[] = [
+  {
+    action: "buy",
+    amount: 120000,
+    assetName: "Nifty 50 Index",
+    date: "2026-04-10",
+    id: "txn-nifty-core-1",
+    notes: "Core monthly accumulation",
+    price: 240,
+    quantity: 500,
+    source: "Manual",
+    type: "Index Fund",
+  },
+  {
+    action: "buy",
+    amount: 38000,
+    assetName: "Gold ETF",
+    date: "2026-03-22",
+    id: "txn-gold-1",
+    notes: "Diversifier allocation",
+    price: 68,
+    quantity: 558.82,
+    source: "Manual",
+    type: "Gold",
+  },
+  {
+    action: "buy",
+    amount: 60000,
+    assetName: "Liquid Fund",
+    date: "2026-05-05",
+    id: "txn-liquid-1",
+    notes: "Emergency reserve parking",
+    price: 116,
+    quantity: 517.24,
+    source: "Manual",
+    type: "Debt",
+  },
+];
+
+export const defaultIntegrations: IntegrationConnection[] = [
+  {
+    channel: "broker",
+    id: "integration-paytm-money",
+    importStrategy: "statement-upload",
+    lastDetectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+    lastImportedFileCount: 1,
+    lastSyncAt: null,
+    lastSyncMessage: "Waiting for the next statement upload.",
+    lastSyncStatus: "idle",
+    notes: "Primary broker workflow for guided statement imports.",
+    providerId: "paytm-money",
+    providerName: "Paytm Money",
+    sourceHint: "Upload account statements or CSV exports first.",
+    status: "active",
+    syncHistory: [
+      {
+        detectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
+        id: "sync-paytm-1",
+        importedFileCount: 1,
+        message: "Reviewed 1 statement input through the guided pipeline.",
+        status: "success",
+        syncedAt: "2026-07-10T09:42:00.000Z",
+      },
+    ],
+    syncCadenceMinutes: 720,
+  },
+  {
+    channel: "email",
+    id: "integration-email-forward",
+    importStrategy: "email-forward",
+    lastDetectedProviderSummary: "Email Forward can ingest pasted statements and PDF attachments.",
+    lastImportedFileCount: 0,
+    lastSyncAt: null,
+    lastSyncMessage: "Inbox-based sync has not been triggered yet.",
+    lastSyncStatus: "idle",
+    notes: "Use forwarded statements and PDF attachments until inbox OAuth is added.",
+    providerId: "email-forward",
+    providerName: "Email Forward",
+    sourceHint: "Forward broker statements to yourself and paste or upload them here.",
+    status: "active",
+    syncHistory: [],
+    syncCadenceMinutes: 1440,
+  },
+];
+
+export const defaultMarketPreferences: MarketPreferences = {
+  autoRefresh: true,
+  includeHoldingsWatch: true,
+  pollingIntervalSeconds: 60,
+  preferredSource: "alpha-vantage",
+};
+
+export const defaultImportJobs: ImportJob[] = [
+  {
+    assetCount: 3,
+    attemptCount: 1,
+    createdAt: "2026-07-10T09:30:00.000Z",
+    documentKind: "pdf-statement",
+    duplicateCount: 1,
+    fileName: "paytm-money-july-statement.pdf",
+    id: "import-job-paytm-july",
+    lastActionAt: "2026-07-10T09:42:00.000Z",
+    notes: "Baseline demo import for provider review history.",
+    normalizationApplied: [],
+    normalizedText: "Scheme Name\tCurrent Value\tInvested Value\tUnits\tNAV\nNifty 50 Index Fund\t180000\t158000\t734.69\t245",
+    parserProfileId: "paytm-money",
+    providerId: "paytm-money",
+    providerName: "Paytm Money",
+    providerConfidence: "high",
+    rawText: "Scheme Name\tCurrent Value\tInvested Value\tUnits\tNAV\nNifty 50 Index Fund\t180000\t158000\t734.69\t245",
+    reviewedCorrections: ["Confirmed duplicate folios should be merged."],
+    rowWarnings: ["Duplicate detected for Nifty 50 Index Fund (Mutual Fund)."],
+    status: "completed",
+    summary: "Paytm Money pdf statement looks import-ready (85/100).",
+    usedOcr: false,
+  },
 ];
 
 export const marketNotes = [

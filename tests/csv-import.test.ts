@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parsePortfolioCsv, portfolioAssetsToCsv } from "../lib/csv-import";
 
+function importedAsset(overrides: Record<string, unknown>) {
+  return {
+    gain: 0,
+    investedValue: 0,
+    price: 0,
+    quantity: 0,
+    source: "Imported file",
+    ...overrides,
+  };
+}
+
 describe("parsePortfolioCsv", () => {
   it("imports holdings with supported header aliases", () => {
     const result = parsePortfolioCsv(`holding,category,market value,return%
@@ -10,18 +21,18 @@ Liquid Reserve,Debt,50000,4`);
 
     assert.equal(result.errors.length, 0);
     assert.deepEqual(result.assets, [
-      {
+      importedAsset({
         gain: 12,
         name: "Index Core",
         type: "Index Fund",
         value: 150000,
-      },
-      {
+      }),
+      importedAsset({
         gain: 4,
         name: "Liquid Reserve",
         type: "Debt",
         value: 50000,
-      },
+      }),
     ]);
   });
 
@@ -42,12 +53,13 @@ Total,Rs. 50,000,Rs. 57,500,15%`);
 
     assert.equal(result.errors.length, 0);
     assert.deepEqual(result.assets, [
-      {
+      importedAsset({
         gain: 15,
+        investedValue: 50000,
         name: "Axis Bluechip Fund Direct Growth",
         type: "Mutual Fund",
         value: 57500,
-      },
+      }),
     ]);
   });
 
@@ -59,6 +71,9 @@ Parag Parikh Flexi Cap Fund\tEquity Mutual Fund\t100.5\t625.50\t50000`);
     assert.equal(result.assets.length, 1);
     assert.equal(result.assets[0].name, "Parag Parikh Flexi Cap Fund");
     assert.equal(result.assets[0].type, "Equity Mutual Fund");
+    assert.equal(result.assets[0].investedValue, 50000);
+    assert.equal(result.assets[0].price, 625.5);
+    assert.equal(result.assets[0].quantity, 100.5);
     assert.equal(result.assets[0].value, 62862.75);
     assert.equal(Math.round(result.assets[0].gain), 26);
   });
@@ -69,12 +84,12 @@ RELIANCE INDUSTRIES,EQUITY,"₹2,42,000.50",(3.5%)`);
 
     assert.equal(result.errors.length, 0);
     assert.deepEqual(result.assets, [
-      {
+      importedAsset({
         gain: -3.5,
         name: "RELIANCE INDUSTRIES",
         type: "EQUITY",
         value: 242000.5,
-      },
+      }),
     ]);
   });
 
@@ -93,18 +108,21 @@ Returns %: 6.25%`);
 
     assert.equal(result.errors.length, 0);
     assert.deepEqual(result.assets, [
-      {
+      importedAsset({
         gain: 15,
+        investedValue: 50000,
+        source: "Imported statement",
         name: "Axis Bluechip Fund Direct Growth",
         type: "Mutual Fund",
         value: 57500,
-      },
-      {
+      }),
+      importedAsset({
         gain: 6.25,
+        source: "Imported statement",
         name: "Nippon India Gold ETF",
         type: "ETF",
         value: 21250,
-      },
+      }),
     ]);
   });
 
@@ -116,12 +134,12 @@ Returns %: 6.25%`);
 
     assert.equal(result.errors.length, 0);
     assert.deepEqual(result.assets, [
-      {
+      importedAsset({
         gain: 4.2,
         name: "ICICI Prudential Liquid Fund",
         type: "Debt",
         value: 75000,
-      },
+      }),
     ]);
   });
 });
@@ -131,12 +149,19 @@ describe("portfolioAssetsToCsv", () => {
     const csv = portfolioAssetsToCsv([
       {
         gain: 9,
+        investedValue: 200000,
         name: 'Core "Index", Fund',
+        price: 250,
+        quantity: 1000,
+        source: "Manual",
         type: "Index Fund",
         value: 250000,
       },
     ]);
 
-    assert.equal(csv, 'name,type,value,gain\n"Core ""Index"", Fund",Index Fund,250000,9');
+    assert.equal(
+      csv,
+      'name,type,value,investedValue,quantity,price,gain,source\n"Core ""Index"", Fund",Index Fund,250000,200000,1000,250,9,Manual',
+    );
   });
 });

@@ -1,8 +1,20 @@
 import type { PortfolioAsset } from "@/lib/local-storage";
 
-type CsvImportResult = {
+export type CsvImportResult = {
   assets: PortfolioAsset[];
   errors: string[];
+};
+
+export type PortfolioImportMode = "add" | "merge";
+
+export type PortfolioImportPreview = CsvImportResult & {
+  duplicates: Array<{
+    existingAsset: PortfolioAsset;
+    importedAsset: PortfolioAsset;
+  }>;
+  importedInvestedValue: number;
+  importedValue: number;
+  newAssets: PortfolioAsset[];
 };
 
 const headerAliases = {
@@ -62,6 +74,7 @@ const headerAliases = {
     "price",
   ],
   quantity: ["balance units", "holding qty", "quantity", "qty", "shares", "units"],
+  source: ["account", "broker", "platform", "source", "source app"],
   type: [
     "asset class",
     "asset type",
@@ -92,10 +105,10 @@ const headerAliases = {
   ],
 };
 
-export const samplePortfolioCsv = `scheme name,asset class,current value,returns %
-Nifty 50 Index Fund,Mutual Fund,180000,14
-Gold ETF,ETF,42000,5
-Liquid Fund,Debt,65000,3`;
+export const samplePortfolioCsv = `scheme name,asset class,current value,invested value,units,current nav,returns %,source
+Nifty 50 Index Fund,Mutual Fund,180000,158000,734.69,245,14,Manual
+Gold ETF,ETF,42000,40000,600,70,5,Manual
+Liquid Fund,Debt,65000,63107,550.85,118,3,Manual`;
 
 export function portfolioAssetsToCsv(assets: PortfolioAsset[]) {
   const rows = assets.map((asset) =>
@@ -103,11 +116,69 @@ export function portfolioAssetsToCsv(assets: PortfolioAsset[]) {
       escapeCsvValue(asset.name),
       escapeCsvValue(asset.type),
       asset.value,
+      asset.investedValue,
+      asset.quantity,
+      asset.price,
       asset.gain,
+      escapeCsvValue(asset.source),
     ].join(","),
   );
 
-  return ["name,type,value,gain", ...rows].join("\n");
+  return [
+    "name,type,value,investedValue,quantity,price,gain,source",
+    ...rows,
+  ].join("\n");
+}
+
+export function previewPortfolioImport(
+  importText: string,
+  existingAssets: PortfolioAsset[],
+): PortfolioImportPreview {
+  const parsed = parsePortfolioCsv(importText);
+  const duplicates = parsed.assets.flatMap((importedAsset) => {
+    const existingAsset = existingAssets.find((asset) => createAssetKey(asset) === createAssetKey(importedAsset));
+
+    return existingAsset ? [{ existingAsset, importedAsset }] : [];
+  });
+
+  return {
+    ...parsed,
+    duplicates,
+    importedInvestedValue: parsed.assets.reduce((sum, asset) => sum + asset.investedValue, 0),
+    importedValue: parsed.assets.reduce((sum, asset) => sum + asset.value, 0),
+    newAssets: parsed.assets.filter(
+      (asset) => !existingAssets.some((current) => createAssetKey(current) === createAssetKey(asset)),
+    ),
+  };
+}
+
+export function applyPortfolioImport({
+  existingAssets,
+  importedAssets,
+  mode,
+}: {
+  existingAssets: PortfolioAsset[];
+  importedAssets: PortfolioAsset[];
+  mode: PortfolioImportMode;
+}) {
+  if (mode === "add") {
+    return [...importedAssets, ...existingAssets];
+  }
+
+  const merged = [...existingAssets];
+
+  for (const importedAsset of importedAssets) {
+    const existingIndex = merged.findIndex((asset) => createAssetKey(asset) === createAssetKey(importedAsset));
+
+    if (existingIndex === -1) {
+      merged.unshift(importedAsset);
+      continue;
+    }
+
+    merged[existingIndex] = mergePortfolioAsset(merged[existingIndex], importedAsset);
+  }
+
+  return merged;
 }
 
 export function parsePortfolioCsv(csvText: string): CsvImportResult {
@@ -131,6 +202,7 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
     name: findHeaderIndex(headers, headerAliases.name),
     price: findHeaderIndex(headers, headerAliases.price),
     quantity: findHeaderIndex(headers, headerAliases.quantity),
+    source: findHeaderIndex(headers, headerAliases.source),
     type: findHeaderIndex(headers, headerAliases.type),
     value: findHeaderIndex(headers, headerAliases.value),
   };
@@ -139,10 +211,7 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
     indexes.value !== -1 ||
     indexes.investedValue !== -1 ||
     (indexes.quantity !== -1 && indexes.price !== -1);
-  const missingHeaders = [
-    indexes.name === -1 ? "name" : "",
-    !hasValueSource ? "value" : "",
-  ].filter(Boolean);
+  const missingHeaders = [indexes.name === -1 ? "name" : "", !hasValueSource ? "value" : ""].filter(Boolean);
 
   if (missingHeaders.length) {
     const statementResult = parsePortfolioStatementText(importText);
@@ -159,31 +228,18 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
   const assets = rows.slice(1).flatMap((row, index) => {
     const lineNumber = index + 2;
     const alignedRow = alignOverflowCells(row, headers.length, indexes.value);
-    const name = cell(alignedRow, indexes.name);
-    const type = inferAssetType({
-      name,
-      sourceType: cell(alignedRow, indexes.type),
-    });
-    const value = getHoldingValue(alignedRow, indexes);
-    const gain = getHoldingGain(alignedRow, indexes, value);
+    const asset = createPortfolioAssetFromRow(alignedRow, indexes);
 
-    if (isSummaryRow(name)) {
+    if (isSummaryRow(asset.name)) {
       return [];
     }
 
-    if (!name || !Number.isFinite(value) || value <= 0) {
+    if (!asset.name || !Number.isFinite(asset.value) || asset.value <= 0) {
       errors.push(`Line ${lineNumber}: holding name and positive value are required.`);
       return [];
     }
 
-    return [
-      {
-        gain: Number.isFinite(gain) ? gain : 0,
-        name,
-        type,
-        value,
-      },
-    ];
+    return [asset];
   });
 
   return { assets, errors };
@@ -201,7 +257,7 @@ function parsePortfolioStatementText(statementText: string): CsvImportResult {
   return {
     assets: [],
     errors: [
-      "Paste a CSV/TSV export or an email statement with holding name and current value.",
+      "Paste a CSV/TSV export, email statement, or PDF-extracted statement with holding name and current value.",
     ],
   };
 }
@@ -234,6 +290,7 @@ function parseStatementTable(statementText: string): CsvImportResult {
     name: findHeaderIndex(headers, headerAliases.name),
     price: findHeaderIndex(headers, headerAliases.price),
     quantity: findHeaderIndex(headers, headerAliases.quantity),
+    source: findHeaderIndex(headers, headerAliases.source),
     type: findHeaderIndex(headers, headerAliases.type),
     value: findHeaderIndex(headers, headerAliases.value),
   };
@@ -244,29 +301,16 @@ function parseStatementTable(statementText: string): CsvImportResult {
 
     if (row.length < 2) return [];
 
-    const name = cell(row, indexes.name);
-    if (isSummaryRow(name)) return [];
+    const asset = createPortfolioAssetFromRow(row, indexes);
 
-    const value = getHoldingValue(row, indexes);
-    const type = inferAssetType({
-      name,
-      sourceType: cell(row, indexes.type),
-    });
-    const gain = getHoldingGain(row, indexes, value);
+    if (isSummaryRow(asset.name)) return [];
 
-    if (!name || !Number.isFinite(value) || value <= 0) {
+    if (!asset.name || !Number.isFinite(asset.value) || asset.value <= 0) {
       errors.push(`Line ${lineNumber}: holding name and positive value are required.`);
       return [];
     }
 
-    return [
-      {
-        gain: Number.isFinite(gain) ? gain : 0,
-        name,
-        type,
-        value,
-      },
-    ];
+    return [asset];
   });
 
   return { assets, errors };
@@ -298,22 +342,21 @@ function parseLabelledStatement(statementText: string): CsvImportResult {
   }
 
   const assets = records.flatMap((record) => {
-    const name = getRecordValue(record, headerAliases.name);
+    const name = getRecordValue(record, headerAliases.name) ?? "";
+
     if (isSummaryRow(name)) return [];
 
     const type = inferAssetType({
       name,
-      sourceType: getRecordValue(record, headerAliases.type),
+      sourceType: getRecordValue(record, headerAliases.type) ?? "",
     });
-    const value =
-      parseNumber(getRecordValue(record, headerAliases.value)) ||
-      parseNumber(getRecordValue(record, headerAliases.investedValue));
-    const investedValue = parseNumber(getRecordValue(record, headerAliases.investedValue));
+    const quantity = parseNumber(getRecordValue(record, headerAliases.quantity));
+    const price = parseNumber(getRecordValue(record, headerAliases.price));
+    const parsedValue = parseNumber(getRecordValue(record, headerAliases.value));
+    const investedValue = finiteOrZero(parseNumber(getRecordValue(record, headerAliases.investedValue)));
+    const value = deriveHoldingValue({ investedValue, parsedValue, price, quantity });
     const gain = parseNumber(getRecordValue(record, headerAliases.gain));
-    const derivedGain =
-      Number.isFinite(gain) || !Number.isFinite(investedValue) || investedValue <= 0
-        ? gain
-        : ((value - investedValue) / investedValue) * 100;
+    const derivedGain = deriveHoldingGain({ gain, investedValue, value });
 
     if (!name || !Number.isFinite(value) || value <= 0) {
       return [];
@@ -321,8 +364,12 @@ function parseLabelledStatement(statementText: string): CsvImportResult {
 
     return [
       {
-        gain: Number.isFinite(derivedGain) ? derivedGain : 0,
+        gain: derivedGain,
+        investedValue,
         name,
+        price: deriveHoldingPrice({ price, quantity, value }),
+        quantity: finiteOrZero(quantity),
+        source: getRecordValue(record, headerAliases.source) ?? "Imported statement",
         type,
         value,
       },
@@ -330,6 +377,41 @@ function parseLabelledStatement(statementText: string): CsvImportResult {
   });
 
   return { assets, errors: [] };
+}
+
+function createPortfolioAssetFromRow(
+  row: string[],
+  indexes: Record<
+    "gain" | "investedValue" | "name" | "price" | "quantity" | "source" | "type" | "value",
+    number
+  >,
+): PortfolioAsset {
+  const name = cell(row, indexes.name);
+  const type = inferAssetType({
+    name,
+    sourceType: cell(row, indexes.type),
+  });
+  const quantity = parseNumber(cell(row, indexes.quantity));
+  const price = parseNumber(cell(row, indexes.price));
+  const parsedValue = parseNumber(cell(row, indexes.value));
+  const investedValue = finiteOrZero(parseNumber(cell(row, indexes.investedValue)));
+  const value = deriveHoldingValue({ investedValue, parsedValue, price, quantity });
+  const gain = deriveHoldingGain({
+    gain: parseNumber(cell(row, indexes.gain)),
+    investedValue,
+    value,
+  });
+
+  return {
+    gain,
+    investedValue,
+    name,
+    price: deriveHoldingPrice({ price, quantity, value }),
+    quantity: finiteOrZero(quantity),
+    source: cell(row, indexes.source) || "Imported file",
+    type,
+    value,
+  };
 }
 
 function findHeaderIndex(headers: string[], aliases: string[]) {
@@ -421,8 +503,8 @@ function detectDelimiter(csvText: string) {
 
   return candidates
     .map((delimiter) => ({
-      delimiter,
       count: parseDelimitedRow(firstLine, delimiter).length,
+      delimiter,
     }))
     .sort((left, right) => right.count - left.count)[0].delimiter;
 }
@@ -433,14 +515,23 @@ function stripThousandsSeparators(row: string) {
 
 function splitStatementColumns(line: string) {
   if (line.includes("\t")) {
-    return line.split("\t").map((value) => value.trim()).filter(Boolean);
+    return line
+      .split("\t")
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
   if (line.includes("|")) {
-    return line.split("|").map((value) => value.trim()).filter(Boolean);
+    return line
+      .split("|")
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
-  return line.split(/\s{2,}/).map((value) => value.trim()).filter(Boolean);
+  return line
+    .split(/\s{2,}/)
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function alignOverflowCells(row: string[], headerCount: number, valueIndex: number) {
@@ -460,34 +551,53 @@ function cell(row: string[], index: number) {
   return row[index]?.trim() ?? "";
 }
 
-function getHoldingValue(
-  row: string[],
-  indexes: Record<"gain" | "investedValue" | "name" | "price" | "quantity" | "type" | "value", number>,
-) {
-  const currentValue = parseNumber(cell(row, indexes.value));
-
-  if (Number.isFinite(currentValue) && currentValue > 0) return currentValue;
-
-  const quantity = parseNumber(cell(row, indexes.quantity));
-  const price = parseNumber(cell(row, indexes.price));
+function deriveHoldingValue({
+  investedValue,
+  parsedValue,
+  price,
+  quantity,
+}: {
+  investedValue: number;
+  parsedValue: number;
+  price: number;
+  quantity: number;
+}) {
+  if (Number.isFinite(parsedValue) && parsedValue > 0) return parsedValue;
 
   if (Number.isFinite(quantity) && Number.isFinite(price) && quantity > 0 && price > 0) {
     return quantity * price;
   }
 
-  return parseNumber(cell(row, indexes.investedValue));
+  return investedValue;
 }
 
-function getHoldingGain(
-  row: string[],
-  indexes: Record<"gain" | "investedValue" | "name" | "price" | "quantity" | "type" | "value", number>,
-  value: number,
-) {
-  const gain = parseNumber(cell(row, indexes.gain));
+function deriveHoldingPrice({
+  price,
+  quantity,
+  value,
+}: {
+  price: number;
+  quantity: number;
+  value: number;
+}) {
+  if (Number.isFinite(price) && price > 0) return price;
+  if (Number.isFinite(quantity) && quantity > 0 && Number.isFinite(value) && value > 0) {
+    return value / quantity;
+  }
 
+  return 0;
+}
+
+function deriveHoldingGain({
+  gain,
+  investedValue,
+  value,
+}: {
+  gain: number;
+  investedValue: number;
+  value: number;
+}) {
   if (Number.isFinite(gain)) return gain;
-
-  const investedValue = parseNumber(cell(row, indexes.investedValue));
 
   if (Number.isFinite(investedValue) && investedValue > 0 && Number.isFinite(value)) {
     return ((value - investedValue) / investedValue) * 100;
@@ -508,7 +618,9 @@ function inferAssetType({
   const normalizedName = name.toLowerCase();
 
   if (/\betf\b/.test(normalizedName)) return "ETF";
-  if (/\bfund\b|direct plan|regular plan|growth|idcw/.test(normalizedName)) return "Mutual Fund";
+  if (/\bfund\b|direct plan|regular plan|growth|idcw/.test(normalizedName)) {
+    return "Mutual Fund";
+  }
   if (/\bgold\b|sgb|sovereign gold/.test(normalizedName)) return "Gold";
   if (/\bbond\b|gilt|debt|liquid|overnight/.test(normalizedName)) return "Debt";
 
@@ -519,19 +631,47 @@ function isSummaryRow(name: string) {
   return /^(grand\s+)?total|summary|net worth$/i.test(name.trim());
 }
 
-function isNameKey(key: string) {
-  return headerAliases.name.map(normalizeHeader).includes(key);
+function getRecordValue(record: Record<string, string>, aliases: string[]) {
+  return aliases
+    .map((alias) => record[normalizeHeader(alias)])
+    .find((value) => Boolean(value))
+    ?.trim();
 }
 
-function getRecordValue(record: Record<string, string>, aliases: string[]) {
-  const normalizedAliases = aliases.map(normalizeHeader);
-  const matchingKey = Object.keys(record).find((key) => normalizedAliases.includes(key));
+function isNameKey(key: string) {
+  return headerAliases.name.some((alias) => normalizeHeader(alias) === key);
+}
 
-  return matchingKey ? record[matchingKey] : "";
+function finiteOrZero(value: number) {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function createAssetKey(asset: PortfolioAsset) {
+  return `${normalizeHeader(asset.name)}::${normalizeHeader(asset.type)}`;
+}
+
+function mergePortfolioAsset(existingAsset: PortfolioAsset, importedAsset: PortfolioAsset): PortfolioAsset {
+  const value = existingAsset.value + importedAsset.value;
+  const investedValue = existingAsset.investedValue + importedAsset.investedValue;
+  const quantity = existingAsset.quantity + importedAsset.quantity;
+  const price = quantity > 0 ? value / quantity : importedAsset.price || existingAsset.price;
+  const gain = investedValue > 0 ? ((value - investedValue) / investedValue) * 100 : importedAsset.gain;
+
+  return {
+    ...existingAsset,
+    gain,
+    investedValue,
+    price,
+    quantity,
+    source:
+      existingAsset.source === importedAsset.source
+        ? existingAsset.source
+        : `${existingAsset.source} + ${importedAsset.source}`,
+    value,
+  };
 }
 
 function escapeCsvValue(value: string) {
   if (!/[",\n]/.test(value)) return value;
-
   return `"${value.replaceAll('"', '""')}"`;
 }

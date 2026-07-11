@@ -21,6 +21,19 @@ const answers: RiskAnswers = {
   timeAvailable: "medium",
 };
 
+const assets = [
+  {
+    gain: 15,
+    investedValue: 50000,
+    name: "Index Core",
+    price: 65,
+    quantity: 884.62,
+    source: "Manual",
+    type: "Index Fund",
+    value: 57500,
+  },
+];
+
 describe("mentorQuestions", () => {
   it("keeps the expected starter question set", () => {
     assert.deepEqual(
@@ -34,6 +47,7 @@ describe("getMentorAnswer", () => {
   it("personalizes emergency guidance with current emergency months and goal", () => {
     const answer = getMentorAnswer({
       answers,
+      assets,
       formatMoney,
       profile: calculateRiskProfile(answers),
       questionId: "emergency",
@@ -46,11 +60,13 @@ describe("getMentorAnswer", () => {
   it("uses the provided money formatter for SIP guidance", () => {
     const answer = getMentorAnswer({
       answers,
+      assets,
       formatMoney,
       profile: calculateRiskProfile(answers),
       questionId: "sip",
     });
 
     assert.match(answer.personalNote, /\$750/);
+    assert.match(answer.personalNote, /\$57500/);
   });
 });
