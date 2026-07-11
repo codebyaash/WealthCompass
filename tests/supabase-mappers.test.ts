@@ -258,6 +258,10 @@ describe("integration mappers", () => {
         importStrategy: "statement-upload",
         lastDetectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
         lastImportedFileCount: 2,
+        lastSchedulerCheckAt: "2026-07-11T09:00:00.000Z",
+        lastSchedulerMessage: "Scheduler ran 1 due connector.",
+        lastSchedulerStatus: "success",
+        lastSyncOrigin: "scheduled",
         lastSyncMessage: "Latest statement review completed.",
         lastSyncStatus: "success",
         notes: "Track broker statements",
@@ -281,6 +285,8 @@ describe("integration mappers", () => {
 
     assert.equal(mapped.providerName, "Paytm Money");
     assert.equal(mapped.lastImportedFileCount, 2);
+    assert.equal(mapped.lastSchedulerStatus, "success");
+    assert.equal(mapped.lastSyncOrigin, "scheduled");
     assert.equal(mapped.lastSyncStatus, "success");
     assert.equal(mapped.syncHistory[0].status, "success");
     assert.equal(mapped.syncCadenceMinutes, 120);
@@ -292,6 +298,10 @@ describe("integration mappers", () => {
         importStrategy: "statement-upload",
         lastDetectedProviderSummary: "Paytm Money guided import path is available for statement PDFs and exports.",
         lastImportedFileCount: 2,
+        lastSchedulerCheckAt: "2026-07-11T09:00:00.000Z",
+        lastSchedulerMessage: "Scheduler ran 1 due connector.",
+        lastSchedulerStatus: "success",
+        lastSyncOrigin: "scheduled",
         lastSyncMessage: "Latest statement review completed.",
         lastSyncStatus: "success",
         notes: "Track broker statements",
@@ -358,10 +368,12 @@ describe("import job mappers", () => {
       created_transactions: 0,
       error_message: null,
       id: "job-1",
-      import_document_id: null,
+      import_document_id: "document-1",
       job_payload: {
         attemptCount: 2,
+        documentId: "document-1",
         documentKind: "pdf-statement",
+        documentStoragePath: "import-documents/document-1/cams.pdf",
         duplicateCount: 1,
         fileName: "cams.pdf",
         lastActionAt: "2026-07-11T01:00:00.000Z",
@@ -382,6 +394,8 @@ describe("import job mappers", () => {
 
     assert.equal(mapped.assetCount, 4);
     assert.equal(mapped.attemptCount, 2);
+    assert.equal(mapped.documentId, "document-1");
+    assert.equal(mapped.documentStoragePath, "import-documents/document-1/cams.pdf");
     assert.equal(mapped.fileName, "cams.pdf");
     assert.equal(mapped.parserProfileId, "cams");
     assert.equal(mapped.status, "completed");
@@ -390,10 +404,12 @@ describe("import job mappers", () => {
       created_assets: 4,
       created_transactions: 0,
       error_message: null,
-      import_document_id: null,
+      import_document_id: "document-1",
       job_payload: {
         attemptCount: 2,
+        documentId: "document-1",
         documentKind: "pdf-statement",
+        documentStoragePath: "import-documents/document-1/cams.pdf",
         duplicateCount: 1,
         fileName: "cams.pdf",
         lastActionAt: "2026-07-11T01:00:00.000Z",
@@ -414,11 +430,13 @@ describe("import job mappers", () => {
     });
 
     assert.deepEqual(mapImportJobToDocumentInsert(mapped, "user-1"), {
+      id: "document-1",
       detected_provider: "cams",
       extracted_text: "Page 1 of 2\nScheme Name\tCurrent Value",
       file_name: "cams.pdf",
       file_type: "pdf-statement",
       import_status: "parsed",
+      storage_path: "import-documents/document-1/cams.pdf",
       parse_summary: {
         duplicateCount: 1,
         normalizedText: "Scheme Name\tCurrent Value",
@@ -445,6 +463,7 @@ describe("import job mappers", () => {
       file_type: "pdf-statement",
       id: "document-1",
       import_status: "needs_review",
+      storage_path: "import-documents/document-1/paytm.pdf",
       parse_summary: {
         duplicateCount: 2,
         normalizedText: "normalized statement text",
@@ -461,6 +480,8 @@ describe("import job mappers", () => {
     });
 
     assert.equal(mapped.id, "document-1");
+    assert.equal(mapped.documentId, "document-1");
+    assert.equal(mapped.documentStoragePath, "import-documents/document-1/paytm.pdf");
     assert.equal(mapped.fileName, "paytm.pdf");
     assert.equal(mapped.status, "reviewed");
     assert.equal(mapped.assetCount, 3);

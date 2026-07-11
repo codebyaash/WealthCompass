@@ -9,6 +9,7 @@ import {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const preferredSource = url.searchParams.get("source");
+  const forceRefresh = url.searchParams.get("refresh") === "force";
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
   if (preferredSource === "fallback") {
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const snapshot = await fetchMarketSnapshot(apiKey);
+    const snapshot = await fetchMarketSnapshot(apiKey, { forceRefresh });
     return NextResponse.json(snapshot);
   } catch (error) {
     const message =

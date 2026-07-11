@@ -6,25 +6,43 @@ import {
 } from "../lib/provider-sync-adapters";
 import type { IntegrationConnection } from "../lib/local-storage";
 
+function createTestConnection(
+  overrides: Partial<IntegrationConnection>,
+): IntegrationConnection {
+  return {
+    channel: "broker",
+    id: "integration-test",
+    importStrategy: "statement-upload",
+    lastDetectedProviderSummary: "",
+    lastImportedFileCount: 0,
+    lastSchedulerCheckAt: null,
+    lastSchedulerMessage: "Scheduler has not checked this source yet.",
+    lastSchedulerStatus: "idle",
+    lastSyncAt: null,
+    lastSyncOrigin: null,
+    lastSyncMessage: "No sync has run yet.",
+    lastSyncStatus: "idle",
+    notes: "",
+    providerId: "custom-connection",
+    providerName: "Custom connection",
+    sourceHint: "Document how this source should be imported.",
+    status: "active",
+    syncHistory: [],
+    syncCadenceMinutes: 720,
+    ...overrides,
+  };
+}
+
 describe("buildProviderSyncPreview", () => {
   it("returns a guided statement pipeline for broker statement uploads", () => {
-    const preview = buildProviderSyncPreview({
+    const preview = buildProviderSyncPreview(createTestConnection({
       channel: "broker",
       id: "integration-paytm-money",
       importStrategy: "statement-upload",
-      lastDetectedProviderSummary: "",
-      lastImportedFileCount: 0,
-      lastSyncAt: null,
-      lastSyncMessage: "No sync has run yet.",
-      lastSyncStatus: "idle",
-      notes: "",
       providerId: "paytm-money",
       providerName: "Paytm Money",
       sourceHint: "Upload account statements or CSV exports first.",
-      status: "active",
-      syncHistory: [],
-      syncCadenceMinutes: 720,
-    } satisfies IntegrationConnection);
+    }));
 
     assert.equal(preview.providerId, "paytm-money");
     assert.equal(preview.connectorStatus, "manual");
@@ -33,23 +51,15 @@ describe("buildProviderSyncPreview", () => {
   });
 
   it("returns a ready email flow for email-forward connectors", () => {
-    const preview = buildProviderSyncPreview({
+    const preview = buildProviderSyncPreview(createTestConnection({
       channel: "email",
       id: "integration-email-forward",
       importStrategy: "email-forward",
-      lastDetectedProviderSummary: "",
-      lastImportedFileCount: 0,
-      lastSyncAt: null,
-      lastSyncMessage: "No sync has run yet.",
-      lastSyncStatus: "idle",
-      notes: "",
       providerId: "email-forward",
       providerName: "Email Forward",
       sourceHint: "Forward broker statements to yourself and paste or upload them here.",
-      status: "active",
-      syncHistory: [],
       syncCadenceMinutes: 1440,
-    } satisfies IntegrationConnection);
+    }));
 
     assert.equal(preview.connectorStatus, "ready");
     assert.equal(preview.recommendedFiles[0], "Forwarded email body");
@@ -57,23 +67,15 @@ describe("buildProviderSyncPreview", () => {
   });
 
   it("returns structured execution output for email-forward connectors", () => {
-    const execution = executeProviderSync({
+    const execution = executeProviderSync(createTestConnection({
       channel: "email",
       id: "integration-email-forward",
       importStrategy: "email-forward",
-      lastDetectedProviderSummary: "",
-      lastImportedFileCount: 0,
-      lastSyncAt: null,
-      lastSyncMessage: "No sync has run yet.",
-      lastSyncStatus: "idle",
-      notes: "",
       providerId: "email-forward",
       providerName: "Email Forward",
       sourceHint: "Forward broker statements to yourself and paste or upload them here.",
-      status: "active",
-      syncHistory: [],
       syncCadenceMinutes: 1440,
-    } satisfies IntegrationConnection);
+    }));
 
     assert.equal(execution.connectorStatus, "ready");
     assert.equal(execution.importedFileCount, 2);
@@ -86,23 +88,15 @@ describe("buildProviderSyncPreview", () => {
 
   it("uses provided source text to produce live execution artifacts", () => {
     const execution = executeProviderSync(
-      {
+      createTestConnection({
         channel: "email",
         id: "integration-email-forward",
         importStrategy: "email-forward",
-        lastDetectedProviderSummary: "",
-        lastImportedFileCount: 0,
-        lastSyncAt: null,
-        lastSyncMessage: "No sync has run yet.",
-        lastSyncStatus: "idle",
-        notes: "",
         providerId: "email-forward",
         providerName: "Email Forward",
         sourceHint: "Forward broker statements to yourself and paste or upload them here.",
-        status: "active",
-        syncHistory: [],
         syncCadenceMinutes: 1440,
-      } satisfies IntegrationConnection,
+      }),
       {
         fileName: "forwarded-statement.txt",
         sourceText:
@@ -117,23 +111,15 @@ describe("buildProviderSyncPreview", () => {
   });
 
   it("returns deferred execution artifacts for sync-ready connectors", () => {
-    const execution = executeProviderSync({
+    const execution = executeProviderSync(createTestConnection({
       channel: "broker",
       id: "integration-direct",
       importStrategy: "sync-ready",
-      lastDetectedProviderSummary: "",
-      lastImportedFileCount: 0,
-      lastSyncAt: null,
-      lastSyncMessage: "No sync has run yet.",
-      lastSyncStatus: "idle",
-      notes: "",
       providerId: "paytm-money",
       providerName: "Paytm Money Direct",
       sourceHint: "Reserve auth for direct account access.",
-      status: "active",
-      syncHistory: [],
       syncCadenceMinutes: 60,
-    } satisfies IntegrationConnection);
+    }));
 
     assert.equal(execution.connectorStatus, "planned");
     assert.equal(execution.importedFileCount, 0);

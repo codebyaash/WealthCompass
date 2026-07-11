@@ -46,6 +46,8 @@ describe("createImportJobFromReview", () => {
 
     assert.equal(job.providerId, "paytm-money");
     assert.equal(job.assetCount, 3);
+    assert.equal(job.documentId.length > 0, true);
+    assert.match(job.documentStoragePath ?? "", /import-documents\/.+\/paytm-money\.pdf/);
     assert.equal(job.duplicateCount, 1);
     assert.match(job.notes, /Collapsed extra whitespace/);
     assert.equal(job.normalizedText, "");

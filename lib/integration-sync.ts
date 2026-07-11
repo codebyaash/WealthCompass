@@ -47,6 +47,28 @@ export type IntegrationSchedulerPlan = {
   readyCount: number;
 };
 
+export type IntegrationSyncBatchMode = "all-active" | "due" | "single";
+export type IntegrationSyncBatchOrigin = "manual" | "scheduled";
+
+export type IntegrationSyncBatchResult = {
+  executedAt: string;
+  importJobs: ImportJob[];
+  integrations: IntegrationConnection[];
+  mode: IntegrationSyncBatchMode;
+  skippedConnectionIds: string[];
+  syncedConnectionIds: string[];
+};
+
+export function resolveScheduledSyncUserIds(
+  requestedUserIds: string[] = [],
+  configuredUserIds = "",
+) {
+  return [...new Set([
+    ...requestedUserIds,
+    ...configuredUserIds.split(","),
+  ].map((value) => value.trim()).filter(Boolean))];
+}
+
 export function createIntegrationSyncEvent(
   connection: IntegrationConnection,
   now = new Date(),
@@ -261,6 +283,123 @@ export function buildIntegrationSchedulerPlan(
     nextRunAt: activeEntries.find((entry) => entry.nextRunAt)?.nextRunAt ?? null,
     pausedCount: entries.filter((entry) => entry.status === "paused").length,
     readyCount: activeEntries.filter((entry) => entry.stateLabel === "Ready").length,
+  };
+}
+
+export function executeIntegrationSyncBatch(
+  integrations: IntegrationConnection[],
+  {
+    connectionId,
+    importJobs = [],
+    mode = "all-active",
+    now = new Date(),
+    origin = "manual",
+  }: {
+    connectionId?: string;
+    importJobs?: ImportJob[];
+    mode?: IntegrationSyncBatchMode;
+    now?: Date;
+    origin?: IntegrationSyncBatchOrigin;
+  } = {},
+): IntegrationSyncBatchResult {
+  const schedulerPlan = buildIntegrationSchedulerPlan(integrations, now);
+  const activeIds = new Set(
+    integrations
+      .filter((integration) => integration.status === "active")
+      .map((integration) => integration.id),
+  );
+  const dueIds = new Set(
+    schedulerPlan.entries
+      .filter((entry) => entry.shouldRunNow)
+      .map((entry) => entry.id),
+  );
+
+  const targetIds = new Set(
+    integrations
+      .filter((integration) => {
+        if (!activeIds.has(integration.id)) return false;
+        if (mode === "single") return integration.id === connectionId;
+        if (mode === "due") return dueIds.has(integration.id);
+        return true;
+      })
+      .map((integration) => integration.id),
+  );
+
+  const skippedConnectionIds = integrations
+    .filter((integration) => {
+      if (mode === "single" && integration.id !== connectionId) return false;
+      if (mode === "due" && !dueIds.has(integration.id)) return false;
+      if (mode === "all-active" && integration.status !== "active") return false;
+      return !targetIds.has(integration.id);
+    })
+    .map((integration) => integration.id);
+
+  const executionById = new Map(
+    integrations
+      .filter((integration) => targetIds.has(integration.id))
+      .map((integration) => [integration.id, executeProviderSync(integration)]),
+  );
+  const executedAt = now.toISOString();
+  const schedulerMessage =
+    targetIds.size === 0
+      ? "Scheduler checked this source and nothing was due."
+      : targetIds.size === 1
+        ? "Scheduler ran 1 due connector."
+        : `Scheduler ran ${targetIds.size} due connectors.`;
+
+  const nextIntegrations = integrations.map((integration) => {
+    const execution = executionById.get(integration.id);
+
+    if (!execution) {
+      if (origin !== "scheduled") return integration;
+
+      return {
+        ...integration,
+        lastSchedulerCheckAt: executedAt,
+        lastSchedulerMessage: schedulerMessage,
+        lastSchedulerStatus: "idle" as const,
+      };
+    }
+
+    const event = createIntegrationSyncEvent(integration, now, execution);
+
+    return {
+      ...integration,
+      lastSchedulerCheckAt: origin === "scheduled" ? executedAt : integration.lastSchedulerCheckAt,
+      lastSchedulerMessage:
+        origin === "scheduled"
+          ? schedulerMessage
+          : integration.lastSchedulerMessage,
+      lastSchedulerStatus:
+        origin === "scheduled"
+          ? ("success" as const)
+          : integration.lastSchedulerStatus,
+      lastSyncOrigin: origin,
+      ...buildIntegrationSyncTelemetry(integration, now, execution),
+      syncHistory: appendIntegrationSyncEvent(integration, event),
+    };
+  });
+
+  const nextImportJobs = [
+    ...integrations
+      .filter((integration) => targetIds.has(integration.id))
+      .map((integration) =>
+        createSyncImportJob(
+          integration,
+          now,
+          executionById.get(integration.id),
+        ),
+      ),
+    ...importJobs,
+  ].slice(0, 20);
+
+  return {
+    executedAt,
+    importJobs: nextImportJobs,
+    integrations: nextIntegrations,
+    mode,
+    skippedConnectionIds,
+    syncedConnectionIds: [...targetIds],
   };
 }
 

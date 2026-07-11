@@ -259,6 +259,20 @@ data modeling.
 - Moved Settings and Data Controls into `components/wealth/data-settings.tsx`
 - Kept workspace export, import, reset controls, and export preview together
 
+## Phase 33: Scheduled Connector Sync
+
+- Added a protected scheduled sync route at `/api/integration-sync/scheduled`
+- Added batch execution for due connector checkpoints using server-side cloud state
+- Added `vercel.json` cron wiring for a 30-minute sync cadence
+- Added `.env.example` entries for Supabase admin access, market data, cron auth, and scheduled user IDs
+- Kept manual sync and sync-plan preview flows working alongside the new automatic path
+
+## Scheduled Sync Env
+
+- `CRON_SECRET`: shared secret used by the scheduled sync route
+- `WEALTHCOMPASS_SYNC_USER_IDS`: comma-separated Supabase user IDs to include in automatic connector runs
+- `SUPABASE_SERVICE_ROLE_KEY`: required so scheduled syncs can load and save cloud snapshots without a browser session
+
 ## Phase 33: Import Review Layer
 
 - Added provider-aware import review for uploaded statements and pasted email text

@@ -6,11 +6,13 @@ import {
   buildIntegrationSchedulerPlan,
   createIntegrationSyncEvent,
   createSyncImportJob,
+  executeIntegrationSyncBatch,
   formatSyncTimeLabel,
   getConnectorAttentionSummary,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
+  resolveScheduledSyncUserIds,
 } from "../lib/integration-sync";
 import type { IntegrationConnection } from "../lib/local-storage";
 
@@ -20,7 +22,11 @@ const activeConnection: IntegrationConnection = {
   importStrategy: "statement-upload",
   lastDetectedProviderSummary: "",
   lastImportedFileCount: 0,
+  lastSchedulerCheckAt: null,
+  lastSchedulerMessage: "Scheduler has not checked this source yet.",
+  lastSchedulerStatus: "idle",
   lastSyncAt: "2026-07-11T08:00:00.000Z",
+  lastSyncOrigin: null,
   lastSyncMessage: "No sync has run yet.",
   lastSyncStatus: "idle",
   notes: "Primary broker workflow for guided statement imports.",
@@ -221,5 +227,59 @@ describe("integration sync helpers", () => {
       ["overdue-source", "ready-source"],
     );
     assert.equal(plan.nextRunAt, "2026-07-11T09:00:00.000Z");
+  });
+
+  it("executes only due connectors when running a scheduled batch", () => {
+    const result = executeIntegrationSyncBatch(
+      [
+        {
+          ...activeConnection,
+          id: "due-source",
+          lastSyncAt: "2026-07-11T07:00:00.000Z",
+          providerName: "Due Source",
+        },
+        {
+          ...activeConnection,
+          id: "future-source",
+          lastSyncAt: "2026-07-11T09:45:00.000Z",
+          providerName: "Future Source",
+        },
+        {
+          ...activeConnection,
+          id: "paused-source",
+          lastSyncAt: "2026-07-11T07:00:00.000Z",
+          providerName: "Paused Source",
+          status: "paused",
+        },
+      ],
+      {
+        importJobs: [],
+        mode: "due",
+        now: new Date("2026-07-11T10:00:00.000Z"),
+        origin: "scheduled",
+      },
+    );
+
+    assert.deepEqual(result.syncedConnectionIds, ["due-source"]);
+    assert.deepEqual(result.skippedConnectionIds, []);
+    assert.equal(result.importJobs.length, 1);
+    assert.equal(result.importJobs[0].providerName, "Due Source");
+    assert.equal(result.integrations[0].lastSyncOrigin, "scheduled");
+    assert.equal(result.integrations[0].lastSchedulerCheckAt, "2026-07-11T10:00:00.000Z");
+    assert.equal(result.integrations[0].lastSchedulerStatus, "success");
+    assert.equal(result.integrations[0].lastSyncAt, "2026-07-11T10:00:00.000Z");
+    assert.equal(result.integrations[0].syncHistory.length, 1);
+    assert.equal(result.integrations[1].lastSchedulerCheckAt, "2026-07-11T10:00:00.000Z");
+    assert.equal(result.integrations[1].lastSchedulerStatus, "idle");
+    assert.equal(result.integrations[1].lastSyncAt, "2026-07-11T09:45:00.000Z");
+  });
+
+  it("merges configured and requested user IDs for scheduled syncs", () => {
+    const userIds = resolveScheduledSyncUserIds(
+      [" user-1 ", "user-2"],
+      "user-2, user-3, , user-1",
+    );
+
+    assert.deepEqual(userIds, ["user-1", "user-2", "user-3"]);
   });
 });

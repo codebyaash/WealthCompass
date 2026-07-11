@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/integration-sync/scheduled",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}

@@ -166,6 +166,8 @@ describe("createIntegrationConnection", () => {
     });
 
     assert.equal(connection.providerName, "Gmail");
+    assert.equal(connection.lastSchedulerStatus, "idle");
+    assert.equal(connection.lastSyncOrigin, null);
     assert.equal(connection.lastSyncStatus, "idle");
     assert.deepEqual(connection.syncHistory, []);
     assert.equal(connection.status, "active");
@@ -182,6 +184,8 @@ describe("createImportJob", () => {
     });
 
     assert.equal(job.fileName, "statement.pdf");
+    assert.equal(job.documentId.length > 0, true);
+    assert.equal(job.documentStoragePath, null);
     assert.deepEqual(job.normalizationApplied, []);
     assert.equal(job.normalizedText, "");
     assert.equal(job.providerName, "CAMS");

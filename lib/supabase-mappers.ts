@@ -79,6 +79,10 @@ export type ImportSourceRow = {
     importStrategy?: IntegrationConnection["importStrategy"];
     lastDetectedProviderSummary?: string;
     lastImportedFileCount?: number;
+    lastSchedulerCheckAt?: string | null;
+    lastSchedulerMessage?: string;
+    lastSchedulerStatus?: IntegrationConnection["lastSchedulerStatus"];
+    lastSyncOrigin?: IntegrationConnection["lastSyncOrigin"];
     lastSyncMessage?: string;
     lastSyncStatus?: IntegrationConnection["lastSyncStatus"];
     notes?: string;
@@ -106,6 +110,8 @@ export type ImportJobRow = {
   id: string;
   import_document_id: string | null;
   job_payload: {
+    documentId?: string;
+    documentStoragePath?: string | null;
     fileName?: string;
     normalizationApplied?: string[];
     normalizedText?: string;
@@ -134,6 +140,7 @@ export type ImportDocumentRow = {
   file_type: string;
   id: string;
   import_status: "failed" | "needs_review" | "parsed" | "received" | null;
+  storage_path: string | null;
   parse_summary: {
     duplicateCount?: number;
     normalizedText?: string;
@@ -296,7 +303,12 @@ export function mapImportSourceRowToIntegration(
     importStrategy: row.metadata?.importStrategy ?? "statement-upload",
     lastDetectedProviderSummary: row.metadata?.lastDetectedProviderSummary ?? "",
     lastImportedFileCount: numberOrDefault(row.metadata?.lastImportedFileCount, 0),
+    lastSchedulerCheckAt: row.metadata?.lastSchedulerCheckAt ?? null,
+    lastSchedulerMessage:
+      row.metadata?.lastSchedulerMessage ?? "Scheduler has not checked this source yet.",
+    lastSchedulerStatus: row.metadata?.lastSchedulerStatus ?? "idle",
     lastSyncAt: row.last_synced_at,
+    lastSyncOrigin: row.metadata?.lastSyncOrigin ?? null,
     lastSyncMessage: row.metadata?.lastSyncMessage ?? "No sync has run yet.",
     lastSyncStatus: row.metadata?.lastSyncStatus ?? "idle",
     notes: row.metadata?.notes ?? "",
@@ -329,6 +341,10 @@ export function mapIntegrationToImportSourceInsert(
       importStrategy: integration.importStrategy,
       lastDetectedProviderSummary: integration.lastDetectedProviderSummary,
       lastImportedFileCount: integration.lastImportedFileCount,
+      lastSchedulerCheckAt: integration.lastSchedulerCheckAt,
+      lastSchedulerMessage: integration.lastSchedulerMessage,
+      lastSchedulerStatus: integration.lastSchedulerStatus,
+      lastSyncOrigin: integration.lastSyncOrigin,
       lastSyncMessage: integration.lastSyncMessage,
       lastSyncStatus: integration.lastSyncStatus,
       notes: integration.notes,
@@ -377,9 +393,11 @@ export function mapImportJobRowToJob(row: ImportJobRow): ImportJob {
     assetCount: row.created_assets ?? 0,
     attemptCount: row.job_payload?.attemptCount ?? 1,
     createdAt: row.created_at,
+    documentId: row.job_payload?.documentId ?? row.import_document_id ?? crypto.randomUUID(),
     documentKind:
       row.job_payload?.documentKind ??
       (row.import_document_id ? "document-import" : "unclassified"),
+    documentStoragePath: row.job_payload?.documentStoragePath ?? null,
     duplicateCount: row.job_payload?.duplicateCount ?? 0,
     fileName: row.job_payload?.fileName ?? row.import_document_id ?? "import-job",
     id: row.id,
@@ -412,10 +430,12 @@ export function mapImportJobToInsert(
     created_assets: job.assetCount,
     created_transactions: 0,
     error_message: job.status === "failed" ? job.notes || job.summary : null,
-    import_document_id: null,
+    import_document_id: job.documentId,
     job_payload: {
       attemptCount: job.attemptCount,
+      documentId: job.documentId,
       documentKind: job.documentKind,
+      documentStoragePath: job.documentStoragePath,
       duplicateCount: job.duplicateCount,
       fileName: job.fileName,
       lastActionAt: job.lastActionAt,
@@ -441,7 +461,9 @@ export function mapImportDocumentRowToJob(row: ImportDocumentRow): ImportJob {
     assetCount: numberOrDefault(row.parse_summary?.selectedAssetCount, 0),
     attemptCount: 1,
     createdAt: row.created_at,
+    documentId: row.id,
     documentKind: row.file_type,
+    documentStoragePath: row.storage_path,
     duplicateCount: numberOrDefault(row.parse_summary?.duplicateCount, 0),
     fileName: row.file_name,
     id: row.id,
@@ -464,11 +486,13 @@ export function mapImportDocumentRowToJob(row: ImportDocumentRow): ImportJob {
 
 export function mapImportJobToDocumentInsert(job: ImportJob, userId: string) {
   return {
+    id: job.documentId,
     detected_provider: job.providerId,
     extracted_text: job.rawText,
     file_name: job.fileName,
     file_type: job.documentKind,
     import_status: mapImportJobStatusToDocumentStatus(job.status),
+    storage_path: job.documentStoragePath,
     parse_summary: {
       duplicateCount: job.duplicateCount,
       normalizedText: job.normalizedText,

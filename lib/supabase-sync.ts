@@ -73,7 +73,7 @@ export async function loadCloudSnapshot(
       .returns<ImportJobRow[]>(),
     supabase
       .from("import_documents")
-      .select("id, file_name, file_type, detected_provider, import_status, extracted_text, parse_summary, created_at")
+      .select("id, file_name, file_type, storage_path, detected_provider, import_status, extracted_text, parse_summary, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .returns<ImportDocumentRow[]>(),

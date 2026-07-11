@@ -48,6 +48,10 @@ export type IntegrationChannel = "broker" | "email" | "file" | "registrar";
 
 export type IntegrationStatus = "active" | "paused" | "error";
 
+export type IntegrationSyncOrigin = "manual" | "scheduled";
+
+export type IntegrationSchedulerStatus = "error" | "idle" | "success";
+
 export type IntegrationImportStrategy =
   | "csv-upload"
   | "email-forward"
@@ -69,7 +73,11 @@ export type IntegrationConnection = {
   importStrategy: IntegrationImportStrategy;
   lastDetectedProviderSummary: string;
   lastImportedFileCount: number;
+  lastSchedulerCheckAt: string | null;
+  lastSchedulerMessage: string;
+  lastSchedulerStatus: IntegrationSchedulerStatus;
   lastSyncAt: string | null;
+  lastSyncOrigin: IntegrationSyncOrigin | null;
   lastSyncMessage: string;
   lastSyncStatus: "error" | "idle" | "success" | "warning";
   notes: string;
@@ -94,7 +102,9 @@ export type ImportJob = {
   assetCount: number;
   attemptCount: number;
   createdAt: string;
+  documentId: string;
   documentKind: string;
+  documentStoragePath: string | null;
   duplicateCount: number;
   fileName: string;
   id: string;
@@ -359,7 +369,11 @@ export function createIntegrationConnection(
     importStrategy: "statement-upload",
     lastDetectedProviderSummary: "",
     lastImportedFileCount: 0,
+    lastSchedulerCheckAt: null,
+    lastSchedulerMessage: "Scheduler has not checked this source yet.",
+    lastSchedulerStatus: "idle",
     lastSyncAt: null,
+    lastSyncOrigin: null,
     lastSyncMessage: "No sync has run yet.",
     lastSyncStatus: "idle",
     notes: "",
@@ -380,7 +394,9 @@ export function createImportJob(
     assetCount: 0,
     attemptCount: 1,
     createdAt: new Date().toISOString(),
+    documentId: crypto.randomUUID(),
     documentKind: "unclassified",
+    documentStoragePath: null,
     duplicateCount: 0,
     fileName: "manual-import.txt",
     id: crypto.randomUUID(),
@@ -492,9 +508,27 @@ function normalizeIntegrations(value: unknown): IntegrationConnection[] | null {
       ) as IntegrationImportStrategy,
       lastDetectedProviderSummary: stringOrDefault(integration.lastDetectedProviderSummary, ""),
       lastImportedFileCount: numberOrDefault(integration.lastImportedFileCount, 0),
+      lastSchedulerCheckAt:
+        typeof integration.lastSchedulerCheckAt === "string" &&
+        integration.lastSchedulerCheckAt.trim()
+          ? integration.lastSchedulerCheckAt
+          : null,
+      lastSchedulerMessage: stringOrDefault(
+        integration.lastSchedulerMessage,
+        "Scheduler has not checked this source yet.",
+      ),
+      lastSchedulerStatus: enumOrDefault(
+        integration.lastSchedulerStatus,
+        ["idle", "success", "error"],
+        "idle",
+      ) as IntegrationSchedulerStatus,
       lastSyncAt:
         typeof integration.lastSyncAt === "string" && integration.lastSyncAt.trim()
           ? integration.lastSyncAt
+          : null,
+      lastSyncOrigin:
+        integration.lastSyncOrigin === "manual" || integration.lastSyncOrigin === "scheduled"
+          ? integration.lastSyncOrigin
           : null,
       lastSyncMessage: stringOrDefault(integration.lastSyncMessage, "No sync has run yet."),
       lastSyncStatus: enumOrDefault(
@@ -541,7 +575,12 @@ function normalizeImportJobs(value: unknown): ImportJob[] | null {
       assetCount: numberOrDefault(job.assetCount, 0),
       attemptCount: numberOrDefault(job.attemptCount, 1),
       createdAt: stringOrDefault(job.createdAt, new Date().toISOString()),
+      documentId: stringOrDefault(job.documentId, crypto.randomUUID()),
       documentKind: stringOrDefault(job.documentKind, "unclassified"),
+      documentStoragePath:
+        typeof job.documentStoragePath === "string" && job.documentStoragePath.trim()
+          ? job.documentStoragePath
+          : null,
       duplicateCount: numberOrDefault(job.duplicateCount, 0),
       fileName: stringOrDefault(job.fileName, "manual-import.txt"),
       id: stringOrDefault(job.id, crypto.randomUUID()),

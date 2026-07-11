@@ -34,6 +34,9 @@ import {
   describeReadiness,
   importSourceDescriptors,
 } from "@/lib/import-sources";
+import type {
+  EmailIngestionResult,
+} from "@/lib/email-ingestion";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
 import {
   buildIntegrationSchedulerPlan,
@@ -69,6 +72,7 @@ export function DataSettings({
   onImportWorkspace,
   onAddIntegration,
   onDeleteIntegration,
+  onLogImportJob,
   onReprocessImportJob,
   onResetPortfolio,
   onRestoreDemoWorkspace,
@@ -92,6 +96,7 @@ export function DataSettings({
   onImportWorkspace: (workspace: WealthCompassImport) => void;
   onAddIntegration: (connection: IntegrationConnection) => void;
   onDeleteIntegration: (connectionId: string) => void;
+  onLogImportJob: (job: ImportJob) => void;
   onReprocessImportJob: (jobId: string) => void;
   onResetPortfolio: () => void;
   onRestoreDemoWorkspace: () => void;
@@ -118,6 +123,12 @@ export function DataSettings({
     }),
   );
   const [editingIntegrationId, setEditingIntegrationId] = useState<string | null>(null);
+  const [emailAttachmentFileName, setEmailAttachmentFileName] = useState("statement-attachment.txt");
+  const [emailAttachmentText, setEmailAttachmentText] = useState("");
+  const [emailBodyText, setEmailBodyText] = useState("");
+  const [emailFrom, setEmailFrom] = useState(userEmail || "statements@example.com");
+  const [emailIntakeResult, setEmailIntakeResult] = useState<EmailIngestionResult | null>(null);
+  const [emailSubject, setEmailSubject] = useState("Monthly statement attached");
   const [importJson, setImportJson] = useState("");
   const [syncInputFileName, setSyncInputFileName] = useState("");
   const [syncInputText, setSyncInputText] = useState("");
@@ -265,6 +276,40 @@ export function DataSettings({
     }
   }
 
+  async function handleIngestEmail() {
+    try {
+      const response = await fetch("/api/email-ingest", {
+        body: JSON.stringify({
+          attachments: emailAttachmentText.trim()
+            ? [
+                {
+                  fileName: emailAttachmentFileName.trim() || "statement-attachment.txt",
+                  text: emailAttachmentText,
+                },
+              ]
+            : [],
+          bodyText: emailBodyText,
+          from: emailFrom.trim() || "statements@example.com",
+          subject: emailSubject.trim() || "Forwarded statement",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Email intake route unavailable.");
+      }
+
+      const result = (await response.json()) as EmailIngestionResult;
+      setEmailIntakeResult(result);
+      onLogImportJob(result.job);
+      setActionMessage(`Email intake captured through ${result.sourceType} input.`);
+    } catch {
+      setEmailIntakeResult(null);
+      setActionMessage("Could not ingest the email payload right now.");
+    }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
       <Card>
@@ -397,6 +442,67 @@ export function DataSettings({
                   Each imported file can now be analyzed for provider cues, OCR use, and statement quality before holdings are merged.
                 </p>
               </div>
+            </div>
+
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <p className="text-sm font-medium">Email ingestion simulator</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Mirror the future forwarding webhook path by sending sender, subject, body text, and one extracted attachment payload through the email intake route.
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void handleIngestEmail()}>
+                  <Mail className="h-4 w-4" />
+                  Ingest email
+                </Button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <TextField label="From" value={emailFrom} onChange={setEmailFrom} />
+                <TextField label="Subject" value={emailSubject} onChange={setEmailSubject} />
+              </div>
+              <TextField
+                label="Attachment file name"
+                value={emailAttachmentFileName}
+                onChange={setEmailAttachmentFileName}
+              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-2">
+                  <p className="text-sm font-medium">Email body</p>
+                  <textarea
+                    className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="Forwarded message&#10;Subject: Monthly statement&#10;Statement attached..."
+                    value={emailBodyText}
+                    onChange={(event) => setEmailBodyText(event.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <p className="text-sm font-medium">Attachment text</p>
+                  <textarea
+                    className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="Scheme Name&#9;Current Value&#9;Invested Value&#9;Units"
+                    value={emailAttachmentText}
+                    onChange={(event) => setEmailAttachmentText(event.target.value)}
+                  />
+                </div>
+              </div>
+              {emailIntakeResult ? (
+                <div className="grid gap-3 rounded-md border bg-background p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">{emailIntakeResult.review.detectedSource?.name ?? "Unknown provider"}</Badge>
+                    <Badge variant="outline">{emailIntakeResult.sourceType}</Badge>
+                    <Badge variant="outline">{emailIntakeResult.review.documentKind}</Badge>
+                    <Badge variant="outline">{emailIntakeResult.review.parseReadiness}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{emailIntakeResult.review.summary}</p>
+                  <div className="grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
+                    <span>Chosen input {emailIntakeResult.chosenInputLabel}</span>
+                    <span>Parsed assets {emailIntakeResult.job.assetCount}</span>
+                    <span>Warnings {emailIntakeResult.job.rowWarnings.length}</span>
+                    <span>Document {emailIntakeResult.job.documentId}</span>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid gap-2 md:grid-cols-2">
@@ -538,9 +644,13 @@ export function DataSettings({
                           )}
                           <p className="text-[11px] text-muted-foreground">
                             Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}
+                            {integration.lastSyncOrigin ? ` · ${integration.lastSyncOrigin}` : ""}
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             Result {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Scheduler {integration.lastSchedulerStatus} · {integration.lastSchedulerCheckAt ? new Date(integration.lastSchedulerCheckAt).toLocaleString() : "not checked yet"}
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             Success {healthMetrics.successRate}% · avg files {healthMetrics.averageImportedFiles.toFixed(1)}
@@ -557,6 +667,9 @@ export function DataSettings({
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             {integration.lastSyncMessage}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {integration.lastSchedulerMessage}
                           </p>
                           {integration.lastDetectedProviderSummary && (
                             <p className="text-[11px] text-muted-foreground">
@@ -952,6 +1065,8 @@ function ImportJobCard({
             <p className="text-xs font-medium text-foreground">Document archive</p>
           </div>
           <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
+            <span>Document {job.documentId}</span>
+            <span>Storage {job.documentStoragePath ?? "not reserved yet"}</span>
             <span>Raw text {documentMetrics.rawLength} chars</span>
             <span>Normalized {documentMetrics.normalizedLength} chars</span>
             <span>Warnings {job.rowWarnings.length}</span>

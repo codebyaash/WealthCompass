@@ -32,6 +32,8 @@ export type HoldingWatchItem = {
 };
 
 type AlphaVantageDailyResponse = {
+  "Error Message"?: string;
+  "Information"?: string;
   "Meta Data"?: {
     "3. Last Refreshed"?: string;
   };
@@ -48,6 +50,23 @@ type MarketProxy = {
   fallbackChange: number;
   signal: string;
   symbol: string;
+};
+
+type FetchMarketSnapshotOptions = {
+  fetchDaily?: (symbol: string, apiKey: string) => Promise<AlphaVantageDailyResponse>;
+  forceRefresh?: boolean;
+  now?: number;
+};
+
+type CachedMarketSnapshot = {
+  fetchedAt: number;
+  snapshot: MarketSnapshotResponse;
+  staleUntil: number;
+};
+
+type CachedDailySeries = {
+  expiresAt: number;
+  response: AlphaVantageDailyResponse;
 };
 
 const marketProxyRules: Array<{
@@ -163,6 +182,12 @@ const fallbackSectors: SectorMove[] = [
   { name: "Pharma", value: 0.6 },
 ];
 
+const ALPHA_VANTAGE_DAILY_TTL_MS = 15 * 60_000;
+const MARKET_SNAPSHOT_TTL_MS = 5 * 60_000;
+const MARKET_SNAPSHOT_STALE_MS = 60 * 60_000;
+const alphaVantageDailyCache = new Map<string, CachedDailySeries>();
+const marketSnapshotCache = new Map<string, CachedMarketSnapshot>();
+
 export function calculateMarketSentiment(snapshot: MarketTile[]) {
   const sentimentScore = Math.round(50 + snapshot.reduce((sum, item) => sum + item.change, 0) * 8);
   const sentiment =
@@ -230,7 +255,14 @@ export function parseAlphaVantageDailySeries({
   };
 }
 
-export async function fetchMarketSnapshot(apiKey: string) {
+export async function fetchMarketSnapshot(
+  apiKey: string,
+  {
+    fetchDaily = fetchAlphaVantageDaily,
+    forceRefresh = false,
+    now = Date.now(),
+  }: FetchMarketSnapshotOptions = {},
+) {
   const snapshotSources = [
     { label: "Global Equities", signal: "Broad market check", symbol: "SPY" },
     { label: "Financials", signal: "Rate-sensitive pulse", symbol: "XLF" },
@@ -245,24 +277,39 @@ export async function fetchMarketSnapshot(apiKey: string) {
     { label: "Pharma", symbol: "XLV" },
   ];
 
-  const snapshot = await Promise.all(
-    snapshotSources.map(async (item) => {
-      const response = await fetchAlphaVantageDaily(item.symbol, apiKey);
+  const cachedSnapshot = marketSnapshotCache.get(apiKey);
 
-      return parseAlphaVantageDailySeries({
+  if (!forceRefresh && cachedSnapshot && cachedSnapshot.fetchedAt + MARKET_SNAPSHOT_TTL_MS > now) {
+    return cachedSnapshot.snapshot;
+  }
+
+  const uniqueSymbols = [...new Set([
+    ...snapshotSources.map((item) => item.symbol),
+    ...sectorSources.map((item) => item.symbol),
+  ])];
+
+  try {
+    const responses = new Map(
+      await Promise.all(
+        uniqueSymbols.map(async (symbol) => [
+          symbol,
+          await fetchDaily(symbol, apiKey),
+        ] as const),
+      ),
+    );
+
+    const snapshot = snapshotSources.map((item) =>
+      parseAlphaVantageDailySeries({
         label: item.label,
-        response,
+        response: responses.get(item.symbol) ?? {},
         signal: item.signal,
-      });
-    }),
-  );
+      }),
+    );
 
-  const sectors = await Promise.all(
-    sectorSources.map(async (item) => {
-      const response = await fetchAlphaVantageDaily(item.symbol, apiKey);
+    const sectors = sectorSources.map((item) => {
       const parsed = parseAlphaVantageDailySeries({
         label: item.label,
-        response,
+        response: responses.get(item.symbol) ?? {},
         signal: item.label,
       });
 
@@ -270,21 +317,41 @@ export async function fetchMarketSnapshot(apiKey: string) {
         name: item.label,
         value: parsed.change,
       };
-    }),
-  );
+    });
 
-  const { sentiment, sentimentScore } = calculateMarketSentiment(snapshot);
+    const { sentiment, sentimentScore } = calculateMarketSentiment(snapshot);
+    const nextSnapshot = {
+      holdingsWatch: [],
+      message: forceRefresh
+        ? "Fresh live market snapshot loaded from Alpha Vantage."
+        : "Live market snapshot loaded from Alpha Vantage.",
+      sectors,
+      sentiment,
+      sentimentScore,
+      snapshot,
+      source: "alpha-vantage",
+      updatedAt:
+        snapshot.map((item) => item.updatedAt).sort().at(-1) ?? new Date(now).toISOString(),
+    } satisfies MarketSnapshotResponse;
 
-  return {
-    holdingsWatch: [],
-    message: "Live market snapshot loaded from Alpha Vantage.",
-    sectors,
-    sentiment,
-    sentimentScore,
-    snapshot,
-    source: "alpha-vantage",
-    updatedAt: snapshot.map((item) => item.updatedAt).sort().at(-1) ?? new Date().toISOString(),
-  };
+    marketSnapshotCache.set(apiKey, {
+      fetchedAt: now,
+      snapshot: nextSnapshot,
+      staleUntil: now + MARKET_SNAPSHOT_STALE_MS,
+    });
+
+    return nextSnapshot;
+  } catch (error) {
+    if (cachedSnapshot && cachedSnapshot.staleUntil > now) {
+      return {
+        ...cachedSnapshot.snapshot,
+        message: `${getMarketErrorMessage(error)} Showing the latest cached live snapshot while Alpha Vantage recovers.`,
+        source: "alpha-vantage-cached",
+      } satisfies MarketSnapshotResponse;
+    }
+
+    throw error;
+  }
 }
 
 export async function buildHoldingsWatch(
@@ -362,16 +429,53 @@ function fallbackChangeForAsset(asset: PortfolioAsset) {
 }
 
 async function fetchAlphaVantageDaily(symbol: string, apiKey: string) {
+  const cacheKey = `${apiKey}:${symbol}`;
+  const now = Date.now();
+  const cached = alphaVantageDailyCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.response;
+  }
+
   const url = new URL("https://www.alphavantage.co/query");
   url.searchParams.set("function", "TIME_SERIES_DAILY");
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("apikey", apiKey);
 
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(8_000),
+  });
 
   if (!response.ok) {
     throw new Error(`Market request failed for ${symbol}.`);
   }
 
-  return (await response.json()) as AlphaVantageDailyResponse;
+  const payload = (await response.json()) as AlphaVantageDailyResponse;
+
+  if (payload.Note?.trim()) {
+    throw new Error("Alpha Vantage rate limit reached.");
+  }
+
+  if (payload.Information?.trim()) {
+    throw new Error(payload.Information);
+  }
+
+  if (payload["Error Message"]?.trim()) {
+    throw new Error(payload["Error Message"]);
+  }
+
+  alphaVantageDailyCache.set(cacheKey, {
+    expiresAt: now + ALPHA_VANTAGE_DAILY_TTL_MS,
+    response: payload,
+  });
+
+  return payload;
+}
+
+function getMarketErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return "Live market snapshot could not be refreshed.";
 }

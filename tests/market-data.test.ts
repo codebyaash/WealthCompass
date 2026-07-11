@@ -4,6 +4,7 @@ import {
   buildHoldingsWatch,
   buildFallbackMarketResponse,
   calculateMarketSentiment,
+  fetchMarketSnapshot,
   inferMarketProxyForAsset,
   inferMarketSymbolForAsset,
   parseAlphaVantageDailySeries,
@@ -148,5 +149,61 @@ describe("buildHoldingsWatch", () => {
     assert.equal(watch.length, 1);
     assert.equal(watch[0]?.mappedSymbol, "GLD");
     assert.equal(watch[0]?.signal, "Gold proxy");
+  });
+});
+
+describe("fetchMarketSnapshot", () => {
+  it("deduplicates repeated Alpha Vantage symbols within one snapshot build", async () => {
+    const requestedSymbols: string[] = [];
+    const response = {
+      "Meta Data": {
+        "3. Last Refreshed": "2026-07-11",
+      },
+      "Time Series (Daily)": {
+        "2026-07-11": { "4. close": "101.00" },
+        "2026-07-10": { "4. close": "100.00" },
+      },
+    };
+
+    await fetchMarketSnapshot("test-key-dedupe", {
+      fetchDaily: async (symbol) => {
+        requestedSymbols.push(symbol);
+        return response;
+      },
+      forceRefresh: true,
+      now: 1,
+    });
+
+    assert.equal(requestedSymbols.filter((symbol) => symbol === "XLF").length, 1);
+    assert.equal(new Set(requestedSymbols).size, requestedSymbols.length);
+  });
+
+  it("returns the latest cached live snapshot when a forced refresh fails", async () => {
+    const seedResponse = {
+      "Meta Data": {
+        "3. Last Refreshed": "2026-07-11",
+      },
+      "Time Series (Daily)": {
+        "2026-07-11": { "4. close": "110.00" },
+        "2026-07-10": { "4. close": "100.00" },
+      },
+    };
+
+    await fetchMarketSnapshot("test-key-stale", {
+      fetchDaily: async () => seedResponse,
+      forceRefresh: true,
+      now: 10,
+    });
+
+    const stale = await fetchMarketSnapshot("test-key-stale", {
+      fetchDaily: async () => {
+        throw new Error("Alpha Vantage rate limit reached.");
+      },
+      forceRefresh: true,
+      now: 20,
+    });
+
+    assert.equal(stale.source, "alpha-vantage-cached");
+    assert.match(stale.message, /cached live snapshot/i);
   });
 });

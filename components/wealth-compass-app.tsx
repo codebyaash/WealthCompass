@@ -42,13 +42,9 @@ import { createImportJobFromReview } from "@/lib/import-jobs";
 import { previewPortfolioImport } from "@/lib/csv-import";
 import { buildImportDiagnostics } from "@/lib/import-diagnostics";
 import {
-  appendIntegrationSyncEvent,
-  buildIntegrationSyncTelemetry,
   getConnectorAttentionSummary,
-  createIntegrationSyncEvent,
-  createSyncImportJob,
+  executeIntegrationSyncBatch,
 } from "@/lib/integration-sync";
-import { executeProviderSync } from "@/lib/provider-sync-adapters";
 import { detectImportSource } from "@/lib/import-sources";
 import { analyzeImportDocument } from "@/lib/import-review";
 import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
@@ -454,63 +450,71 @@ export function WealthCompassApp() {
     setSyncMessage("Integration removed.");
   }
 
-  function handleRunIntegrationSync(connectionId?: string) {
-    const syncAt = new Date().toISOString();
-    const targetIds = new Set(
-      connectionId
-        ? [connectionId]
-        : safeIntegrations
-            .filter((connection) => connection.status === "active")
-            .map((connection) => connection.id),
+  async function handleRunIntegrationSync(connectionId?: string) {
+    const mode = connectionId ? "single" : "all-active";
+    const targetConnections = safeIntegrations.filter((connection) =>
+      mode === "single"
+        ? connection.id === connectionId && connection.status === "active"
+        : connection.status === "active",
     );
 
-    const syncedConnections = safeIntegrations.filter((connection) => targetIds.has(connection.id));
-
-    if (!syncedConnections.length) {
+    if (!targetConnections.length) {
       setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
       setSyncMessage("No active integration sources were available to sync.");
       return;
     }
 
-    setIntegrations((current) =>
-      current.map((connection) =>
-        targetIds.has(connection.id)
-          ? (() => {
-              const execution = executeProviderSync(connection);
-              const event = createIntegrationSyncEvent(
-                connection,
-                new Date(syncAt),
-                execution,
-              );
-              return {
-                ...connection,
-                ...buildIntegrationSyncTelemetry(
-                  connection,
-                  new Date(syncAt),
-                  execution,
-                ),
-                syncHistory: appendIntegrationSyncEvent(connection, event),
-              };
-            })()
-          : connection,
-      ),
-    );
-    setImportJobs((current) => [
-      ...syncedConnections.map((connection) =>
-        createSyncImportJob(
-          connection,
-          new Date(syncAt),
-          executeProviderSync(connection),
-        ),
-      ),
-      ...current,
-    ].slice(0, 20));
     setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
     setSyncMessage(
-      syncedConnections.length === 1
-        ? `${syncedConnections[0].providerName} sync checkpoint recorded.`
-        : `${syncedConnections.length} integration sync checkpoints recorded.`,
+      mode === "single"
+        ? `Running ${targetConnections[0].providerName} sync checkpoint.`
+        : `Running ${targetConnections.length} integration sync checkpoints.`,
     );
+
+    try {
+      const response = await fetch("/api/integration-sync", {
+        body: JSON.stringify({
+          connectionId,
+          importJobs,
+          integrations: safeIntegrations,
+          mode,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Integration sync route unavailable.");
+      }
+
+      const result = (await response.json()) as {
+        importJobs: ImportJob[];
+        integrations: IntegrationConnection[];
+        syncedConnectionIds: string[];
+      };
+
+      setIntegrations(result.integrations);
+      setImportJobs(result.importJobs);
+      setSyncMessage(
+        result.syncedConnectionIds.length === 1
+          ? `${targetConnections[0].providerName} sync checkpoint recorded.`
+          : `${result.syncedConnectionIds.length} integration sync checkpoints recorded.`,
+      );
+    } catch {
+      const fallback = executeIntegrationSyncBatch(safeIntegrations, {
+        connectionId,
+        importJobs,
+        mode,
+      });
+
+      setIntegrations(fallback.integrations);
+      setImportJobs(fallback.importJobs);
+      setSyncMessage(
+        fallback.syncedConnectionIds.length === 1
+          ? `${targetConnections[0].providerName} sync checkpoint recorded locally.`
+          : `${fallback.syncedConnectionIds.length} integration sync checkpoints recorded locally.`,
+      );
+    }
   }
 
   function handleLogImportJob(job: ImportJob) {
@@ -672,6 +676,7 @@ export function WealthCompassApp() {
               onImportWorkspace={handleImportWorkspace}
               onAddIntegration={handleAddIntegration}
               onDeleteIntegration={handleDeleteIntegration}
+              onLogImportJob={handleLogImportJob}
               onReprocessImportJob={handleReprocessImportJob}
               onResetPortfolio={handleResetPortfolio}
               onRestoreDemoWorkspace={handleRestoreDemoWorkspace}

@@ -1,6 +1,19 @@
 import { createImportJob, type ImportJob } from "./local-storage";
 import type { ImportReview } from "./import-review";
 
+export function buildImportDocumentStoragePath(
+  documentId: string,
+  fileName: string,
+) {
+  const safeFileName = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9.\-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return `import-documents/${documentId}/${safeFileName || "document.txt"}`;
+}
+
 export function createImportJobFromReview({
   assetCount,
   duplicateCount,
@@ -13,10 +26,12 @@ export function createImportJobFromReview({
   review,
   rowWarnings,
   status,
+  documentId = crypto.randomUUID(),
 }: {
   assetCount: number;
   duplicateCount: number;
   fileName: string;
+  documentId?: string;
   notes?: string;
   normalizationApplied?: string[];
   normalizedText?: string;
@@ -33,7 +48,9 @@ export function createImportJobFromReview({
 
   return createImportJob({
     assetCount,
+    documentId,
     documentKind: review.documentKind,
+    documentStoragePath: buildImportDocumentStoragePath(documentId, fileName),
     duplicateCount,
     fileName,
     lastActionAt: new Date().toISOString(),

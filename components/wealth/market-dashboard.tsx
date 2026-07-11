@@ -137,7 +137,7 @@ export function MarketDashboard({
     async function loadMarketSnapshot() {
       try {
         const response = await fetch(
-          `/api/market-snapshot?source=${marketPreferences.preferredSource}`,
+          `/api/market-snapshot?source=${marketPreferences.preferredSource}&refresh=${refreshNonce > 0 ? "force" : "auto"}`,
           { cache: "no-store" },
         );
         const data = normalizeMarketSnapshotResponse(await response.json());
@@ -400,10 +400,13 @@ export function MarketDashboard({
                   </div>
                   <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
                     <span>
-                      Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}
+                      Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}{integration.lastSyncOrigin ? ` · ${integration.lastSyncOrigin}` : ""}
                     </span>
                     <span>
                       Result {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
+                    </span>
+                    <span>
+                      Scheduler {integration.lastSchedulerStatus} · {integration.lastSchedulerCheckAt ? new Date(integration.lastSchedulerCheckAt).toLocaleString() : "not checked yet"}
                     </span>
                     <span>
                       Success {healthMetrics.successRate}% · avg files {healthMetrics.averageImportedFiles.toFixed(1)}
@@ -417,6 +420,7 @@ export function MarketDashboard({
                       {healthMetrics.warningStreak ? ` · warning streak ${healthMetrics.warningStreak}` : ""}
                     </span>
                     <span>{integration.lastSyncMessage}</span>
+                    <span>{integration.lastSchedulerMessage}</span>
                   </div>
                   <div className="mt-3 flex justify-end">
                     <Button

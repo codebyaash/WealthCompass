@@ -48,8 +48,10 @@ type TesseractModule = {
 };
 
 export type PdfExtractResult = {
+  pageCount: number;
   text: string;
   usedOcr: boolean;
+  warnings: string[];
 };
 
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
@@ -77,6 +79,7 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractResult> 
 
   try {
     const pdf = await pdfjs.getDocument({ data }).promise;
+    const pageCount = pdf.numPages;
     const pages: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -89,16 +92,29 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractResult> 
 
     if (!isLikelyScannedPdfText(text)) {
       return {
+        pageCount,
         text,
         usedOcr: false,
+        warnings: buildPdfExtractionWarnings({
+          pageCount,
+          text,
+          usedOcr: false,
+        }),
       };
     }
 
     const ocrText = await extractTextWithOcr(pdf);
+    const normalizedOcrText = ocrText.trim();
 
     return {
-      text: ocrText.trim(),
+      pageCount,
+      text: normalizedOcrText,
       usedOcr: true,
+      warnings: buildPdfExtractionWarnings({
+        pageCount,
+        text: normalizedOcrText,
+        usedOcr: true,
+      }),
     };
   } catch (error) {
     throw new Error(getPdfImportErrorMessage(error));
@@ -107,8 +123,10 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractResult> 
 
 export function isLikelyScannedPdfText(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
+  const digitCount = (normalized.match(/\d/g) ?? []).length;
+  const alphaCount = (normalized.match(/[a-z]/gi) ?? []).length;
 
-  return normalized.length < 40;
+  return normalized.length < 40 || (digitCount > 0 && alphaCount < 12);
 }
 
 export function getPdfImportErrorMessage(error: unknown) {
@@ -159,6 +177,37 @@ async function extractTextWithOcr(pdf: PdfDocument) {
   }
 
   return texts.join("\n");
+}
+
+export function buildPdfExtractionWarnings({
+  pageCount,
+  text,
+  usedOcr,
+}: {
+  pageCount: number;
+  text: string;
+  usedOcr: boolean;
+}) {
+  const warnings: string[] = [];
+  const normalized = text.replace(/\s+/g, " ").trim();
+
+  if (usedOcr) {
+    warnings.push("OCR was used, so scheme names, units, and decimal values should be checked carefully.");
+  }
+
+  if (pageCount > 3) {
+    warnings.push("Only the first 3 PDF pages are sent through OCR today, so longer statements may need a cleaner export.");
+  }
+
+  if (normalized.length < 80) {
+    warnings.push("Very little text was extracted from this PDF. A text-based statement or CSV export will import more reliably.");
+  }
+
+  if (!/\b(current value|invested value|scheme name|security name|units|nav|isin|folio)\b/i.test(normalized)) {
+    warnings.push("The extracted text does not clearly show standard holding columns yet, so review before importing.");
+  }
+
+  return warnings;
 }
 
 function groupPdfItemsIntoLines(items: PdfTextItem[]) {

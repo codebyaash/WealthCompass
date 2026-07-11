@@ -78,6 +78,69 @@ Parag Parikh Flexi Cap Fund\tEquity Mutual Fund\t100.5\t625.50\t50000`);
     assert.equal(Math.round(result.assets[0].gain), 26);
   });
 
+  it("imports dense Paytm Money statement rows without explicit delimiters", () => {
+    const result = parsePortfolioCsv(`Paytm Money portfolio
+Scheme Name Current Value Invested Value Units NAV
+Axis Bluechip Fund Direct Growth 57500 50000 123.45 465.77
+Nippon India Gold ETF 21250 20000 250 85
+Total 78750 70000`);
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.assets, [
+      importedAsset({
+        gain: 15,
+        investedValue: 50000,
+        name: "Axis Bluechip Fund Direct Growth",
+        price: 465.77,
+        quantity: 123.45,
+        source: "Paytm Money statement",
+        type: "Mutual Fund",
+        value: 57500,
+      }),
+      importedAsset({
+        gain: 6.25,
+        investedValue: 20000,
+        name: "Nippon India Gold ETF",
+        price: 85,
+        quantity: 250,
+        source: "Paytm Money statement",
+        type: "ETF",
+        value: 21250,
+      }),
+    ]);
+  });
+
+  it("imports dense Jupiter statement rows and splits name from asset class", () => {
+    const result = parsePortfolioCsv(`Jupiter portfolio snapshot
+Fund Name Asset Class Units Current NAV Invested Value Current Value
+Parag Parikh Flexi Cap Fund Equity Mutual Fund 100.5 625.5 50000 62862.75
+ICICI Prudential Liquid Fund Debt Mutual Fund 300 118 35000 35400`);
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.assets, [
+      importedAsset({
+        gain: 25.7255,
+        investedValue: 50000,
+        name: "Parag Parikh Flexi Cap Fund",
+        price: 625.5,
+        quantity: 100.5,
+        source: "Jupiter statement",
+        type: "Equity Mutual Fund",
+        value: 62862.75,
+      }),
+      importedAsset({
+        gain: 1.1428571428571428,
+        investedValue: 35000,
+        name: "ICICI Prudential Liquid Fund",
+        price: 118,
+        quantity: 300,
+        source: "Jupiter statement",
+        type: "Debt Mutual Fund",
+        value: 35400,
+      }),
+    ]);
+  });
+
   it("imports stock broker style security exports with market value aliases", () => {
     const result = parsePortfolioCsv(`Security Name,Segment,Market Value,P&L %
 RELIANCE INDUSTRIES,EQUITY,"₹2,42,000.50",(3.5%)`);

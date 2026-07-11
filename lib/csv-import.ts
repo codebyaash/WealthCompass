@@ -246,6 +246,10 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
 }
 
 function parsePortfolioStatementText(statementText: string): CsvImportResult {
+  const providerSpecificResult = parseProviderSpecificStatement(statementText);
+
+  if (providerSpecificResult.assets.length) return providerSpecificResult;
+
   const tableResult = parseStatementTable(statementText);
 
   if (tableResult.assets.length) return tableResult;
@@ -260,6 +264,25 @@ function parsePortfolioStatementText(statementText: string): CsvImportResult {
       "Paste a CSV/TSV export, email statement, or PDF-extracted statement with holding name and current value.",
     ],
   };
+}
+
+function parseProviderSpecificStatement(statementText: string): CsvImportResult {
+  const lines = statementText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const paytmHeaderIndex = lines.findIndex((line) => isPaytmMoneyHeader(line));
+  if (paytmHeaderIndex !== -1) {
+    return parsePaytmMoneyStatementLines(lines.slice(paytmHeaderIndex + 1));
+  }
+
+  const jupiterHeaderIndex = lines.findIndex((line) => isJupiterHeader(line));
+  if (jupiterHeaderIndex !== -1) {
+    return parseJupiterStatementLines(lines.slice(jupiterHeaderIndex + 1));
+  }
+
+  return { assets: [], errors: [] };
 }
 
 function parseStatementTable(statementText: string): CsvImportResult {
@@ -314,6 +337,96 @@ function parseStatementTable(statementText: string): CsvImportResult {
   });
 
   return { assets, errors };
+}
+
+function parsePaytmMoneyStatementLines(lines: string[]): CsvImportResult {
+  const assets = lines.flatMap((line) => {
+    if (isSummaryRow(line)) return [];
+
+    const split = splitLineByNumericTail(line, 4) ?? splitLineByNumericTail(line, 3);
+    if (!split) return [];
+
+    const [name, ...tail] = split;
+    const numericTail = tail.map((value) => parseNumber(value));
+
+    const currentValue = numericTail[0];
+    const investedValue = numericTail[1];
+    const quantity = numericTail[2];
+    const price = numericTail[3];
+    const value = deriveHoldingValue({
+      investedValue: finiteOrZero(investedValue),
+      parsedValue: currentValue,
+      price,
+      quantity,
+    });
+
+    if (!name || !Number.isFinite(value) || value <= 0) return [];
+
+    return [
+      {
+        gain: deriveHoldingGain({
+          gain: Number.NaN,
+          investedValue: finiteOrZero(investedValue),
+          value,
+        }),
+        investedValue: finiteOrZero(investedValue),
+        name,
+        price: deriveHoldingPrice({ price, quantity, value }),
+        quantity: finiteOrZero(quantity),
+        source: "Paytm Money statement",
+        type: inferAssetType({ name, sourceType: "" }),
+        value,
+      } satisfies PortfolioAsset,
+    ];
+  });
+
+  return { assets, errors: [] };
+}
+
+function parseJupiterStatementLines(lines: string[]): CsvImportResult {
+  const assets = lines.flatMap((line) => {
+    if (isSummaryRow(line)) return [];
+
+    const split = splitLineByNumericTail(line, 4) ?? splitLineByNumericTail(line, 3);
+    if (!split) return [];
+
+    const [prefix, ...tail] = split;
+    const resolvedPrefix = splitJupiterNameAndType(prefix);
+    if (!resolvedPrefix) return [];
+
+    const numericTail = tail.map((value) => parseNumber(value));
+    const quantity = numericTail[0];
+    const price = numericTail[1];
+    const investedValue = numericTail[2];
+    const currentValue = numericTail[3];
+    const value = deriveHoldingValue({
+      investedValue: finiteOrZero(investedValue),
+      parsedValue: currentValue,
+      price,
+      quantity,
+    });
+
+    if (!resolvedPrefix.name || !Number.isFinite(value) || value <= 0) return [];
+
+    return [
+      {
+        gain: deriveHoldingGain({
+          gain: Number.NaN,
+          investedValue: finiteOrZero(investedValue),
+          value,
+        }),
+        investedValue: finiteOrZero(investedValue),
+        name: resolvedPrefix.name,
+        price: deriveHoldingPrice({ price, quantity, value }),
+        quantity: finiteOrZero(quantity),
+        source: "Jupiter statement",
+        type: resolvedPrefix.type,
+        value,
+      } satisfies PortfolioAsset,
+    ];
+  });
+
+  return { assets, errors: [] };
 }
 
 function parseLabelledStatement(statementText: string): CsvImportResult {
@@ -534,6 +647,21 @@ function splitStatementColumns(line: string) {
     .filter(Boolean);
 }
 
+function splitLineByNumericTail(line: string, numericColumns: number) {
+  const compact = line.replace(/\s+/g, " ").trim();
+  const tokens = compact.split(" ");
+
+  if (tokens.length <= numericColumns) return null;
+
+  const tail = tokens.slice(-numericColumns);
+  if (!tail.every((token) => Number.isFinite(parseNumber(token)))) return null;
+
+  const head = tokens.slice(0, -numericColumns).join(" ").trim();
+  if (!head || isSummaryRow(head)) return null;
+
+  return [head, ...tail];
+}
+
 function alignOverflowCells(row: string[], headerCount: number, valueIndex: number) {
   const extraCells = row.length - headerCount;
 
@@ -625,6 +753,53 @@ function inferAssetType({
   if (/\bbond\b|gilt|debt|liquid|overnight/.test(normalizedName)) return "Debt";
 
   return "Imported Holding";
+}
+
+function isPaytmMoneyHeader(line: string) {
+  const normalized = normalizeHeader(line);
+
+  return (
+    normalized.includes("scheme name") &&
+    normalized.includes("current value") &&
+    normalized.includes("invested value")
+  );
+}
+
+function isJupiterHeader(line: string) {
+  const normalized = normalizeHeader(line);
+
+  return (
+    normalized.includes("fund name") &&
+    normalized.includes("units") &&
+    (normalized.includes("current nav") || normalized.includes("nav")) &&
+    normalized.includes("invested value")
+  );
+}
+
+function splitJupiterNameAndType(prefix: string) {
+  const typePatterns = [
+    "Equity Mutual Fund",
+    "Debt Mutual Fund",
+    "Mutual Fund",
+    "Gold ETF",
+    "ETF",
+    "Debt",
+    "Gold",
+  ];
+
+  for (const type of typePatterns) {
+    if (prefix.endsWith(type)) {
+      return {
+        name: prefix.slice(0, -type.length).trim(),
+        type,
+      };
+    }
+  }
+
+  return {
+    name: prefix,
+    type: "Mutual Fund",
+  };
 }
 
 function isSummaryRow(name: string) {

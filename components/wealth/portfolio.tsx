@@ -74,8 +74,10 @@ import {
 import type { RiskProfile } from "@/lib/wealth-rules";
 
 type PdfExtractResult = {
+  pageCount: number;
   text: string;
   usedOcr: boolean;
+  warnings: string[];
 };
 
 const importModeOptions: Array<[PortfolioImportMode, string]> = [
@@ -340,6 +342,8 @@ export function Portfolio({
         preview: filePreview,
         rawText,
       });
+      const pdfWarnings = pdfResult?.warnings ?? [];
+      const reviewWarnings = [...pdfWarnings, ...diagnostics.rowWarnings];
 
       setCsvText(text);
       const review = await reviewImportDocument({
@@ -360,14 +364,14 @@ export function Portfolio({
           normalizedText: text,
           rawText,
           review,
-          rowWarnings: diagnostics.rowWarnings,
+          rowWarnings: reviewWarnings,
           status: "reviewed",
         }),
       );
       setCsvMessage(
         isPdf
           ? pdfResult?.usedOcr
-            ? `${file.name} looked scanned, so OCR was used.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Review the extracted text and duplicate preview, then import.`
+            ? `${file.name} looked scanned, so OCR was used on ${pdfResult.pageCount} page${pdfResult.pageCount === 1 ? "" : "s"}.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Review the extracted text and duplicate preview, then import.`
             : `${file.name} converted from PDF.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Review the extracted text and duplicate preview, then import.`
           : `${file.name} loaded.${detectedSource ? ` Detected ${detectedSource.name}.` : ""}${normalized.applied.length ? " Provider cleanup applied." : ""} Review the import preview, then import.`,
       );
