@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Cloud,
@@ -37,6 +37,12 @@ import {
   importSourceDescriptors,
 } from "@/lib/import-sources";
 import {
+  connectorTemplates,
+  createConnectionFromTemplate,
+  describeConnectorTemplate,
+  getConnectorTemplate,
+} from "@/lib/connector-templates";
+import {
   brokerProviderDescriptors,
   type BrokerConnection,
 } from "@/lib/broker-connections";
@@ -55,6 +61,8 @@ import {
   buildIntegrationOperationsSummary,
   buildIntegrationSchedulerPlan,
   formatSyncTimeLabel,
+  type IntegrationActionItem,
+  getIntegrationActionItems,
   getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
@@ -65,7 +73,6 @@ import type {
   ProviderSyncPreview,
 } from "@/lib/provider-sync-adapters";
 import {
-  createIntegrationConnection,
   type ImportJob,
   parseWorkspaceImport,
   type IntegrationConnection,
@@ -133,14 +140,10 @@ export function DataSettings({
   const [actionMessage, setActionMessage] = useState("Full workspace export is ready.");
   const [jobCorrectionDrafts, setJobCorrectionDrafts] = useState<Record<string, string>>({});
   const [draftIntegration, setDraftIntegration] = useState<IntegrationConnection>(
-    createIntegrationConnection({
-      channel: "broker",
-      providerId: "groww",
-      providerName: "Groww",
-      sourceHint: "Define the import path for this provider.",
-    }),
+    createConnectionFromTemplate("paytm-money"),
   );
   const [editingIntegrationId, setEditingIntegrationId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("paytm-money");
   const [emailAttachmentFileName, setEmailAttachmentFileName] = useState("statement-attachment.txt");
   const [emailAttachmentContentType, setEmailAttachmentContentType] = useState("text/plain");
   const [emailAttachmentPageCount, setEmailAttachmentPageCount] = useState(1);
@@ -162,6 +165,11 @@ export function DataSettings({
   const [syncPreviewProviderId, setSyncPreviewProviderId] = useState<string | null>(null);
   const [jobFilter, setJobFilter] = useState<"all" | "completed" | "open" | "failed">("all");
   const [jobSearch, setJobSearch] = useState("");
+  const brokerSectionRef = useRef<HTMLDivElement | null>(null);
+  const inboxSectionRef = useRef<HTMLDivElement | null>(null);
+  const emailIntakeSectionRef = useRef<HTMLDivElement | null>(null);
+  const connectedSourcesSectionRef = useRef<HTMLDivElement | null>(null);
+  const syncPlanSectionRef = useRef<HTMLDivElement | null>(null);
   const integrationHealthSummary = useMemo(() => {
     const metrics = integrations.map(getIntegrationHealthMetrics);
     const activeCount = integrations.filter((integration) => integration.status === "active").length;
@@ -181,6 +189,14 @@ export function DataSettings({
   const schedulerPlan = useMemo(
     () => buildIntegrationSchedulerPlan(integrations),
     [integrations],
+  );
+  const selectedTemplate = useMemo(
+    () => getConnectorTemplate(selectedTemplateId) ?? connectorTemplates[0],
+    [selectedTemplateId],
+  );
+  const selectedTemplateMeta = useMemo(
+    () => describeConnectorTemplate(selectedTemplate),
+    [selectedTemplate],
   );
   const operationsSummary = useMemo(
     () => buildIntegrationOperationsSummary(integrations),
@@ -363,8 +379,81 @@ export function DataSettings({
     }
 
     onAddIntegration(draftIntegration);
-    setDraftIntegration(createIntegrationConnection());
-    setActionMessage("Integration added.");
+    setDraftIntegration(createConnectionFromTemplate(selectedTemplateId));
+    setActionMessage(`${draftIntegration.providerName} source added.`);
+  }
+
+  function handleApplyTemplate(templateId: string) {
+    setSelectedTemplateId(templateId);
+    setDraftIntegration(createConnectionFromTemplate(templateId));
+
+    const template = getConnectorTemplate(templateId);
+    if (template) {
+      setActionMessage(`${template.providerName} template loaded into the source editor.`);
+    }
+  }
+
+  function scrollToSection(ref: { current: HTMLDivElement | null }) {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function handleIntegrationActionClick(
+    integration: IntegrationConnection,
+    action: IntegrationActionItem,
+  ) {
+    switch (action.actionId) {
+      case "fix-source":
+        setEditingIntegrationId(integration.id);
+        scrollToSection(connectedSourcesSectionRef);
+        setActionMessage(`${integration.providerName} opened in edit mode.`);
+        return;
+      case "connect-live-sync":
+        scrollToSection(brokerSectionRef);
+        if (integration.providerId === "zerodha") {
+          await handleConnectBroker();
+        } else {
+          await handlePreviewSyncPlan(integration);
+        }
+        return;
+      case "keep-fallback-import":
+        handleApplyTemplate("paytm-money");
+        scrollToSection(connectedSourcesSectionRef);
+        return;
+      case "feed-email-intake":
+        setEmailSubject(`${integration.providerName} statement attached`);
+        setEmailFrom(userEmail || "statements@example.com");
+        scrollToSection(emailIntakeSectionRef);
+        setActionMessage(`${integration.providerName} email intake is ready for pasted message content.`);
+        return;
+      case "connect-inbox-access":
+        scrollToSection(inboxSectionRef);
+        setActionMessage("Inbox connector section is ready for Gmail or Outlook setup.");
+        return;
+      case "upload-fresh-export":
+      case "upload-latest-statement":
+      case "import-latest-statement":
+      case "reconcile-holdings":
+        await handlePreviewSyncPlan(integration);
+        scrollToSection(syncPlanSectionRef);
+        return;
+      case "run-connector-now":
+        if (integration.importStrategy === "sync-ready") {
+          onRunIntegrationSync(integration.id);
+          setActionMessage(`${integration.providerName} sync started.`);
+        } else {
+          await handlePreviewSyncPlan(integration);
+          setActionMessage(`${integration.providerName} sync plan opened for the next manual import step.`);
+        }
+        scrollToSection(syncPlanSectionRef);
+        return;
+      case "run-first-check":
+        await handlePreviewSyncPlan(integration);
+        scrollToSection(syncPlanSectionRef);
+        setActionMessage(`${integration.providerName} first-run plan opened.`);
+        return;
+      default:
+        return;
+    }
   }
 
   async function handlePreviewSyncPlan(connection: IntegrationConnection) {
@@ -904,7 +993,7 @@ export function DataSettings({
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={brokerSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Broker API connectors</p>
@@ -960,7 +1049,7 @@ export function DataSettings({
               })}
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={inboxSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Inbox OAuth connectors</p>
@@ -1010,7 +1099,7 @@ export function DataSettings({
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={emailIntakeSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Email ingestion simulator</p>
@@ -1125,7 +1214,7 @@ export function DataSettings({
               ))}
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={connectedSourcesSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">Connected sources</p>
@@ -1142,8 +1231,63 @@ export function DataSettings({
                     <Plus className="h-4 w-4" />
                     Add source
                   </Button>
+                  </div>
                 </div>
-              </div>
+                <div className="grid gap-3 rounded-md border bg-background p-3">
+                  <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+                    <div>
+                      <p className="text-sm font-medium">Provider templates</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        Start from a provider playbook so channel, cadence, and import lane are sensible from the first run.
+                      </p>
+                    </div>
+                    <SegmentedControl
+                      label="Template"
+                      options={connectorTemplates.map((template) => [template.id, template.providerName])}
+                      value={selectedTemplateId}
+                      onChange={handleApplyTemplate}
+                    />
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">{selectedTemplate.providerName}</Badge>
+                        <Badge variant="outline">{selectedTemplateMeta.readinessLabel}</Badge>
+                        <Badge variant="outline">{selectedTemplate.channel}</Badge>
+                        <Badge variant="outline">{selectedTemplate.importStrategy}</Badge>
+                        <Badge variant="outline">{selectedTemplateMeta.cadenceLabel}</Badge>
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                        {selectedTemplate.summary}
+                      </p>
+                      <div className="mt-4 grid gap-2 text-xs text-muted-foreground">
+                        <p className="font-medium text-foreground">Best inputs</p>
+                        {selectedTemplate.bestInputs.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <p className="text-sm font-medium">Setup playbook</p>
+                      <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                        {selectedTemplate.setupSteps.map((step, index) => (
+                          <p key={step}>
+                            {index + 1}. {step}
+                          </p>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                        {selectedTemplate.notes}
+                      </p>
+                      <div className="mt-4">
+                        <Button type="button" size="sm" variant="outline" onClick={() => handleApplyTemplate(selectedTemplate.id)}>
+                          <Plus className="h-4 w-4" />
+                          Load into editor
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               <div className="grid gap-3 rounded-md border bg-background p-3">
                 <ConnectionFields
                   connection={draftIntegration}
@@ -1200,6 +1344,7 @@ export function DataSettings({
                   const syncState = getIntegrationSyncState(integration);
                   const healthMetrics = getIntegrationHealthMetrics(integration);
                   const nextSyncAt = getNextIntegrationSyncAt(integration);
+                  const actionItems = getIntegrationActionItems(integration);
 
                   return (
                     <div key={integration.id} className="rounded-md border bg-background p-3">
@@ -1290,6 +1435,31 @@ export function DataSettings({
                                     {new Date(event.syncedAt).toLocaleString()} · {event.status} · files {event.importedFileCount}
                                   </p>
                                   <p>{event.message}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {actionItems.length > 0 && (
+                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                                Recommended next actions
+                              </p>
+                              {actionItems.map((item) => (
+                                <div key={`${integration.id}-${item.label}`} className="grid gap-2 text-[11px] text-muted-foreground">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="font-medium text-foreground">
+                                      {item.emphasis === "high" ? "Now" : "Next"}: {item.label}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void handleIntegrationActionClick(integration, item)}
+                                    >
+                                      Open
+                                    </Button>
+                                  </div>
+                                  <p>{item.detail}</p>
                                 </div>
                               ))}
                             </div>
@@ -1427,6 +1597,7 @@ export function DataSettings({
           </CardContent>
         </Card>
 
+        <div ref={syncPlanSectionRef}>
         <Card>
           <CardHeader>
             <CardTitle>Provider sync plan</CardTitle>
@@ -1563,6 +1734,7 @@ export function DataSettings({
             )}
           </CardContent>
         </Card>
+        </div>
 
         <Card>
           <CardHeader>

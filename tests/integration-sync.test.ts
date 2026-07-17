@@ -10,6 +10,7 @@ import {
   executeIntegrationSyncBatch,
   formatSyncTimeLabel,
   getConnectorAttentionSummary,
+  getIntegrationActionItems,
   getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
@@ -303,6 +304,51 @@ describe("integration sync helpers", () => {
     assert.equal(items[0]?.providerName, "Error Source");
     assert.equal(items[0]?.severity, "error");
     assert.equal(items[1]?.statusLabel, "Due now");
+  });
+
+  it("builds provider-aware next actions for statement-driven sources", () => {
+    const items = getIntegrationActionItems(
+      {
+        ...activeConnection,
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+      },
+      new Date("2026-07-11T10:00:00.000Z"),
+    );
+
+    assert.equal(items[0]?.label, "Upload latest statement");
+    assert.match(items[0]?.detail ?? "", /transaction summary|SIP activity|Paytm Money/i);
+  });
+
+  it("builds provider-aware next actions for sync-ready live connectors", () => {
+    const items = getIntegrationActionItems(
+      {
+        ...autoConnection,
+        providerId: "zerodha",
+        providerName: "Zerodha",
+        lastSyncAt: null,
+      },
+      new Date("2026-07-11T10:00:00.000Z"),
+    );
+
+    assert.equal(items[0]?.label, "Connect live sync");
+    assert.equal(items[1]?.label, "Run first check");
+  });
+
+  it("adds inbox guidance for email-forward connectors", () => {
+    const items = getIntegrationActionItems(
+      {
+        ...activeConnection,
+        channel: "email",
+        importStrategy: "email-forward",
+        providerId: "email-forward",
+        providerName: "Email Forward",
+      },
+      new Date("2026-07-11T10:00:00.000Z"),
+    );
+
+    assert.equal(items[0]?.label, "Feed email intake");
+    assert.equal(items.some((item) => item.label === "Connect inbox access"), true);
   });
 
   it("builds a scheduler plan for cron-style connector checks", () => {

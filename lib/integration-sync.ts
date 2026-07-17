@@ -34,6 +34,24 @@ export type IntegrationAttentionItem = {
   statusLabel: string;
 };
 
+export type IntegrationActionItem = {
+  actionId:
+    | "connect-inbox-access"
+    | "connect-live-sync"
+    | "feed-email-intake"
+    | "fix-source"
+    | "import-latest-statement"
+    | "keep-fallback-import"
+    | "reconcile-holdings"
+    | "run-connector-now"
+    | "run-first-check"
+    | "upload-fresh-export"
+    | "upload-latest-statement";
+  detail: string;
+  emphasis: "high" | "medium";
+  label: string;
+};
+
 export type IntegrationOperationsSummary = {
   activeCount: number;
   attentionCount: number;
@@ -401,6 +419,103 @@ export function getIntegrationAttentionItems(
     });
 
   return items;
+}
+
+export function getIntegrationActionItems(
+  connection: IntegrationConnection,
+  now = new Date(),
+): IntegrationActionItem[] {
+  const syncState = getIntegrationSyncState(connection, now);
+  const actions: IntegrationActionItem[] = [];
+
+  if (connection.status === "error") {
+    actions.push({
+      actionId: "fix-source",
+      detail: "Review the connector configuration, then retry the source after the latest failure is understood.",
+      emphasis: "high",
+      label: "Fix source",
+    });
+  }
+
+  if (connection.importStrategy === "sync-ready") {
+    actions.push({
+      actionId:
+        connection.providerId === "zerodha" ? "connect-live-sync" : "keep-fallback-import",
+      detail:
+        connection.providerId === "zerodha"
+          ? "Connect Kite and run a first live holdings sync, then compare the result against a manual export."
+          : "Keep the manual fallback lane available until direct account auth is fully implemented for this provider.",
+      emphasis: "high",
+      label:
+        connection.providerId === "zerodha" ? "Connect live sync" : "Keep fallback import",
+    });
+  } else if (connection.importStrategy === "email-forward") {
+    actions.push({
+      actionId: "feed-email-intake",
+      detail: "Use forwarded statement emails with attachment text so provider review has both the body and the holdings payload.",
+      emphasis: "high",
+      label: "Feed email intake",
+    });
+  } else if (connection.importStrategy === "csv-upload") {
+    actions.push({
+      actionId: "upload-fresh-export",
+      detail: "Pull a fresh export before each import review so value columns and holdings names stay current.",
+      emphasis: "high",
+      label: "Upload fresh export",
+    });
+  } else {
+    actions.push({
+      actionId:
+        connection.providerId === "paytm-money"
+          ? "upload-latest-statement"
+          : "import-latest-statement",
+      detail:
+        connection.providerId === "paytm-money"
+          ? "Use the latest Paytm Money statement or transaction summary so both holdings and SIP activity can be reviewed together."
+          : "Use a recent statement PDF or copied table to keep this guided-import lane current.",
+      emphasis: "high",
+      label:
+        connection.providerId === "paytm-money"
+          ? "Upload latest statement"
+          : "Import latest statement",
+    });
+  }
+
+  if (syncState.label === "Due now") {
+    actions.push({
+      actionId: "run-connector-now",
+      detail: syncState.detail,
+      emphasis: "medium",
+      label: "Run connector now",
+    });
+  } else if (syncState.label === "Ready") {
+    actions.push({
+      actionId: "run-first-check",
+      detail: "This source has not had its first successful run yet.",
+      emphasis: "medium",
+      label: "Run first check",
+    });
+  }
+
+  if (connection.channel === "email") {
+    actions.push({
+      actionId: "connect-inbox-access",
+      detail: "If OAuth is available, connect inbox access so forwarding and manual pasting do not stay the only ingestion path.",
+      emphasis: "medium",
+      label: "Connect inbox access",
+    });
+  }
+
+  if (connection.channel === "registrar") {
+    actions.push({
+      actionId: "reconcile-holdings",
+      detail: "Use this source as a periodic reconciliation layer against broker-reported mutual fund positions.",
+      emphasis: "medium",
+      label: "Reconcile holdings",
+    });
+  }
+
+  return actions.slice(0, 3);
 }
 
 export function executeIntegrationSyncBatch(

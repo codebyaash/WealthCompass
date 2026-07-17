@@ -21,6 +21,13 @@ CRON_SECRET=...
 
 `WEALTHCOMPASS_SYNC_USER_IDS` is optional and only needed for scheduled sync demos.
 
+For the optional signed-in Playwright cloud-sync check, also add:
+
+```bash
+WEALTHCOMPASS_E2E_EMAIL=...
+WEALTHCOMPASS_E2E_PASSWORD=...
+```
+
 ## 2. Apply the database schema
 
 1. Open your Supabase project dashboard
@@ -68,6 +75,23 @@ After sign-in:
 - the app should return to `/`
 - the header should stop showing browser-only mode
 - settings should reflect signed-in sync status
+
+## 5a. Run the signed-in cloud persistence browser check
+
+If you want to verify real Supabase save-and-refresh behavior with Playwright, add these to `.env.local`:
+
+```bash
+WEALTHCOMPASS_E2E_EMAIL=...
+WEALTHCOMPASS_E2E_PASSWORD=...
+```
+
+Then run:
+
+```bash
+npm run test:e2e:cloud
+```
+
+The check is skipped automatically unless both the Supabase app keys and these dedicated E2E credentials are present.
 
 ## 6. Check live market data
 

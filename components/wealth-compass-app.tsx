@@ -39,7 +39,6 @@ import {
   type RiskHistoryItem,
   type WealthCompassImport,
   type WealthGoal,
-  workspaceHasMeaningfulUserData,
   createWealthGoal,
   defaultGoals,
 } from "@/lib/local-storage";
@@ -54,6 +53,11 @@ import {
 import { detectImportSource } from "@/lib/import-sources";
 import { analyzeImportDocument } from "@/lib/import-review";
 import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
+import {
+  getCloudHydrationLoadingMessage,
+  resolveHydratedCloudWorkspace,
+  shouldRestoreCachedWorkspaceAfterCloudError,
+} from "@/lib/cloud-workspace-hydration";
 import {
   loadCloudSnapshot,
   loadRiskProfileHistory,
@@ -208,27 +212,34 @@ export function WealthCompassApp() {
       if (!isMounted) return;
 
       const cachedWorkspace = loadSignedInWorkspaceCache(user.id);
+      const loadingMessage = getCloudHydrationLoadingMessage(cachedWorkspace);
       setHasHydratedCloudWorkspace(false);
       setUserId(user.id);
       setUserEmail(user.email ?? "");
       setSyncStatus("Loading cloud");
-      setSyncMessage("Loading your Supabase workspace.");
+      setSyncMessage(loadingMessage);
+
+      if (shouldRestoreCachedWorkspaceAfterCloudError(cachedWorkspace) && cachedWorkspace) {
+        const derivedCachedAssets = applySnapshotState(cachedWorkspace.snapshot);
+        setRiskHistory(cachedWorkspace.riskHistory);
+        saveSnapshot({ ...cachedWorkspace.snapshot, assets: derivedCachedAssets });
+        saveRiskHistory(cachedWorkspace.riskHistory);
+      }
 
       try {
         const snapshot = await loadCloudSnapshot(client, user.id);
         if (!isMounted) return;
         const history = await loadRiskProfileHistory(client, user.id);
         if (!isMounted) return;
-        const shouldRestoreCachedWorkspace =
-          cachedWorkspace !== null &&
-          workspaceHasMeaningfulUserData(cachedWorkspace.snapshot, cachedWorkspace.riskHistory) &&
-          !workspaceHasMeaningfulUserData(snapshot, history);
-        const resolvedSnapshot = shouldRestoreCachedWorkspace
-          ? cachedWorkspace.snapshot
-          : snapshot;
-        const resolvedHistory = shouldRestoreCachedWorkspace
-          ? cachedWorkspace.riskHistory
-          : history;
+        const {
+          resolvedHistory,
+          resolvedSnapshot,
+          successMessage,
+        } = resolveHydratedCloudWorkspace({
+          cachedWorkspace,
+          cloudHistory: history,
+          cloudSnapshot: snapshot,
+        });
         const derivedAssets = applySnapshotState(resolvedSnapshot);
         saveSnapshot({ ...resolvedSnapshot, assets: derivedAssets });
         saveSignedInWorkspaceCache({
@@ -240,21 +251,12 @@ export function WealthCompassApp() {
         saveRiskHistory(resolvedHistory);
         resetWorkspaceSyncTracking();
         setSyncStatus("Cloud synced");
-        setSyncMessage(
-          shouldRestoreCachedWorkspace
-            ? "Loaded your last saved browser copy while cloud data catches up."
-            : snapshot.assets.length || snapshot.transactions.length || snapshot.goals.length
-              ? "Loaded your saved Supabase data."
-              : "Signed in with a clean workspace. Add your own portfolio to begin tracking.",
-        );
+        setSyncMessage(successMessage);
         setHasHydratedCloudWorkspace(true);
         setHasLoadedSnapshot(true);
       } catch (error) {
         if (!isMounted) return;
-        if (
-          cachedWorkspace !== null &&
-          workspaceHasMeaningfulUserData(cachedWorkspace.snapshot, cachedWorkspace.riskHistory)
-        ) {
+        if (shouldRestoreCachedWorkspaceAfterCloudError(cachedWorkspace) && cachedWorkspace) {
           const derivedAssets = applySnapshotState(cachedWorkspace.snapshot);
           setRiskHistory(cachedWorkspace.riskHistory);
           saveSnapshot({ ...cachedWorkspace.snapshot, assets: derivedAssets });

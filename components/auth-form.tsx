@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, LockKeyhole, Mail } from "lucide-react";
@@ -26,6 +26,8 @@ export function AuthForm() {
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const emailFieldId = useId();
+  const passwordFieldId = useId();
   const configured = isSupabaseConfigured();
   const connectorNotice = useMemo(() => {
     const broker = searchParams.get("broker");
@@ -160,11 +162,12 @@ export function AuthForm() {
                 </div>
               ) : null}
               <div className="grid gap-2">
-                <Label>Email</Label>
+                <Label htmlFor={emailFieldId}>Email</Label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     className="pl-9"
+                    id={emailFieldId}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@example.com"
                     required
@@ -174,8 +177,9 @@ export function AuthForm() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Password</Label>
+                <Label htmlFor={passwordFieldId}>Password</Label>
                 <Input
+                  id={passwordFieldId}
                   minLength={8}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Minimum 8 characters"

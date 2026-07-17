@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createImportJob } from "../lib/local-storage";
-import { loadCloudSnapshot, persistCloudImportJob } from "../lib/supabase-sync";
+import {
+  createImportJob,
+  createIntegrationConnection,
+  emptySignedInSnapshot,
+} from "../lib/local-storage";
+import {
+  loadCloudSnapshot,
+  persistCloudImportJob,
+  saveCloudSnapshot,
+} from "../lib/supabase-sync";
 
 describe("loadCloudSnapshot", () => {
   it("clears connector-only cloud residue into an empty signed-in workspace", async () => {
@@ -327,6 +335,159 @@ describe("persistCloudImportJob", () => {
         status: "completed",
         user_id: "user-1",
       },
+      table: "import_jobs",
+    });
+  });
+});
+
+describe("saveCloudSnapshot", () => {
+  it("writes import sources before documents and jobs so linkages stay intact", async () => {
+    const operations: Array<{
+      action: string;
+      payload?: unknown;
+      table: string;
+    }> = [];
+    const filters = new Map<string, Record<string, unknown>>();
+
+    const supabase = {
+      from(table: string) {
+        return {
+          delete() {
+            operations.push({ action: "delete", table });
+            return this;
+          },
+          eq(field: string, value: unknown) {
+            const current = filters.get(table) ?? {};
+            filters.set(table, { ...current, [field]: value });
+            return this;
+          },
+          insert: async (payload: unknown) => {
+            operations.push({ action: "insert", payload, table });
+            return { error: null };
+          },
+          upsert: async (payload: unknown) => {
+            operations.push({ action: "upsert", payload, table });
+            return { error: null };
+          },
+        };
+      },
+    } as const;
+
+    const integration = createIntegrationConnection({
+      channel: "broker",
+      id: "source-paytm",
+      importStrategy: "statement-upload",
+      providerId: "paytm-money",
+      providerName: "Paytm Money",
+      status: "active",
+    });
+    const job = createImportJob({
+      assetCount: 2,
+      documentId: "document-paytm-1",
+      documentKind: "pdf-statement",
+      documentStoragePath: "import-documents/document-paytm-1/paytm.pdf",
+      fileName: "paytm.pdf",
+      providerId: "paytm-money",
+      providerName: "Paytm Money",
+      rawText: "statement text",
+      status: "reviewed",
+      summary: "Paytm statement needs review.",
+      usedOcr: true,
+    });
+
+    await saveCloudSnapshot({
+      snapshot: {
+        ...emptySignedInSnapshot,
+        importJobs: [job],
+        integrations: [integration],
+      },
+      supabase: supabase as never,
+      userId: "user-1",
+    });
+
+    assert.deepEqual(filters.get("import_sources"), { user_id: "user-1" });
+    assert.deepEqual(filters.get("import_documents"), { user_id: "user-1" });
+    assert.deepEqual(filters.get("import_jobs"), { user_id: "user-1" });
+
+    const importSourcesInsertIndex = operations.findIndex(
+      (entry) => entry.action === "insert" && entry.table === "import_sources",
+    );
+    const importDocumentsInsertIndex = operations.findIndex(
+      (entry) => entry.action === "insert" && entry.table === "import_documents",
+    );
+    const importJobsInsertIndex = operations.findIndex(
+      (entry) => entry.action === "insert" && entry.table === "import_jobs",
+    );
+
+    assert.ok(importSourcesInsertIndex >= 0);
+    assert.ok(importDocumentsInsertIndex > importSourcesInsertIndex);
+    assert.ok(importJobsInsertIndex > importDocumentsInsertIndex);
+
+    assert.deepEqual(operations[importDocumentsInsertIndex], {
+      action: "insert",
+      payload: [
+        {
+          detected_provider: "paytm-money",
+          extracted_text: "statement text",
+          file_name: "paytm.pdf",
+          file_type: "pdf-statement",
+          id: "document-paytm-1",
+          import_source_id: "source-paytm",
+          import_status: "needs_review",
+          parse_summary: {
+            duplicateCount: 0,
+            normalizedText: "",
+            parserProfileId: null,
+            providerConfidence: "low",
+            providerId: "paytm-money",
+            providerName: "Paytm Money",
+            reviewedCorrections: [],
+            rowWarnings: [],
+            selectedAssetCount: 2,
+            summary: "Paytm statement needs review.",
+            usedOcr: true,
+          },
+          storage_path: "import-documents/document-paytm-1/paytm.pdf",
+          user_id: "user-1",
+        },
+      ],
+      table: "import_documents",
+    });
+
+    assert.deepEqual(operations[importJobsInsertIndex], {
+      action: "insert",
+      payload: [
+        {
+          created_assets: 2,
+          created_transactions: 0,
+          error_message: null,
+          id: job.id,
+          import_document_id: "document-paytm-1",
+          job_payload: {
+            attemptCount: 1,
+            documentId: "document-paytm-1",
+            documentKind: "pdf-statement",
+            documentStoragePath: "import-documents/document-paytm-1/paytm.pdf",
+            duplicateCount: 0,
+            fileName: "paytm.pdf",
+            lastActionAt: null,
+            localStatus: "reviewed",
+            normalizationApplied: [],
+            normalizedText: "",
+            parserProfileId: null,
+            providerConfidence: "low",
+            providerId: "paytm-money",
+            providerName: "Paytm Money",
+            rawText: "statement text",
+            reviewedCorrections: [],
+            rowWarnings: [],
+            summary: "Paytm statement needs review.",
+            usedOcr: true,
+          },
+          status: "completed",
+          user_id: "user-1",
+        },
+      ],
       table: "import_jobs",
     });
   });
