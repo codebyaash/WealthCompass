@@ -8,6 +8,7 @@ export function AppHeader({
   onSaveRiskHistory,
   onSignOut,
   profile,
+  showProfileContext = true,
   syncMessage,
   syncStatus,
   userEmail,
@@ -20,6 +21,7 @@ export function AppHeader({
   onSaveRiskHistory: () => void;
   onSignOut: () => void;
   profile: RiskProfile;
+  showProfileContext?: boolean;
   syncMessage: string;
   syncStatus: string;
   userEmail: string;
@@ -29,8 +31,14 @@ export function AppHeader({
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{profile.band}</Badge>
-            <Badge variant="outline">{profile.personality}</Badge>
+            {showProfileContext ? (
+              <>
+                <Badge variant="secondary">{profile.band}</Badge>
+                <Badge variant="outline">{profile.personality}</Badge>
+              </>
+            ) : (
+              <Badge variant="secondary">Setup</Badge>
+            )}
             {connectorAttention && (
               <Badge
                 variant={connectorAttention.severity === "healthy" ? "secondary" : "outline"}

@@ -7,6 +7,13 @@ export type PortfolioHealthCheck = {
   value: string;
 };
 
+export type AllocationInsight = {
+  bucket: string;
+  currentShare: number;
+  status: string;
+  suggestedShare: number;
+};
+
 export type TransactionSummary = {
   buys: number;
   dividends: number;
@@ -218,6 +225,70 @@ export function getSuggestedIndexFundCore(profile: RiskProfile) {
   return profile.allocation.find((item) => item.name === "Index Funds")?.value ?? 0;
 }
 
+export function getPortfolioDiversificationScore({
+  assets,
+  portfolioTotal,
+}: {
+  assets: PortfolioAsset[];
+  portfolioTotal: number;
+}) {
+  if (assets.length === 0 || portfolioTotal <= 0) return 0;
+
+  const uniqueTypes = new Set(assets.map((asset) => asset.type)).size;
+  const concentration = calculateLargestHoldingConcentration({ assets, portfolioTotal });
+  const investedValue = calculatePortfolioInvestedValue(assets);
+  const cashShare = assets
+    .filter((asset) => asset.type.toLowerCase().includes("cash"))
+    .reduce((sum, asset) => sum + asset.value, 0) / portfolioTotal;
+
+  let score = 35;
+  score += Math.min(25, uniqueTypes * 6);
+  score += concentration <= 25 ? 20 : concentration <= 40 ? 10 : 0;
+  score += investedValue > 0 ? 10 : 0;
+  score += cashShare <= 0.25 ? 10 : cashShare <= 0.45 ? 5 : 0;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+export function getAllocationInsights({
+  assets,
+  portfolioTotal,
+  profile,
+}: {
+  assets: PortfolioAsset[];
+  portfolioTotal: number;
+  profile: RiskProfile;
+}) {
+  if (portfolioTotal <= 0 || assets.length === 0) return [];
+
+  const grouped = new Map<string, number>();
+
+  for (const asset of assets) {
+    const bucket = mapAssetTypeToSuggestedBucket(asset.type);
+    grouped.set(bucket, (grouped.get(bucket) ?? 0) + asset.value);
+  }
+
+  return profile.allocation
+    .map((target) => {
+      const currentValue = grouped.get(target.name) ?? 0;
+      const currentShare = Math.round((currentValue / portfolioTotal) * 100);
+      const drift = currentShare - target.value;
+
+      return {
+        bucket: target.name,
+        currentShare,
+        status:
+          Math.abs(drift) <= 5
+            ? "Near target"
+            : drift > 5
+              ? "Above target"
+              : "Below target",
+        suggestedShare: target.value,
+      } satisfies AllocationInsight;
+    })
+    .filter((item) => item.currentShare > 0 || item.suggestedShare > 0);
+}
+
 export function getPortfolioHealthChecks({
   assets,
   portfolioTotal,
@@ -231,6 +302,7 @@ export function getPortfolioHealthChecks({
   const suggestedIndexFundCore = getSuggestedIndexFundCore(profile);
   const gainPercent = calculatePortfolioGainPercent(assets, portfolioTotal);
   const detailCoverage = calculateDetailedHoldingsCoverage(assets);
+  const diversificationScore = getPortfolioDiversificationScore({ assets, portfolioTotal });
 
   return [
     {
@@ -253,7 +325,59 @@ export function getPortfolioHealthChecks({
       status: detailCoverage >= 75 ? "Import quality strong" : "Add more cost basis",
       value: `${detailCoverage}%`,
     },
+    {
+      label: "Diversification score",
+      status:
+        diversificationScore >= 75
+          ? "Balanced mix"
+          : diversificationScore >= 55
+            ? "Improving"
+            : "Needs variety",
+      value: `${diversificationScore}/100`,
+    },
   ];
+}
+
+function mapAssetTypeToSuggestedBucket(type: string) {
+  const normalized = type.trim().toLowerCase();
+
+  if (
+    normalized.includes("index") ||
+    normalized.includes("etf") ||
+    normalized.includes("large-cap") ||
+    normalized.includes("international")
+  ) {
+    return "Index Funds";
+  }
+
+  if (
+    normalized.includes("stock") ||
+    normalized.includes("small-cap") ||
+    normalized.includes("flexi")
+  ) {
+    return "Stocks";
+  }
+
+  if (
+    normalized.includes("debt") ||
+    normalized.includes("bond") ||
+    normalized.includes("liquid") ||
+    normalized.includes("fd") ||
+    normalized.includes("ppf") ||
+    normalized.includes("nps")
+  ) {
+    return "Debt";
+  }
+
+  if (normalized.includes("gold")) {
+    return "Gold";
+  }
+
+  if (normalized.includes("cash")) {
+    return "Cash";
+  }
+
+  return "Stocks";
 }
 
 function createAssetKey(asset: Pick<PortfolioAsset, "name" | "type">) {

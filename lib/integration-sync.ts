@@ -26,6 +26,23 @@ export type ConnectorAttentionSummary = {
   title: string;
 };
 
+export type IntegrationAttentionItem = {
+  detail: string;
+  id: string;
+  providerName: string;
+  severity: "error" | "warning";
+  statusLabel: string;
+};
+
+export type IntegrationOperationsSummary = {
+  activeCount: number;
+  attentionCount: number;
+  autoCount: number;
+  dueNowCount: number;
+  manualCount: number;
+  pausedCount: number;
+};
+
 export type IntegrationSchedulerEntry = {
   cadenceMinutes: number;
   id: string;
@@ -222,6 +239,7 @@ export function getNextIntegrationSyncAt(
   now = new Date(),
 ) {
   if (connection.status !== "active") return null;
+  if (!isAutomaticallySyncedIntegration(connection)) return null;
 
   const anchor = connection.lastSyncAt
     ? new Date(connection.lastSyncAt)
@@ -235,6 +253,7 @@ export function getScheduledIntegrationRunAt(
   now = new Date(),
 ) {
   if (connection.status !== "active") return null;
+  if (!isAutomaticallySyncedIntegration(connection)) return null;
   if (!connection.lastSyncAt) return now.toISOString();
 
   return getNextIntegrationSyncAt(connection, now);
@@ -284,6 +303,104 @@ export function buildIntegrationSchedulerPlan(
     pausedCount: entries.filter((entry) => entry.status === "paused").length,
     readyCount: activeEntries.filter((entry) => entry.stateLabel === "Ready").length,
   };
+}
+
+export function buildIntegrationOperationsSummary(
+  integrations: IntegrationConnection[],
+  now = new Date(),
+): IntegrationOperationsSummary {
+  const activeIntegrations = integrations.filter((integration) => integration.status === "active");
+  const pausedCount = integrations.filter((integration) => integration.status === "paused").length;
+  const autoCount = activeIntegrations.filter((integration) =>
+    isAutomaticallySyncedIntegration(integration),
+  ).length;
+  const manualCount = activeIntegrations.length - autoCount;
+  const dueNowCount = activeIntegrations.filter(
+    (integration) => getIntegrationSyncState(integration, now).label === "Due now",
+  ).length;
+  const attentionCount = getIntegrationAttentionItems(integrations, now).length;
+
+  return {
+    activeCount: activeIntegrations.length,
+    attentionCount,
+    autoCount,
+    dueNowCount,
+    manualCount,
+    pausedCount,
+  };
+}
+
+export function getIntegrationAttentionItems(
+  integrations: IntegrationConnection[],
+  now = new Date(),
+) {
+  const items: IntegrationAttentionItem[] = integrations
+    .flatMap<IntegrationAttentionItem>((integration) => {
+      const syncState = getIntegrationSyncState(integration, now);
+      const health = getIntegrationHealthMetrics(integration);
+
+      if (integration.status === "error") {
+        return [
+          {
+            detail: "Connection needs review before the next import attempt.",
+            id: integration.id,
+            providerName: integration.providerName,
+            severity: "error" as const,
+            statusLabel: "Needs fix",
+          },
+        ];
+      }
+
+      if (integration.status === "active" && syncState.label === "Due now") {
+        return [
+          {
+            detail: syncState.detail,
+            id: integration.id,
+            providerName: integration.providerName,
+            severity: "warning" as const,
+            statusLabel: "Due now",
+          },
+        ];
+      }
+
+      if (integration.status === "active" && health.warningStreak >= 2) {
+        return [
+          {
+            detail: `${health.warningStreak} recent runs need review before the source drifts further.`,
+            id: integration.id,
+            providerName: integration.providerName,
+            severity: "warning" as const,
+            statusLabel: "Warning streak",
+          },
+        ];
+      }
+
+      if (
+        integration.status === "active" &&
+        integration.lastSyncStatus === "error"
+      ) {
+        return [
+          {
+            detail: integration.lastSyncMessage,
+            id: integration.id,
+            providerName: integration.providerName,
+            severity: "warning" as const,
+            statusLabel: "Recent error",
+          },
+        ];
+      }
+
+      return [];
+    })
+    .sort((left, right) => {
+      if (left.severity !== right.severity) {
+        return left.severity === "error" ? -1 : 1;
+      }
+
+      return left.providerName.localeCompare(right.providerName);
+    });
+
+  return items;
 }
 
 export function executeIntegrationSyncBatch(
@@ -428,6 +545,14 @@ export function getIntegrationSyncState(
   }
 
   if (!connection.lastSyncAt) {
+    if (!isAutomaticallySyncedIntegration(connection)) {
+      return {
+        detail: getManualSyncDetail(connection),
+        label: "On demand",
+        tone: "idle",
+      };
+    }
+
     return {
       detail: "Ready for the first sync run.",
       label: "Ready",
@@ -437,6 +562,14 @@ export function getIntegrationSyncState(
 
   const lastSync = new Date(connection.lastSyncAt);
   const elapsedMinutes = Math.floor((now.getTime() - lastSync.getTime()) / 60_000);
+
+  if (!isAutomaticallySyncedIntegration(connection)) {
+    return {
+      detail: `Last import activity ${elapsedMinutes} min ago.`,
+      label: "On demand",
+      tone: "healthy",
+    };
+  }
 
   if (elapsedMinutes >= connection.syncCadenceMinutes) {
     return {
@@ -508,5 +641,22 @@ function mapImportStrategyToDocumentKind(
       return "table-export";
     default:
       return "unclassified";
+  }
+}
+
+function isAutomaticallySyncedIntegration(connection: IntegrationConnection) {
+  return connection.importStrategy === "sync-ready";
+}
+
+function getManualSyncDetail(connection: IntegrationConnection) {
+  switch (connection.importStrategy) {
+    case "email-forward":
+      return "Runs when you forward an email or upload an attachment.";
+    case "csv-upload":
+      return "Runs when you upload a fresh export file.";
+    case "statement-upload":
+      return "Runs when you upload a fresh statement.";
+    default:
+      return "Runs when new import data is provided.";
   }
 }

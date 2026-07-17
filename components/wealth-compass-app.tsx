@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRef } from "react";
+import type { SetStateAction } from "react";
 import { Academy } from "@/components/wealth/academy";
 import { AppHeader } from "@/components/wealth/app-header";
 import { AppSidebar, type ActiveView } from "@/components/wealth/app-sidebar";
@@ -23,9 +25,12 @@ import {
   coercePortfolioAssets,
   type ImportJob,
   createRiskHistoryItem,
+  emptySignedInSnapshot,
+  loadSignedInWorkspaceCache,
   loadSnapshot,
   loadRiskHistory,
   saveRiskHistory,
+  saveSignedInWorkspaceCache,
   saveSnapshot,
   type IntegrationConnection,
   type MarketPreferences,
@@ -34,6 +39,7 @@ import {
   type RiskHistoryItem,
   type WealthCompassImport,
   type WealthGoal,
+  workspaceHasMeaningfulUserData,
   createWealthGoal,
   defaultGoals,
 } from "@/lib/local-storage";
@@ -61,7 +67,14 @@ import {
   type RiskAnswers,
 } from "@/lib/wealth-rules";
 
-type SyncStatus = "Local demo" | "Local saved" | "Loading cloud" | "Syncing" | "Cloud synced" | "Cloud error";
+type SyncStatus =
+  | "Local demo"
+  | "Local saved"
+  | "Loading cloud"
+  | "Changes pending"
+  | "Syncing"
+  | "Cloud synced"
+  | "Cloud error";
 
 export function WealthCompassApp() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
@@ -85,13 +98,47 @@ export function WealthCompassApp() {
   const [syncMessage, setSyncMessage] = useState("Browser autosave is active.");
   const [userId, setUserId] = useState("");
   const [userEmail, setUserEmail] = useState("");
+  const [hasHydratedCloudWorkspace, setHasHydratedCloudWorkspace] = useState(false);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [lastSyncedRevision, setLastSyncedRevision] = useState(0);
+  const [isCloudSaveInFlight, setIsCloudSaveInFlight] = useState(false);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const workspaceRevisionRef = useRef(0);
 
-  useEffect(() => {
-    const snapshot = loadSnapshot();
+  function resetWorkspaceSyncTracking() {
+    workspaceRevisionRef.current = 0;
+    setWorkspaceRevision(0);
+    setLastSyncedRevision(0);
+    setIsCloudSaveInFlight(false);
+  }
+
+  function markWorkspaceChanged(message: string) {
+    if (userId && supabase && hasHydratedCloudWorkspace) {
+      const nextRevision = workspaceRevisionRef.current + 1;
+      workspaceRevisionRef.current = nextRevision;
+      setWorkspaceRevision(nextRevision);
+      setSyncStatus("Changes pending");
+      setSyncMessage(message);
+      return;
+    }
+
+    setSyncStatus(isSupabaseConfigured() ? "Local saved" : "Local demo");
+    setSyncMessage(message);
+  }
+
+  function applySnapshotState(snapshot: {
+    answers: RiskAnswers;
+    assets: PortfolioAsset[];
+    goals: WealthGoal[];
+    importJobs: ImportJob[];
+    integrations: IntegrationConnection[];
+    marketPreferences: MarketPreferences;
+    transactions: PortfolioTransaction[];
+  }) {
     const derivedAssets = snapshot.transactions.length
       ? derivePortfolioAssetsFromTransactions(snapshot.transactions, snapshot.assets)
       : snapshot.assets;
+
     setAnswers(snapshot.answers);
     setAssets(derivedAssets);
     setGoals(snapshot.goals);
@@ -99,13 +146,28 @@ export function WealthCompassApp() {
     setImportJobs(snapshot.importJobs);
     setMarketPreferences(snapshot.marketPreferences);
     setTransactions(snapshot.transactions);
+
+    return derivedAssets;
+  }
+
+  useEffect(() => {
+    if (isSupabaseConfigured()) {
+      applySnapshotState(emptySignedInSnapshot);
+      setRiskHistory([]);
+      resetWorkspaceSyncTracking();
+      return;
+    }
+
+    const snapshot = loadSnapshot();
+    applySnapshotState(snapshot);
     setRiskHistory(loadRiskHistory());
+    resetWorkspaceSyncTracking();
     setHasLoadedSnapshot(true);
   }, []);
 
   useEffect(() => {
     if (!hasLoadedSnapshot) return;
-    saveSnapshot({
+    const snapshot = {
       answers,
       assets,
       goals,
@@ -113,8 +175,28 @@ export function WealthCompassApp() {
       importJobs,
       marketPreferences,
       transactions,
-    });
-  }, [answers, assets, goals, integrations, importJobs, marketPreferences, transactions, hasLoadedSnapshot]);
+    };
+    saveSnapshot(snapshot);
+
+    if (userId) {
+      saveSignedInWorkspaceCache({
+        riskHistory,
+        snapshot,
+        userId,
+      });
+    }
+  }, [
+    answers,
+    assets,
+    goals,
+    hasLoadedSnapshot,
+    importJobs,
+    integrations,
+    marketPreferences,
+    riskHistory,
+    transactions,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -122,12 +204,11 @@ export function WealthCompassApp() {
     let isMounted = true;
     const client = supabase;
 
-    async function loadSession() {
-      const { data } = await client.auth.getSession();
-      const user = data.session?.user;
+    async function hydrateWorkspaceForUser(user: NonNullable<Awaited<ReturnType<typeof client.auth.getSession>>["data"]["session"]>["user"]) {
+      if (!isMounted) return;
 
-      if (!isMounted || !user) return;
-
+      const cachedWorkspace = loadSignedInWorkspaceCache(user.id);
+      setHasHydratedCloudWorkspace(false);
       setUserId(user.id);
       setUserEmail(user.email ?? "");
       setSyncStatus("Loading cloud");
@@ -136,28 +217,78 @@ export function WealthCompassApp() {
       try {
         const snapshot = await loadCloudSnapshot(client, user.id);
         if (!isMounted) return;
-        const derivedAssets = snapshot.transactions.length
-          ? derivePortfolioAssetsFromTransactions(snapshot.transactions, snapshot.assets)
-          : snapshot.assets;
-        setAnswers(snapshot.answers);
-        setAssets(derivedAssets);
-        setGoals(snapshot.goals);
-        setIntegrations(snapshot.integrations);
-        setImportJobs(snapshot.importJobs);
-        setMarketPreferences(snapshot.marketPreferences);
-        setTransactions(snapshot.transactions);
-        saveSnapshot({ ...snapshot, assets: derivedAssets });
         const history = await loadRiskProfileHistory(client, user.id);
         if (!isMounted) return;
-        setRiskHistory(history);
-        saveRiskHistory(history);
+        const shouldRestoreCachedWorkspace =
+          cachedWorkspace !== null &&
+          workspaceHasMeaningfulUserData(cachedWorkspace.snapshot, cachedWorkspace.riskHistory) &&
+          !workspaceHasMeaningfulUserData(snapshot, history);
+        const resolvedSnapshot = shouldRestoreCachedWorkspace
+          ? cachedWorkspace.snapshot
+          : snapshot;
+        const resolvedHistory = shouldRestoreCachedWorkspace
+          ? cachedWorkspace.riskHistory
+          : history;
+        const derivedAssets = applySnapshotState(resolvedSnapshot);
+        saveSnapshot({ ...resolvedSnapshot, assets: derivedAssets });
+        saveSignedInWorkspaceCache({
+          riskHistory: resolvedHistory,
+          snapshot: { ...resolvedSnapshot, assets: derivedAssets },
+          userId: user.id,
+        });
+        setRiskHistory(resolvedHistory);
+        saveRiskHistory(resolvedHistory);
+        resetWorkspaceSyncTracking();
         setSyncStatus("Cloud synced");
-        setSyncMessage("Loaded your saved Supabase data.");
+        setSyncMessage(
+          shouldRestoreCachedWorkspace
+            ? "Loaded your last saved browser copy while cloud data catches up."
+            : snapshot.assets.length || snapshot.transactions.length || snapshot.goals.length
+              ? "Loaded your saved Supabase data."
+              : "Signed in with a clean workspace. Add your own portfolio to begin tracking.",
+        );
+        setHasHydratedCloudWorkspace(true);
+        setHasLoadedSnapshot(true);
       } catch (error) {
         if (!isMounted) return;
-        setSyncStatus("Cloud error");
-        setSyncMessage(getErrorMessage(error));
+        if (
+          cachedWorkspace !== null &&
+          workspaceHasMeaningfulUserData(cachedWorkspace.snapshot, cachedWorkspace.riskHistory)
+        ) {
+          const derivedAssets = applySnapshotState(cachedWorkspace.snapshot);
+          setRiskHistory(cachedWorkspace.riskHistory);
+          saveSnapshot({ ...cachedWorkspace.snapshot, assets: derivedAssets });
+          saveRiskHistory(cachedWorkspace.riskHistory);
+          setSyncStatus("Cloud error");
+          setSyncMessage("Cloud refresh failed, so the last saved browser copy was restored.");
+        } else {
+          setSyncStatus("Cloud error");
+          setSyncMessage(getErrorMessage(error));
+        }
+        resetWorkspaceSyncTracking();
+        setHasHydratedCloudWorkspace(true);
+        setHasLoadedSnapshot(true);
       }
+    }
+
+    async function loadSession() {
+      const { data } = await client.auth.getSession();
+      const user = data.session?.user;
+
+      if (!isMounted) return;
+      if (!user) {
+        const snapshot = loadSnapshot();
+        applySnapshotState(snapshot);
+        setRiskHistory(loadRiskHistory());
+        resetWorkspaceSyncTracking();
+        setHasHydratedCloudWorkspace(true);
+        setHasLoadedSnapshot(true);
+        setSyncStatus("Local saved");
+        setSyncMessage("Browser autosave is active.");
+        return;
+      }
+
+      await hydrateWorkspaceForUser(user);
     }
 
     void loadSession();
@@ -166,16 +297,21 @@ export function WealthCompassApp() {
       data: { subscription },
     } = client.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
+        const snapshot = loadSnapshot();
+        applySnapshotState(snapshot);
+        setRiskHistory(loadRiskHistory());
         setUserId("");
         setUserEmail("");
+        resetWorkspaceSyncTracking();
+        setHasHydratedCloudWorkspace(true);
+        setHasLoadedSnapshot(true);
         setSyncStatus("Local saved");
         setSyncMessage("Signed out. Browser autosave is active.");
         return;
       }
 
-      if (session?.user) {
-        setUserId(session.user.id);
-        setUserEmail(session.user.email ?? "");
+      if (event === "SIGNED_IN" && session?.user) {
+        void hydrateWorkspaceForUser(session.user);
       }
     });
 
@@ -186,13 +322,25 @@ export function WealthCompassApp() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!hasLoadedSnapshot || !supabase || !userId) return;
+    if (
+      !hasLoadedSnapshot ||
+      !supabase ||
+      !userId ||
+      !hasHydratedCloudWorkspace ||
+      isCloudSaveInFlight ||
+      workspaceRevision === lastSyncedRevision
+    ) {
+      return;
+    }
 
     const client = supabase;
-    setSyncStatus("Syncing");
-    setSyncMessage("Saving profile, portfolio, and goal data.");
+    const targetRevision = workspaceRevision;
 
     const timeoutId = window.setTimeout(async () => {
+      setIsCloudSaveInFlight(true);
+      setSyncStatus("Syncing");
+      setSyncMessage("Saving profile, portfolio, and goal data.");
+
       try {
         await saveCloudSnapshot({
           snapshot: {
@@ -207,11 +355,19 @@ export function WealthCompassApp() {
           supabase: client,
           userId,
         });
-        setSyncStatus("Cloud synced");
-        setSyncMessage("Cloud save complete.");
+        setLastSyncedRevision(targetRevision);
+        if (workspaceRevisionRef.current > targetRevision) {
+          setSyncStatus("Changes pending");
+          setSyncMessage("More changes are waiting to sync.");
+        } else {
+          setSyncStatus("Cloud synced");
+          setSyncMessage("Cloud save complete.");
+        }
       } catch (error) {
         setSyncStatus("Cloud error");
         setSyncMessage(getErrorMessage(error));
+      } finally {
+        setIsCloudSaveInFlight(false);
       }
     }, 900);
 
@@ -222,11 +378,15 @@ export function WealthCompassApp() {
     goals,
     hasLoadedSnapshot,
     integrations,
+    isCloudSaveInFlight,
     importJobs,
+    lastSyncedRevision,
     marketPreferences,
     supabase,
     transactions,
+    hasHydratedCloudWorkspace,
     userId,
+    workspaceRevision,
   ]);
 
   const safeAssets = useMemo(() => coercePortfolioAssets(assets, []), [assets]);
@@ -236,6 +396,14 @@ export function WealthCompassApp() {
     () => getConnectorAttentionSummary(safeIntegrations),
     [safeIntegrations],
   );
+  const isCloudWorkspaceInitializing = Boolean(supabase) && !hasHydratedCloudWorkspace;
+  const isFreshWorkspace =
+    userId.length > 0 &&
+    safeAssets.length === 0 &&
+    goals.length === 0 &&
+    safeIntegrations.length === 0 &&
+    importJobs.length === 0 &&
+    transactions.length === 0;
   const portfolioTotal = safeAssets.reduce((sum, asset) => sum + asset.value, 0);
   const monthlyGoal = goals.reduce(
     (sum, goal) => sum + calculateGoalMonthlyInvestment(goal),
@@ -247,6 +415,15 @@ export function WealthCompassApp() {
       (answers.debtLevel === "heavy" ? 4 : answers.debtLevel === "none" ? 20 : 13) +
       16,
   );
+
+  function handleUpdateAnswers(nextAnswers: SetStateAction<RiskAnswers>) {
+    setAnswers(nextAnswers);
+    markWorkspaceChanged(
+      userId
+        ? "Profile answers updated. Saving your workspace."
+        : "Profile answers updated in this browser.",
+    );
+  }
 
   async function handleSaveRiskHistory() {
     const historyItem = createRiskHistoryItem(profile);
@@ -262,8 +439,23 @@ export function WealthCompassApp() {
 
     setSyncStatus("Syncing");
     setSyncMessage("Saving risk profile snapshot.");
+    setIsCloudSaveInFlight(true);
+    const targetRevision = workspaceRevisionRef.current;
 
     try {
+      await saveCloudSnapshot({
+        snapshot: {
+          answers,
+          assets,
+          goals,
+          integrations,
+          importJobs,
+          marketPreferences,
+          transactions,
+        },
+        supabase,
+        userId,
+      });
       await saveRiskProfileHistory({
         answers,
         profile,
@@ -273,11 +465,19 @@ export function WealthCompassApp() {
       const history = await loadRiskProfileHistory(supabase, userId);
       setRiskHistory(history);
       saveRiskHistory(history);
-      setSyncStatus("Cloud synced");
-      setSyncMessage("Risk profile saved to history.");
+      setLastSyncedRevision(targetRevision);
+      if (workspaceRevisionRef.current > targetRevision) {
+        setSyncStatus("Changes pending");
+        setSyncMessage("Risk snapshot saved. More workspace changes are still pending.");
+      } else {
+        setSyncStatus("Cloud synced");
+        setSyncMessage("Risk profile and workspace saved to cloud.");
+      }
     } catch (error) {
       setSyncStatus("Cloud error");
       setSyncMessage(getErrorMessage(error));
+    } finally {
+      setIsCloudSaveInFlight(false);
     }
   }
 
@@ -287,43 +487,45 @@ export function WealthCompassApp() {
   }
 
   function handleResetPortfolio() {
+    if (userId) {
+      setAssets([]);
+      setTransactions([]);
+      setImportJobs([]);
+      markWorkspaceChanged("Tracked portfolio data cleared for this signed-in workspace.");
+      return;
+    }
+
     setAssets(derivePortfolioAssetsFromTransactions(portfolioTransactions, portfolioAssets));
     setTransactions(portfolioTransactions);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Portfolio restored to demo holdings.");
+    markWorkspaceChanged("Portfolio restored to demo holdings.");
   }
 
   function handleUpdateAsset(assetIndex: number, nextAsset: PortfolioAsset) {
     setAssets((current) =>
       current.map((asset, index) => (index === assetIndex ? nextAsset : asset)),
     );
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Portfolio holding updated.");
+    markWorkspaceChanged("Portfolio holding updated.");
   }
 
   function handleAddAsset(nextAsset: PortfolioAsset) {
     setAssets((current) => [nextAsset, ...current]);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Portfolio holding added.");
+    markWorkspaceChanged("Portfolio holding added.");
   }
 
   function handleImportAssets(nextAssets: PortfolioAsset[]) {
     setAssets(nextAssets);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Portfolio import applied.");
+    markWorkspaceChanged("Portfolio import applied.");
   }
 
   function handleImportBrokerAssets(nextAssets: PortfolioAsset[], job: ImportJob) {
     setAssets(nextAssets);
     setImportJobs((current) => [job, ...current].slice(0, 20));
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Broker holdings sync applied.");
+    markWorkspaceChanged("Broker holdings sync applied.");
   }
 
   function handleDeleteAsset(assetIndex: number) {
     setAssets((current) => current.filter((_, index) => index !== assetIndex));
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Portfolio holding removed.");
+    markWorkspaceChanged("Portfolio holding removed.");
   }
 
   function handleAddTransaction(nextTransaction: PortfolioTransaction) {
@@ -334,8 +536,7 @@ export function WealthCompassApp() {
       );
       return nextTransactions;
     });
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Transaction recorded.");
+    markWorkspaceChanged("Transaction recorded.");
   }
 
   function handleDeleteTransaction(transactionId: string) {
@@ -348,11 +549,24 @@ export function WealthCompassApp() {
       );
       return nextTransactions;
     });
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Transaction removed.");
+    markWorkspaceChanged("Transaction removed.");
   }
 
   function handleRestoreDemoWorkspace() {
+    if (userId) {
+      setAnswers(emptySignedInSnapshot.answers);
+      setAssets(emptySignedInSnapshot.assets);
+      setGoals(emptySignedInSnapshot.goals);
+      setIntegrations(emptySignedInSnapshot.integrations);
+      setImportJobs(emptySignedInSnapshot.importJobs);
+      setMarketPreferences(emptySignedInSnapshot.marketPreferences);
+      setTransactions(emptySignedInSnapshot.transactions);
+      setRiskHistory([]);
+      saveRiskHistory([]);
+      markWorkspaceChanged("Signed-in workspace cleared. Add your own portfolio to begin tracking.");
+      return;
+    }
+
     setAnswers(defaultRiskAnswers);
     setAssets(derivePortfolioAssetsFromTransactions(portfolioTransactions, portfolioAssets));
     setGoals(defaultGoals);
@@ -390,8 +604,7 @@ export function WealthCompassApp() {
     setTransactions(portfolioTransactions);
     setRiskHistory([]);
     saveRiskHistory([]);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage(
+    markWorkspaceChanged(
       userId
         ? "Demo workspace restored. Profile, portfolio, and goal changes will sync; cloud history is retained."
         : "Demo workspace restored in this browser.",
@@ -411,32 +624,27 @@ export function WealthCompassApp() {
     setTransactions(workspace.transactions);
     setRiskHistory(workspace.riskHistory);
     saveRiskHistory(workspace.riskHistory);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Imported workspace data.");
+    markWorkspaceChanged("Imported workspace data.");
   }
 
   function handleAddGoal() {
     setGoals((current) => [createWealthGoal(), ...current]);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Goal added.");
+    markWorkspaceChanged("Goal added.");
   }
 
   function handleUpdateGoal(goalId: string, nextGoal: WealthGoal) {
     setGoals((current) => current.map((goal) => (goal.id === goalId ? nextGoal : goal)));
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Goal updated.");
+    markWorkspaceChanged("Goal updated.");
   }
 
   function handleDeleteGoal(goalId: string) {
     setGoals((current) => current.filter((goal) => goal.id !== goalId));
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Goal removed.");
+    markWorkspaceChanged("Goal removed.");
   }
 
   function handleAddIntegration(connection: IntegrationConnection) {
     setIntegrations((current) => [connection, ...current]);
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Integration connection added.");
+    markWorkspaceChanged("Integration connection added.");
   }
 
   function handleUpdateIntegration(connectionId: string, nextConnection: IntegrationConnection) {
@@ -445,16 +653,19 @@ export function WealthCompassApp() {
         connection.id === connectionId ? nextConnection : connection,
       ),
     );
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Integration updated.");
+    markWorkspaceChanged("Integration updated.");
   }
 
   function handleDeleteIntegration(connectionId: string) {
     setIntegrations((current) =>
       current.filter((connection) => connection.id !== connectionId),
     );
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Integration removed.");
+    markWorkspaceChanged("Integration removed.");
+  }
+
+  function handleUpdateMarketPreferences(nextPreferences: MarketPreferences) {
+    setMarketPreferences(nextPreferences);
+    markWorkspaceChanged("Market preferences updated.");
   }
 
   async function handleRunIntegrationSync(connectionId?: string) {
@@ -466,13 +677,11 @@ export function WealthCompassApp() {
     );
 
     if (!targetConnections.length) {
-      setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-      setSyncMessage("No active integration sources were available to sync.");
+      markWorkspaceChanged("No active integration sources were available to sync.");
       return;
     }
 
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage(
+    markWorkspaceChanged(
       mode === "single"
         ? `Running ${targetConnections[0].providerName} sync checkpoint.`
         : `Running ${targetConnections.length} integration sync checkpoints.`,
@@ -502,7 +711,7 @@ export function WealthCompassApp() {
 
       setIntegrations(result.integrations);
       setImportJobs(result.importJobs);
-      setSyncMessage(
+      markWorkspaceChanged(
         result.syncedConnectionIds.length === 1
           ? `${targetConnections[0].providerName} sync checkpoint recorded.`
           : `${result.syncedConnectionIds.length} integration sync checkpoints recorded.`,
@@ -516,7 +725,7 @@ export function WealthCompassApp() {
 
       setIntegrations(fallback.integrations);
       setImportJobs(fallback.importJobs);
-      setSyncMessage(
+      markWorkspaceChanged(
         fallback.syncedConnectionIds.length === 1
           ? `${targetConnections[0].providerName} sync checkpoint recorded locally.`
           : `${fallback.syncedConnectionIds.length} integration sync checkpoints recorded locally.`,
@@ -526,16 +735,14 @@ export function WealthCompassApp() {
 
   function handleLogImportJob(job: ImportJob) {
     setImportJobs((current) => [job, ...current].slice(0, 20));
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Import job saved.");
+    markWorkspaceChanged("Import job saved.");
   }
 
   function handleUpdateImportJob(jobId: string, nextJob: ImportJob) {
     setImportJobs((current) =>
       current.map((job) => (job.id === jobId ? nextJob : job)),
     );
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Import job updated.");
+    markWorkspaceChanged("Import job updated.");
   }
 
   function handleReprocessImportJob(jobId: string) {
@@ -598,8 +805,7 @@ export function WealthCompassApp() {
         };
       }),
     );
-    setSyncStatus(userId ? "Syncing" : isSupabaseConfigured() ? "Local saved" : "Local demo");
-    setSyncMessage("Import job reprocessed.");
+    markWorkspaceChanged("Import job reprocessed.");
   }
 
   return (
@@ -613,11 +819,19 @@ export function WealthCompassApp() {
             onSaveRiskHistory={handleSaveRiskHistory}
             onSignOut={handleSignOut}
             profile={profile}
+            showProfileContext={!isFreshWorkspace}
             syncMessage={syncMessage}
             syncStatus={syncStatus}
             userEmail={userEmail}
           />
-          {activeView === "dashboard" && (
+          {isCloudWorkspaceInitializing ? (
+            <div className="rounded-lg border bg-card p-6 shadow-sm">
+              <p className="text-sm font-medium">Preparing your workspace</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                We are loading your signed-in data before the app becomes editable.
+              </p>
+            </div>
+          ) : activeView === "dashboard" ? (
             <Dashboard
               assets={safeAssets}
               goals={goals}
@@ -627,13 +841,11 @@ export function WealthCompassApp() {
               onNavigate={(view) => setActiveView(view)}
               portfolioTotal={portfolioTotal}
               profile={profile}
+              transactions={transactions}
             />
-          )}
-          {activeView === "onboarding" && (
-            <Onboarding answers={answers} onChange={setAnswers} profile={profile} />
-          )}
-          {activeView === "academy" && <Academy />}
-          {activeView === "portfolio" && (
+          ) : activeView === "onboarding" ? (
+            <Onboarding answers={answers} onChange={handleUpdateAnswers} profile={profile} />
+          ) : activeView === "academy" ? <Academy /> : activeView === "portfolio" ? (
             <Portfolio
               assets={safeAssets}
               onAddAsset={handleAddAsset}
@@ -648,8 +860,7 @@ export function WealthCompassApp() {
               profile={profile}
               transactions={transactions}
             />
-          )}
-          {activeView === "goals" && (
+          ) : activeView === "goals" ? (
             <Goals
               goals={goals}
               monthlyGoal={monthlyGoal}
@@ -657,23 +868,19 @@ export function WealthCompassApp() {
               onDeleteGoal={handleDeleteGoal}
               onUpdateGoal={handleUpdateGoal}
             />
-          )}
-          {activeView === "history" && (
+          ) : activeView === "history" ? (
             <RiskHistory history={riskHistory} profile={profile} />
-          )}
-          {activeView === "market" && (
+          ) : activeView === "market" ? (
             <MarketDashboard
               assets={safeAssets}
               integrations={safeIntegrations}
               marketPreferences={marketPreferences}
               onRunIntegrationSync={handleRunIntegrationSync}
-              onUpdatePreferences={setMarketPreferences}
+              onUpdatePreferences={handleUpdateMarketPreferences}
             />
-          )}
-          {activeView === "mentor" && (
+          ) : activeView === "mentor" ? (
             <MentorPanel answers={answers} assets={safeAssets} profile={profile} />
-          )}
-          {activeView === "settings" && (
+          ) : activeView === "settings" ? (
             <DataSettings
               answers={answers}
               assets={safeAssets}
@@ -691,7 +898,7 @@ export function WealthCompassApp() {
               onRunIntegrationSync={handleRunIntegrationSync}
               onUpdateImportJob={handleUpdateImportJob}
               onUpdateIntegration={handleUpdateIntegration}
-              onUpdateMarketPreferences={setMarketPreferences}
+              onUpdateMarketPreferences={handleUpdateMarketPreferences}
               profile={profile}
               riskHistory={riskHistory}
               marketPreferences={marketPreferences}
@@ -700,7 +907,7 @@ export function WealthCompassApp() {
               transactions={transactions}
               userEmail={userEmail}
             />
-          )}
+          ) : null}
         </section>
       </div>
     </main>
@@ -709,6 +916,14 @@ export function WealthCompassApp() {
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
   if (typeof error === "string") return error;
   return "Something went wrong while syncing.";
 }

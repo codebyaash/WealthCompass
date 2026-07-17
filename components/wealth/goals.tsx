@@ -26,6 +26,8 @@ import { Progress } from "@/components/ui/progress";
 import { formatMoney } from "@/lib/formatters";
 import {
   calculateGoalFundingGap,
+  getGoalMilestones,
+  getGoalScenarioRows,
   calculateGoalProgress,
   getGoalMonthlySplit,
   getGoalPlanningChecks,
@@ -57,6 +59,7 @@ export function Goals({
   const chartData = getGoalMonthlySplit(goals);
   const planningChecks = getGoalPlanningChecks({
     formatMoney,
+    goals,
     monthlyGoal,
     priorityCount,
     totalProgress,
@@ -146,6 +149,26 @@ export function Goals({
               ))}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Funding posture</CardTitle>
+              <CardDescription>Read the plan before the plan reads you.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <MetricMini
+                label="Avg monthly per goal"
+                value={goals.length ? formatMoney(Math.round(monthlyGoal / goals.length)) : formatMoney(0)}
+              />
+              <MetricMini
+                label="Essential goal share"
+                value={goals.length ? `${Math.round((priorityCount / goals.length) * 100)}%` : "0%"}
+              />
+              <div className="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                Essential goals should usually be funded before aspirational ones start competing for the same monthly cash flow.
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
@@ -164,6 +187,8 @@ function GoalEditor({
   const progress = calculateGoalProgress(goal);
   const monthlyInvestment = calculateGoalMonthlyInvestment(goal);
   const fundingGap = calculateGoalFundingGap(goal);
+  const scenarios = getGoalScenarioRows(goal);
+  const milestones = getGoalMilestones(goal);
 
   return (
     <Card>
@@ -228,6 +253,56 @@ function GoalEditor({
           <MetricMini label="Monthly SIP" value={formatMoney(monthlyInvestment)} />
           <MetricMini label="Funding gap" value={formatMoney(fundingGap)} />
           <MetricMini label="Timeline" value={`${goal.years} years`} />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+            <div>
+              <p className="text-sm font-medium">Scenario view</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                See how sensitive the monthly requirement is to return assumptions.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              {scenarios.map((scenario) => (
+                <div
+                  key={scenario.label}
+                  className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <div>
+                    <p className="font-medium">{scenario.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {scenario.annualReturn}% annual return
+                    </p>
+                  </div>
+                  <Badge variant="secondary">{formatMoney(scenario.monthly)}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+            <div>
+              <p className="text-sm font-medium">Milestone ladder</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                What this plan implies before the finish line arrives.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              {milestones.map((milestone) => (
+                <div
+                  key={milestone.label}
+                  className="grid gap-1 rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{milestone.label}</p>
+                    <Badge variant="outline">{formatMoney(milestone.targetAmount)}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Base plan pace: {milestone.timeToMilestoneLabel} · Needs {formatMoney(milestone.monthlyNeeded)} monthly if this were the only milestone target.
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

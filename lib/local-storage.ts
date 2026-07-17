@@ -146,6 +146,13 @@ export type RiskHistoryItem = Pick<
   id: string;
 };
 
+type SignedInWorkspaceCacheEntry = {
+  riskHistory: RiskHistoryItem[];
+  snapshot: WealthCompassSnapshot;
+  updatedAt: string;
+  userId: string;
+};
+
 export const defaultGoal: WealthGoal = {
   id: "goal-home-down-payment",
   name: "Home down payment",
@@ -179,8 +186,19 @@ export const defaultSnapshot: WealthCompassSnapshot = {
   transactions: portfolioTransactions,
 };
 
+export const emptySignedInSnapshot: WealthCompassSnapshot = {
+  answers: defaultRiskAnswers,
+  assets: [],
+  goals: [],
+  integrations: [],
+  importJobs: [],
+  marketPreferences: defaultMarketPreferences,
+  transactions: [],
+};
+
 const storageKey = "wealthcompass:snapshot:v1";
 const riskHistoryKey = "wealthcompass:risk-history:v1";
+const signedInWorkspaceCacheKey = "wealthcompass:signed-in-workspace-cache:v1";
 
 export function loadSnapshot() {
   if (typeof window === "undefined") return defaultSnapshot;
@@ -237,6 +255,101 @@ export function saveRiskHistory(history: RiskHistoryItem[]) {
   if (typeof window === "undefined") return;
 
   window.localStorage.setItem(riskHistoryKey, JSON.stringify(history));
+}
+
+export function loadSignedInWorkspaceCache(userId: string): SignedInWorkspaceCacheEntry | null {
+  if (typeof window === "undefined") return null;
+
+  const rawCache = window.localStorage.getItem(signedInWorkspaceCacheKey);
+  if (!rawCache) return null;
+
+  try {
+    const parsedCache = JSON.parse(rawCache) as Record<string, SignedInWorkspaceCacheEntry>;
+    const cachedEntry = parsedCache[userId];
+
+    if (!cachedEntry) return null;
+
+    const snapshot = parseWorkspaceImport(
+      JSON.stringify({
+        ...cachedEntry.snapshot,
+        riskHistory: cachedEntry.riskHistory,
+      }),
+    ).data;
+
+    if (!snapshot) return null;
+
+    return {
+      riskHistory: snapshot.riskHistory,
+      snapshot: {
+        answers: snapshot.answers,
+        assets: snapshot.assets,
+        goals: snapshot.goals,
+        integrations: snapshot.integrations,
+        importJobs: snapshot.importJobs,
+        marketPreferences: snapshot.marketPreferences,
+        transactions: snapshot.transactions,
+      },
+      updatedAt: stringOrDefault(cachedEntry.updatedAt, new Date(0).toISOString()),
+      userId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveSignedInWorkspaceCache({
+  riskHistory,
+  snapshot,
+  userId,
+}: {
+  riskHistory: RiskHistoryItem[];
+  snapshot: WealthCompassSnapshot;
+  userId: string;
+}) {
+  if (typeof window === "undefined") return;
+
+  let existingCache: Record<string, SignedInWorkspaceCacheEntry> = {};
+
+  try {
+    const rawCache = window.localStorage.getItem(signedInWorkspaceCacheKey);
+    if (rawCache) {
+      existingCache = JSON.parse(rawCache) as Record<string, SignedInWorkspaceCacheEntry>;
+    }
+  } catch {
+    existingCache = {};
+  }
+
+  existingCache[userId] = {
+    riskHistory,
+    snapshot,
+    updatedAt: new Date().toISOString(),
+    userId,
+  };
+
+  window.localStorage.setItem(signedInWorkspaceCacheKey, JSON.stringify(existingCache));
+}
+
+export function workspaceHasMeaningfulUserData(
+  snapshot: WealthCompassSnapshot,
+  riskHistory: RiskHistoryItem[] = [],
+) {
+  const hasProfileAnswers =
+    JSON.stringify(snapshot.answers) !== JSON.stringify(emptySignedInSnapshot.answers);
+  const hasTrackedPortfolio = snapshot.assets.length > 0 || snapshot.transactions.length > 0;
+  const hasGoals = snapshot.goals.length > 0;
+  const hasImportState = snapshot.integrations.length > 0 || snapshot.importJobs.length > 0;
+  const hasCustomMarketPreferences =
+    JSON.stringify(snapshot.marketPreferences) !==
+    JSON.stringify(emptySignedInSnapshot.marketPreferences);
+
+  return (
+    hasProfileAnswers ||
+    hasTrackedPortfolio ||
+    hasGoals ||
+    hasImportState ||
+    hasCustomMarketPreferences ||
+    riskHistory.length > 0
+  );
 }
 
 export function coercePortfolioAssets(

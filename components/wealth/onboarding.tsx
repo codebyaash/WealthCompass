@@ -1,5 +1,6 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import { useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { CheckCircle2 } from "lucide-react";
@@ -30,12 +31,12 @@ export function Onboarding({
   profile,
 }: {
   answers: RiskAnswers;
-  onChange: (answers: RiskAnswers) => void;
+  onChange: Dispatch<SetStateAction<RiskAnswers>>;
   profile: RiskProfile;
 }) {
   const [step, setStep] = useState(0);
   const update = <K extends keyof RiskAnswers>(key: K, value: RiskAnswers[K]) => {
-    onChange({ ...answers, [key]: value });
+    onChange((current) => ({ ...current, [key]: value }));
   };
   const steps = ["Profile", "Risk", "Plan"];
 

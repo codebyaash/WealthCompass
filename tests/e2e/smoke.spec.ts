@@ -1,13 +1,32 @@
 import { expect, test } from "@playwright/test";
 
-test("landing dashboard flow renders key MVP surfaces", async ({ page }) => {
+test("dashboard shell renders current MVP surfaces", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByText("WealthCompass")).toBeVisible();
-  await expect(page.getByText("Find your financial direction.")).toBeVisible();
-
-  await page.getByRole("button", { name: /continue with demo workspace/i }).click();
-
+  await expect(page.getByText("Your investment command center")).toBeVisible();
   await expect(page.getByText("Next best action")).toBeVisible();
-  await expect(page.getByText("Manual portfolio tracker")).toBeVisible();
+  await expect(page.getByText("Quick actions")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Update profile" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Track holdings" })).toBeVisible();
+});
+
+test("local onboarding changes survive a refresh", async ({ page }) => {
+  const countryValue = "Persist QA";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Update profile" }).click();
+
+  await expect(page.getByText("Tell WealthCompass about yourself")).toBeVisible();
+
+  const countryField = page.getByLabel("Country");
+  await countryField.fill(countryValue);
+
+  await expect(countryField).toHaveValue(countryValue);
+  await expect(page.getByText("Local saved")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Update profile" }).click();
+
+  await expect(page.getByLabel("Country")).toHaveValue(countryValue);
 });

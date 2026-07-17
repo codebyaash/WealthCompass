@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildPortfolioTrajectory,
   getDashboardAction,
   getGoalPortfolioInsight,
 } from "../lib/dashboard-rules";
-import type { WealthGoal } from "../lib/local-storage";
+import type { PortfolioTransaction, WealthGoal } from "../lib/local-storage";
 import { calculateRiskProfile, type RiskAnswers } from "../lib/wealth-rules";
 
 const formatMoney = (value: number) => `$${value}`;
@@ -115,5 +116,99 @@ describe("getGoalPortfolioInsight", () => {
 
     assert.equal(insight.title, "Funding gap is still the main story");
     assert.match(insight.detail, /₹1,500/);
+  });
+});
+
+describe("buildPortfolioTrajectory", () => {
+  it("builds a six-month cumulative timeline from recorded transactions", () => {
+    const trajectory = buildPortfolioTrajectory({
+      transactions: [
+        {
+          action: "buy",
+          amount: 10000,
+          assetName: "Core Fund",
+          date: "2026-01-15",
+          id: "txn-1",
+          notes: "",
+          price: 100,
+          quantity: 100,
+          source: "Manual",
+          type: "Index Fund",
+        },
+        {
+          action: "buy",
+          amount: 5000,
+          assetName: "Debt Fund",
+          date: "2026-03-03",
+          id: "txn-2",
+          notes: "",
+          price: 100,
+          quantity: 50,
+          source: "Manual",
+          type: "Debt",
+        },
+        {
+          action: "sell",
+          amount: 2000,
+          assetName: "Core Fund",
+          date: "2026-04-11",
+          id: "txn-3",
+          notes: "",
+          price: 100,
+          quantity: 20,
+          source: "Manual",
+          type: "Index Fund",
+        },
+      ],
+    });
+
+    assert.deepEqual(trajectory, [
+      { month: "Nov", value: 0 },
+      { month: "Dec", value: 0 },
+      { month: "Jan", value: 10000 },
+      { month: "Feb", value: 10000 },
+      { month: "Mar", value: 15000 },
+      { month: "Apr", value: 13000 },
+    ]);
+  });
+
+  it("includes older transactions as the opening balance within the window", () => {
+    const transactions: PortfolioTransaction[] = [
+      {
+        action: "buy",
+        amount: 8000,
+        assetName: "Older Fund",
+        date: "2025-12-01",
+        id: "txn-old",
+        notes: "",
+        price: 100,
+        quantity: 80,
+        source: "Manual",
+        type: "Index Fund",
+      },
+      {
+        action: "buy",
+        amount: 2000,
+        assetName: "New Fund",
+        date: "2026-04-01",
+        id: "txn-new",
+        notes: "",
+        price: 100,
+        quantity: 20,
+        source: "Manual",
+        type: "Index Fund",
+      },
+    ];
+
+    const trajectory = buildPortfolioTrajectory({
+      transactions,
+      windowMonths: 3,
+    });
+
+    assert.deepEqual(trajectory, [
+      { month: "Feb", value: 8000 },
+      { month: "Mar", value: 8000 },
+      { month: "Apr", value: 10000 },
+    ]);
   });
 });

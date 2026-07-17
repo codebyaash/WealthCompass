@@ -128,8 +128,9 @@ export type ImportJobRow = {
     duplicateCount?: number;
     documentKind?: string;
     lastActionAt?: string | null;
+    localStatus?: ImportJob["status"];
   } | null;
-  status: ImportJob["status"] | null;
+  status: "completed" | "failed" | "processing" | "queued" | null;
 };
 
 export type ImportDocumentRow = {
@@ -239,6 +240,7 @@ export function mapGoalToInsert(goal: WealthGoal, userId: string) {
   return {
     current_amount: goal.currentAmount,
     expected_return: goal.annualReturn,
+    id: goal.id,
     name: goal.name,
     priority: goal.priority,
     target_amount: goal.targetAmount,
@@ -336,6 +338,7 @@ export function mapIntegrationToImportSourceInsert(
 ) {
   return {
     channel: integration.channel,
+    id: integration.id,
     last_synced_at: integration.lastSyncAt,
     metadata: {
       importStrategy: integration.importStrategy,
@@ -412,7 +415,10 @@ export function mapImportJobRowToJob(row: ImportJobRow): ImportJob {
     rawText: row.job_payload?.rawText ?? "",
     reviewedCorrections: row.job_payload?.reviewedCorrections ?? [],
     rowWarnings: row.job_payload?.rowWarnings ?? [],
-    status: row.status ?? "received",
+    status: mapImportJobDatabaseStatusToLocalStatus(
+      row.job_payload?.localStatus ?? null,
+      row.status,
+    ),
     summary: row.job_payload?.summary ?? (
       row.status === "failed"
         ? row.error_message ?? "Import failed."
@@ -430,6 +436,7 @@ export function mapImportJobToInsert(
     created_assets: job.assetCount,
     created_transactions: 0,
     error_message: job.status === "failed" ? job.notes || job.summary : null,
+    id: job.id,
     import_document_id: job.documentId,
     job_payload: {
       attemptCount: job.attemptCount,
@@ -439,6 +446,7 @@ export function mapImportJobToInsert(
       duplicateCount: job.duplicateCount,
       fileName: job.fileName,
       lastActionAt: job.lastActionAt,
+      localStatus: job.status,
       normalizationApplied: job.normalizationApplied,
       normalizedText: job.normalizedText,
       parserProfileId: job.parserProfileId,
@@ -451,7 +459,7 @@ export function mapImportJobToInsert(
       summary: job.summary,
       usedOcr: job.usedOcr,
     },
-    status: job.status,
+    status: mapImportJobLocalStatusToDatabaseStatus(job.status),
     user_id: userId,
   };
 }
@@ -516,5 +524,32 @@ function mapImportJobStatusToDocumentStatus(
   if (status === "failed") return "failed";
   if (status === "completed") return "parsed";
   if (status === "reviewed") return "needs_review";
+  return "received";
+}
+
+function mapImportJobLocalStatusToDatabaseStatus(
+  status: ImportJob["status"],
+): NonNullable<ImportJobRow["status"]> {
+  if (status === "failed") return "failed";
+  if (status === "completed") return "completed";
+  if (status === "reviewed") return "completed";
+  return "queued";
+}
+
+function mapImportJobDatabaseStatusToLocalStatus(
+  localStatus: ImportJob["status"] | null,
+  databaseStatus: ImportJobRow["status"],
+): ImportJob["status"] {
+  if (
+    localStatus === "received" ||
+    localStatus === "reviewed" ||
+    localStatus === "completed" ||
+    localStatus === "failed"
+  ) {
+    return localStatus;
+  }
+
+  if (databaseStatus === "failed") return "failed";
+  if (databaseStatus === "completed") return "completed";
   return "received";
 }

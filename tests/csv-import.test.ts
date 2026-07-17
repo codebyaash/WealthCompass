@@ -189,6 +189,36 @@ Returns %: 6.25%`);
     ]);
   });
 
+  it("imports generic pasted statement rows with numeric tails", () => {
+    const result = parsePortfolioCsv(`Portfolio Statement
+Axis Bluechip Fund Direct Growth 57500 50000 123.45 465.77
+Nippon India Gold ETF 21250 20000 250 85`);
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.assets, [
+      importedAsset({
+        gain: 15,
+        investedValue: 50000,
+        name: "Axis Bluechip Fund Direct Growth",
+        price: 465.77,
+        quantity: 123.45,
+        source: "Imported statement",
+        type: "Mutual Fund",
+        value: 57500,
+      }),
+      importedAsset({
+        gain: 6.25,
+        investedValue: 20000,
+        name: "Nippon India Gold ETF",
+        price: 85,
+        quantity: 250,
+        source: "Imported statement",
+        type: "ETF",
+        value: 21250,
+      }),
+    ]);
+  });
+
   it("imports HTML email statement tables", () => {
     const result = parsePortfolioCsv(`<table>
 <tr><th>Fund Name</th><th>Asset Class</th><th>Current Value</th><th>XIRR %</th></tr>

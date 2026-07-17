@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { ImportJob, RiskHistoryItem, WealthCompassSnapshot } from "./local-storage";
-import { defaultSnapshot } from "./local-storage";
+import { emptySignedInSnapshot } from "./local-storage";
 import {
   mapAnswersToProfile,
   mapAssetToPortfolioInsert,
@@ -93,31 +93,54 @@ export async function loadCloudSnapshot(
   if (importDocumentsResult.error) throw importDocumentsResult.error;
   if (marketPreferencesResult.error) throw marketPreferencesResult.error;
 
-  return {
+  const hasStoredWorkspace =
+    Boolean(profileResult.data) ||
+    assetsResult.data.length > 0 ||
+    goalsResult.data.length > 0 ||
+    transactionsResult.data.length > 0 ||
+    integrationsResult.data.length > 0 ||
+    importJobsResult.data.length > 0 ||
+    importDocumentsResult.data.length > 0 ||
+    Boolean(marketPreferencesResult.data);
+
+  if (!hasStoredWorkspace) {
+    return emptySignedInSnapshot;
+  }
+
+  const snapshot = {
     answers: profileResult.data
       ? mapProfileToAnswers(profileResult.data)
-      : defaultSnapshot.answers,
+      : emptySignedInSnapshot.answers,
     assets: assetsResult.data.length
       ? assetsResult.data.map(mapPortfolioRowToAsset)
-      : defaultSnapshot.assets,
+      : emptySignedInSnapshot.assets,
     goals: goalsResult.data.length
       ? goalsResult.data.map(mapGoalRowToGoal)
-      : defaultSnapshot.goals,
+      : emptySignedInSnapshot.goals,
     integrations: integrationsResult.data.length
       ? integrationsResult.data.map(mapImportSourceRowToIntegration)
-      : defaultSnapshot.integrations,
-    importJobs: importJobsResult.data.length
-      ? importJobsResult.data.map(mapImportJobRowToJob)
-      : importDocumentsResult.data.length
-        ? importDocumentsResult.data.map(mapImportDocumentRowToJob)
-        : defaultSnapshot.importJobs,
+      : emptySignedInSnapshot.integrations,
+    importJobs:
+      importJobsResult.data.length || importDocumentsResult.data.length
+        ? mergeCloudImportJobs(importJobsResult.data, importDocumentsResult.data)
+        : emptySignedInSnapshot.importJobs,
     marketPreferences: marketPreferencesResult.data
       ? mapMarketPreferenceRowToSettings(marketPreferencesResult.data)
-      : defaultSnapshot.marketPreferences,
+      : emptySignedInSnapshot.marketPreferences,
     transactions: transactionsResult.data.length
       ? transactionsResult.data.map(mapTransactionRowToTransaction)
-      : defaultSnapshot.transactions,
+      : emptySignedInSnapshot.transactions,
   };
+
+  if (shouldTreatCloudSnapshotAsEmpty(snapshot)) {
+    return {
+      ...emptySignedInSnapshot,
+      answers: snapshot.answers,
+      marketPreferences: snapshot.marketPreferences,
+    };
+  }
+
+  return snapshot;
 }
 
 export async function saveCloudSnapshot({
@@ -216,8 +239,15 @@ export async function saveCloudSnapshot({
   if (deleteImportDocumentsResult.error) throw deleteImportDocumentsResult.error;
 
   if (snapshot.importJobs.length) {
+    const integrationSourceIdByProvider = new Map(
+      snapshot.integrations.map((integration) => [integration.providerId, integration.id]),
+    );
     const importDocumentsResult = await supabase.from("import_documents").insert(
-      snapshot.importJobs.map((job) => mapImportJobToDocumentInsert(job, userId)),
+      snapshot.importJobs.map((job) => ({
+        ...mapImportJobToDocumentInsert(job, userId),
+        import_source_id:
+          (job.providerId ? integrationSourceIdByProvider.get(job.providerId) : null) ?? null,
+      })),
     );
 
     if (importDocumentsResult.error) throw importDocumentsResult.error;
@@ -241,6 +271,73 @@ export async function saveCloudSnapshot({
   if (marketPreferencesResult.error) throw marketPreferencesResult.error;
 }
 
+function shouldTreatCloudSnapshotAsEmpty(snapshot: WealthCompassSnapshot) {
+  const hasTrackedPortfolio = snapshot.assets.length > 0 || snapshot.transactions.length > 0;
+  const hasGoals = snapshot.goals.length > 0;
+  const hasMeaningfulImportHistory = snapshot.importJobs.some(
+    (job) => job.rawText.trim() || job.normalizedText.trim() || job.assetCount > 0,
+  );
+
+  if (hasTrackedPortfolio || hasGoals) {
+    return false;
+  }
+
+  const hasImportResidue =
+    snapshot.integrations.length > 0 || snapshot.importJobs.length > 0;
+
+  return hasImportResidue && !hasMeaningfulImportHistory;
+}
+
+function mergeCloudImportJobs(
+  importJobRows: ImportJobRow[],
+  importDocumentRows: ImportDocumentRow[],
+) {
+  const mergedByDocumentId = new Map<string, ImportJob>();
+
+  for (const documentRow of importDocumentRows) {
+    const mappedDocument = mapImportDocumentRowToJob(documentRow);
+    mergedByDocumentId.set(mappedDocument.documentId, mappedDocument);
+  }
+
+  for (const jobRow of importJobRows) {
+    const mappedJob = mapImportJobRowToJob(jobRow);
+    const existing = mergedByDocumentId.get(mappedJob.documentId);
+
+    mergedByDocumentId.set(mappedJob.documentId, {
+      ...existing,
+      ...mappedJob,
+      assetCount: mappedJob.assetCount || existing?.assetCount || 0,
+      documentStoragePath:
+        mappedJob.documentStoragePath ?? existing?.documentStoragePath ?? null,
+      duplicateCount: mappedJob.duplicateCount || existing?.duplicateCount || 0,
+      normalizedText: mappedJob.normalizedText || existing?.normalizedText || "",
+      providerId: mappedJob.providerId ?? existing?.providerId ?? null,
+      providerName:
+        mappedJob.providerName !== "Imported source"
+          ? mappedJob.providerName
+          : existing?.providerName ?? mappedJob.providerName,
+      rawText: mappedJob.rawText || existing?.rawText || "",
+      reviewedCorrections:
+        mappedJob.reviewedCorrections.length > 0
+          ? mappedJob.reviewedCorrections
+          : existing?.reviewedCorrections ?? [],
+      rowWarnings:
+        mappedJob.rowWarnings.length > 0
+          ? mappedJob.rowWarnings
+          : existing?.rowWarnings ?? [],
+      summary:
+        mappedJob.summary !== "Import job synced from cloud."
+          ? mappedJob.summary
+          : existing?.summary ?? mappedJob.summary,
+      usedOcr: mappedJob.usedOcr || existing?.usedOcr || false,
+    });
+  }
+
+  return [...mergedByDocumentId.values()].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  );
+}
+
 export async function saveRiskProfileHistory({
   answers,
   profile,
@@ -252,6 +349,14 @@ export async function saveRiskProfileHistory({
   supabase: SupabaseClient;
   userId: User["id"];
 }) {
+  const profileResult = await supabase.from("profiles").upsert({
+    id: userId,
+    ...mapAnswersToProfile(answers),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (profileResult.error) throw profileResult.error;
+
   const result = await supabase.from("risk_profiles").insert({
     allocation: profile.allocation,
     answers,

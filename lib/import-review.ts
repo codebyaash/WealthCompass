@@ -58,6 +58,7 @@ export function analyzeImportDocument({
     detectedSource && cues.length >= 2 ? "high" : detectedSource ? "medium" : "low";
   const parserProfile = getProviderParserProfile(detectedSource?.id);
   const guidance = buildGuidance({
+    lowerText,
     detectedSource,
     documentKind,
     normalizationApplied,
@@ -137,6 +138,9 @@ function collectCues(lowerText: string, fileName: string | undefined, usedOcr: b
   if (/folio|isin|nav|ltp|units/.test(lowerText)) {
     cues.push("Investment statement terms");
   }
+  if (/transaction summary|investment activity|fresh purchase|withdrawal|redemption|purchase summary/.test(lowerText)) {
+    cues.push("Transaction summary markers");
+  }
 
   return cues;
 }
@@ -165,6 +169,7 @@ function calculateQualityScore({
 }
 
 function buildGuidance({
+  lowerText,
   detectedSource,
   documentKind,
   normalizationApplied,
@@ -172,6 +177,7 @@ function buildGuidance({
   parseReadiness,
   usedOcr,
 }: {
+  lowerText: string;
   detectedSource: ImportSourceDescriptor | null;
   documentKind: ImportDocumentKind;
   normalizationApplied: string[];
@@ -191,6 +197,17 @@ function buildGuidance({
 
   if (documentKind === "email-statement") {
     guidance.push("Keep the holdings section and trim long email footers if the preview looks noisy.");
+  }
+
+  if (
+    /transaction summary|investment activity|fresh purchase|withdrawal|redemption|purchase summary/.test(
+      lowerText,
+    ) &&
+    !/scheme name|security name|current value|market value|invested value/.test(lowerText)
+  ) {
+    guidance.push(
+      "This looks like a transaction or activity summary, not the holdings section. Paste the portfolio holdings table or upload the statement page that lists each fund/security with current value.",
+    );
   }
 
   if (documentKind === "pdf-statement" && usedOcr) {

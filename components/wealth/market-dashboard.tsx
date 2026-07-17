@@ -30,6 +30,9 @@ import {
 } from "@/lib/integration-sync";
 import {
   buildFallbackMarketResponse,
+  getMarketPortfolioNote,
+  summarizeHoldingsWatch,
+  summarizeSectorBreadth,
   type MarketSnapshotResponse,
 } from "@/lib/market-data";
 import type {
@@ -110,26 +113,21 @@ export function MarketDashboard({
     ).toISOString();
   }, [lastRefreshedAt, marketPreferences.autoRefresh, marketPreferences.pollingIntervalSeconds]);
   const holdingsWatchSummary = useMemo(() => {
-    const items = marketData.holdingsWatch.map((item) => {
-      const asset = assets.find(
-        (current) => current.name === item.assetName && current.type === item.type,
-      );
-      const trackedValue = asset?.value ?? 0;
-      const indicativeValue = trackedValue * (1 + item.change / 100);
-
-      return {
-        ...item,
-        indicativeValue,
-        trackedValue,
-      };
-    });
-
-    return {
-      items,
-      trackedTotal: items.reduce((sum, item) => sum + item.trackedValue, 0),
-      updatedTotal: items.reduce((sum, item) => sum + item.indicativeValue, 0),
-    };
+    return summarizeHoldingsWatch(marketData.holdingsWatch, assets);
   }, [assets, marketData.holdingsWatch]);
+  const sectorBreadth = useMemo(
+    () => summarizeSectorBreadth(marketData.sectors),
+    [marketData.sectors],
+  );
+  const marketPortfolioNote = useMemo(
+    () =>
+      getMarketPortfolioNote({
+        holdingsWatch: holdingsWatchSummary,
+        sectorBreadth,
+        sentiment: marketData.sentiment,
+      }),
+    [holdingsWatchSummary, marketData.sentiment, sectorBreadth],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -271,6 +269,24 @@ export function MarketDashboard({
               <MarketTile key={item.name} item={item} />
             ))}
           </div>
+          <div className="rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{marketData.sentiment}</Badge>
+              <Badge variant="outline">
+                {sectorBreadth.advancing} up / {sectorBreadth.declining} down
+              </Badge>
+              {holdingsWatchSummary.trackedTotal > 0 && (
+                <Badge variant="outline">
+                  Watch {holdingsWatchSummary.deltaPercent >= 0 ? "+" : ""}
+                  {holdingsWatchSummary.deltaPercent.toFixed(2)}%
+                </Badge>
+              )}
+            </div>
+            <p className="mt-3 text-sm font-medium">{marketPortfolioNote.title}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {marketPortfolioNote.detail}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -311,6 +327,16 @@ export function MarketDashboard({
                 <span>{marketData.sentimentScore}/100</span>
               </div>
               <Progress value={marketData.sentimentScore} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-xs text-muted-foreground">Strongest sector</p>
+                <p className="mt-2 font-semibold">{sectorBreadth.strongest ?? "N/A"}</p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-xs text-muted-foreground">Weakest sector</p>
+                <p className="mt-2 font-semibold">{sectorBreadth.weakest ?? "N/A"}</p>
+              </div>
             </div>
             <div className="rounded-md border bg-muted/40 p-4 text-sm leading-6">
               {marketData.sentiment === "Constructive"
@@ -492,6 +518,28 @@ export function MarketDashboard({
                   {holdingsWatchSummary.updatedTotal.toLocaleString("en-IN", {
                     maximumFractionDigits: 0,
                   })}
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-sm font-medium">Indicative move</p>
+                <p className="mt-2 text-2xl font-semibold">
+                  {holdingsWatchSummary.deltaValue >= 0 ? "+" : ""}
+                  {holdingsWatchSummary.deltaValue.toLocaleString("en-IN", {
+                    maximumFractionDigits: 0,
+                  })}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {holdingsWatchSummary.deltaPercent >= 0 ? "+" : ""}
+                  {holdingsWatchSummary.deltaPercent.toFixed(2)}%
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-sm font-medium">Leading / lagging</p>
+                <p className="mt-2 text-sm font-semibold">
+                  {holdingsWatchSummary.leadMover ?? "N/A"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Weakest {holdingsWatchSummary.lagMover ?? "N/A"}
                 </p>
               </div>
             </div>

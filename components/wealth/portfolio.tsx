@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Roadmap } from "@/components/wealth/roadmap";
 import { HealthCheck } from "@/components/wealth/health-check";
+import { MetricMini } from "@/components/wealth/metric-mini";
 import { Badge } from "@/components/ui/badge";
 import {
   NumberField,
@@ -59,6 +60,7 @@ import {
 } from "@/lib/import-review";
 import { createImportJobFromReview } from "@/lib/import-jobs";
 import { buildImportDiagnostics, type ImportDiagnostics } from "@/lib/import-diagnostics";
+import { parseImportedTransactions } from "@/lib/transaction-import";
 import {
   createPortfolioTransaction,
   coercePortfolioAssets,
@@ -67,6 +69,9 @@ import {
   type PortfolioTransaction,
 } from "@/lib/local-storage";
 import {
+  calculatePortfolioInvestedValue,
+  getAllocationInsights,
+  getPortfolioDiversificationScore,
   calculateRealizedGainFromTransactions,
   getPortfolioHealthChecks,
   summarizeTransactions,
@@ -178,9 +183,29 @@ export function Portfolio({
     () => summarizeTransactions(transactions),
     [transactions],
   );
+  const transactionImportPreview = useMemo(
+    () => parseImportedTransactions(csvText),
+    [csvText],
+  );
   const realizedGain = useMemo(
     () => calculateRealizedGainFromTransactions(transactions),
     [transactions],
+  );
+  const investedValue = useMemo(
+    () => calculatePortfolioInvestedValue(safeAssets),
+    [safeAssets],
+  );
+  const unrealizedGain = useMemo(
+    () => portfolioTotal - investedValue,
+    [portfolioTotal, investedValue],
+  );
+  const diversificationScore = useMemo(
+    () => getPortfolioDiversificationScore({ assets: safeAssets, portfolioTotal }),
+    [portfolioTotal, safeAssets],
+  );
+  const allocationInsights = useMemo(
+    () => getAllocationInsights({ assets: safeAssets, portfolioTotal, profile }),
+    [portfolioTotal, profile, safeAssets],
   );
 
   useEffect(() => {
@@ -194,8 +219,20 @@ export function Portfolio({
     const normalizedText = importArtifacts?.normalizedText || csvText;
     const rowWarnings = importArtifacts?.rowWarnings ?? importPreview.errors;
 
+    if (!importPreview.assets.length && transactionImportPreview.transactions.length) {
+      transactionImportPreview.transactions.forEach((transaction) => {
+        onAddTransaction(transaction);
+      });
+      setCsvMessage(
+        `Imported ${transactionImportPreview.transactions.length} transaction${transactionImportPreview.transactions.length === 1 ? "" : "s"} into the journal.`,
+      );
+      return;
+    }
+
     if (!importPreview.assets.length) {
-      setCsvMessage(importPreview.errors.join(" "));
+      setCsvMessage(
+        [...importPreview.errors, ...transactionImportPreview.errors].filter(Boolean).join(" "),
+      );
       if (importReview) {
         onLogImportJob(
           createImportJobFromReview({
@@ -325,7 +362,9 @@ export function Portfolio({
       setIsReviewingImport(true);
       const isPdf =
         file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      const pdfResult = isPdf ? await extractTextFromPdfOnDemand(file) : null;
+      const serverPdfResult = isPdf ? await extractImportTextFromUpload(file) : null;
+      const pdfResult =
+        serverPdfResult ?? (isPdf ? await extractTextFromPdfOnDemand(file) : null);
       const rawText = pdfResult ? pdfResult.text : await file.text();
       const detectedSource = detectImportSource({
         fileName: file.name,
@@ -429,6 +468,12 @@ export function Portfolio({
         }),
       );
       setCsvMessage("Import text analyzed. Review the cues before importing.");
+    } catch (error) {
+      setImportReview(null);
+      setImportArtifacts(null);
+      setCsvMessage(
+        error instanceof Error ? error.message : "Could not analyze the pasted text.",
+      );
     } finally {
       setIsReviewingImport(false);
     }
@@ -488,6 +533,12 @@ export function Portfolio({
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <MetricMini label="Tracked value" value={formatMoney(portfolioTotal)} />
+            <MetricMini label="Invested basis" value={formatMoney(investedValue)} />
+            <MetricMini label="Unrealized P&L" value={formatMoney(unrealizedGain)} />
+            <MetricMini label="Diversification" value={`${diversificationScore}/100`} />
+          </div>
           <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
             <div>
               <p className="text-sm font-medium">Add one holding</p>
@@ -616,10 +667,13 @@ export function Portfolio({
                 type="button"
                 variant="outline"
                 onClick={handleCsvImport}
-                disabled={!selectedImportedAssets.length}
+                disabled={
+                  !selectedImportedAssets.length &&
+                  !transactionImportPreview.transactions.length
+                }
               >
                 <Upload className="h-4 w-4" />
-                Import {selectedImportedAssets.length || ""}
+                Import {selectedImportedAssets.length || transactionImportPreview.transactions.length || ""}
               </Button>
             </div>
             <SegmentedControl
@@ -657,6 +711,11 @@ export function Portfolio({
               <ImportReviewCard
                 artifacts={importArtifacts}
                 review={importReview}
+              />
+            )}
+            {transactionImportPreview.transactions.length > 0 && (
+              <TransactionImportPreview
+                transactions={transactionImportPreview.transactions}
               />
             )}
             <ImportPreview
@@ -778,6 +837,35 @@ export function Portfolio({
             ))}
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Allocation alignment</CardTitle>
+            <CardDescription>Compare your current mix with the suggested profile buckets.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {allocationInsights.length ? (
+              allocationInsights.map((insight) => (
+                <div
+                  key={insight.bucket}
+                  className="flex items-center justify-between gap-4 rounded-md border bg-background p-3"
+                >
+                  <div>
+                    <p className="text-sm font-medium">{insight.bucket}</p>
+                    <p className="text-xs text-muted-foreground">{insight.status}</p>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    <p>Current {insight.currentShare}%</p>
+                    <p>Suggested {insight.suggestedShare}%</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm leading-6 text-muted-foreground">
+                Add holdings or imported transactions to compare your real mix with the suggested allocation buckets.
+              </div>
+            )}
+          </CardContent>
+        </Card>
         <Roadmap profile={profile} compact />
       </div>
     </div>
@@ -788,6 +876,46 @@ async function extractTextFromPdfOnDemand(file: File): Promise<PdfExtractResult>
   const { extractTextFromPdf } = await import("@/lib/pdf-import");
 
   return extractTextFromPdf(file);
+}
+
+async function extractImportTextFromUpload(file: File): Promise<PdfExtractResult | null> {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/import-extract", {
+      body: formData,
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Upload extraction route unavailable.");
+    }
+
+    const payload = (await response.json()) as {
+      error?: string;
+      isPdf: boolean;
+      pageCount: number;
+      text: string;
+      usedOcr: boolean;
+      warnings: string[];
+    };
+
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+
+    return payload.isPdf
+      ? {
+          pageCount: payload.pageCount,
+          text: payload.text,
+          usedOcr: payload.usedOcr,
+          warnings: payload.warnings,
+        }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function reviewImportDocument({
@@ -982,6 +1110,50 @@ function ParsedImportRows({
               ) : (
                 <span>Ready to import</span>
               )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TransactionImportPreview({
+  transactions,
+}: {
+  transactions: PortfolioTransaction[];
+}) {
+  return (
+    <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">Parsed transactions</p>
+        <p className="text-xs text-muted-foreground">
+          {transactions.length} row{transactions.length === 1 ? "" : "s"}
+        </p>
+      </div>
+      <div className="grid gap-2">
+        {transactions.slice(0, 8).map((transaction) => (
+          <div
+            key={transaction.id}
+            className="grid gap-2 rounded-md border bg-background p-3 text-xs md:grid-cols-[1.6fr_0.8fr_0.8fr_1fr]"
+          >
+            <div>
+              <p className="font-medium text-foreground">{transaction.assetName}</p>
+              <p className="mt-1 text-muted-foreground">
+                {transaction.type} · {transaction.source}
+              </p>
+            </div>
+            <div className="grid gap-1 text-muted-foreground">
+              <span>{transaction.date}</span>
+              <span>{transaction.action}</span>
+            </div>
+            <div className="grid gap-1 text-muted-foreground">
+              <span>Units {transaction.quantity.toFixed(3)}</span>
+              <span>NAV {formatMoney(transaction.price)}</span>
+            </div>
+            <div className="grid gap-1 text-muted-foreground">
+              <span>Amount {formatMoney(transaction.amount)}</span>
+              <span>{transaction.notes}</span>
             </div>
           </div>
         ))}

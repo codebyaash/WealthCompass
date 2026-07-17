@@ -31,6 +31,29 @@ export type HoldingWatchItem = {
   type: string;
 };
 
+export type HoldingsWatchSummary = {
+  deltaPercent: number;
+  deltaValue: number;
+  items: Array<
+    HoldingWatchItem & {
+      indicativeValue: number;
+      trackedValue: number;
+    }
+  >;
+  leadMover: string | null;
+  lagMover: string | null;
+  trackedTotal: number;
+  updatedTotal: number;
+};
+
+export type SectorBreadthSummary = {
+  advancing: number;
+  declining: number;
+  flat: number;
+  strongest: string | null;
+  weakest: string | null;
+};
+
 type AlphaVantageDailyResponse = {
   "Error Message"?: string;
   "Information"?: string;
@@ -209,6 +232,100 @@ export function buildFallbackMarketResponse(message = "Using built-in market sna
     source: "fallback",
     updatedAt: new Date().toISOString(),
   } satisfies MarketSnapshotResponse;
+}
+
+export function summarizeHoldingsWatch(
+  holdingsWatch: HoldingWatchItem[],
+  assets: PortfolioAsset[],
+): HoldingsWatchSummary {
+  const items = holdingsWatch.map((item) => {
+    const asset = assets.find(
+      (current) => current.name === item.assetName && current.type === item.type,
+    );
+    const trackedValue = asset?.value ?? 0;
+    const indicativeValue = trackedValue * (1 + item.change / 100);
+
+    return {
+      ...item,
+      indicativeValue,
+      trackedValue,
+    };
+  });
+
+  const trackedTotal = items.reduce((sum, item) => sum + item.trackedValue, 0);
+  const updatedTotal = items.reduce((sum, item) => sum + item.indicativeValue, 0);
+  const deltaValue = updatedTotal - trackedTotal;
+  const deltaPercent =
+    trackedTotal > 0 ? Number(((deltaValue / trackedTotal) * 100).toFixed(2)) : 0;
+  const sortedByMove = [...items].sort((left, right) => right.change - left.change);
+
+  return {
+    deltaPercent,
+    deltaValue,
+    items,
+    lagMover: sortedByMove.at(-1)?.assetName ?? null,
+    leadMover: sortedByMove[0]?.assetName ?? null,
+    trackedTotal,
+    updatedTotal,
+  };
+}
+
+export function summarizeSectorBreadth(sectors: SectorMove[]): SectorBreadthSummary {
+  const sorted = [...sectors].sort((left, right) => right.value - left.value);
+
+  return {
+    advancing: sectors.filter((sector) => sector.value > 0).length,
+    declining: sectors.filter((sector) => sector.value < 0).length,
+    flat: sectors.filter((sector) => sector.value === 0).length,
+    strongest: sorted[0]?.name ?? null,
+    weakest: sorted.at(-1)?.name ?? null,
+  };
+}
+
+export function getMarketPortfolioNote({
+  holdingsWatch,
+  sectorBreadth,
+  sentiment,
+}: {
+  holdingsWatch: HoldingsWatchSummary;
+  sectorBreadth: SectorBreadthSummary;
+  sentiment: string;
+}) {
+  if (holdingsWatch.trackedTotal <= 0) {
+    return {
+      detail: "Add holdings to compare your tracked portfolio with the current market tone.",
+      title: "No portfolio-linked market read yet",
+    };
+  }
+
+  if (Math.abs(holdingsWatch.deltaPercent) >= 1) {
+    return {
+      detail: `Your watched holdings are moving about ${holdingsWatch.deltaPercent > 0 ? "+" : ""}${holdingsWatch.deltaPercent.toFixed(2)}% on a best-effort basis, led by ${holdingsWatch.deltaPercent > 0 ? holdingsWatch.leadMover ?? "the strongest proxy" : holdingsWatch.lagMover ?? "the weakest proxy"}.`,
+      title:
+        holdingsWatch.deltaPercent > 0
+          ? "Your tracked watch is broadly participating"
+          : "Your tracked watch is feeling the softness",
+    };
+  }
+
+  if (sectorBreadth.advancing >= sectorBreadth.declining + 2) {
+    return {
+      detail: `Breadth is positive with ${sectorBreadth.advancing} advancing sectors versus ${sectorBreadth.declining} laggards. ${sectorBreadth.strongest ? `${sectorBreadth.strongest} is leading.` : ""}`.trim(),
+      title: "The market is stronger than the headlines alone suggest",
+    };
+  }
+
+  if (sentiment === "Cautious") {
+    return {
+      detail: `Breadth is soft and ${sectorBreadth.weakest ? `${sectorBreadth.weakest} is the weakest pocket right now.` : "several sectors are lagging."} Use this as a prompt to review allocation, not as a prompt to improvise trades.`,
+      title: "This is more of a risk-check day than an action day",
+    };
+  }
+
+  return {
+    detail: "Market conditions look mixed, so staying close to your plan matters more than squeezing meaning out of every tick.",
+    title: "Nothing urgent is demanding a portfolio change",
+  };
 }
 
 export function parseAlphaVantageDailySeries({

@@ -5,9 +5,12 @@ import {
   buildFallbackMarketResponse,
   calculateMarketSentiment,
   fetchMarketSnapshot,
+  getMarketPortfolioNote,
   inferMarketProxyForAsset,
   inferMarketSymbolForAsset,
   parseAlphaVantageDailySeries,
+  summarizeHoldingsWatch,
+  summarizeSectorBreadth,
 } from "../lib/market-data";
 
 describe("calculateMarketSentiment", () => {
@@ -149,6 +152,103 @@ describe("buildHoldingsWatch", () => {
     assert.equal(watch.length, 1);
     assert.equal(watch[0]?.mappedSymbol, "GLD");
     assert.equal(watch[0]?.signal, "Gold proxy");
+  });
+});
+
+describe("summarizeHoldingsWatch", () => {
+  it("calculates indicative totals and lead movers from watched holdings", () => {
+    const summary = summarizeHoldingsWatch(
+      [
+        {
+          assetName: "Gold Savings",
+          change: 2,
+          mappedSymbol: "GLD",
+          signal: "Gold proxy",
+          type: "Gold",
+        },
+        {
+          assetName: "Liquid Fund",
+          change: -1,
+          mappedSymbol: "IEF",
+          signal: "Debt proxy",
+          type: "Debt",
+        },
+      ],
+      [
+        {
+          gain: 0,
+          investedValue: 1000,
+          name: "Gold Savings",
+          price: 100,
+          quantity: 10,
+          source: "Imported",
+          type: "Gold",
+          value: 1000,
+        },
+        {
+          gain: 0,
+          investedValue: 2000,
+          name: "Liquid Fund",
+          price: 100,
+          quantity: 20,
+          source: "Imported",
+          type: "Debt",
+          value: 2000,
+        },
+      ],
+    );
+
+    assert.equal(summary.trackedTotal, 3000);
+    assert.equal(summary.updatedTotal, 3000);
+    assert.equal(summary.deltaPercent, 0);
+    assert.equal(summary.leadMover, "Gold Savings");
+    assert.equal(summary.lagMover, "Liquid Fund");
+  });
+});
+
+describe("summarizeSectorBreadth", () => {
+  it("counts advancing and declining sectors and identifies extremes", () => {
+    const summary = summarizeSectorBreadth([
+      { name: "Banks", value: -0.2 },
+      { name: "IT", value: 0.9 },
+      { name: "Energy", value: 1.1 },
+      { name: "Pharma", value: 0 },
+    ]);
+
+    assert.deepEqual(summary, {
+      advancing: 2,
+      declining: 1,
+      flat: 1,
+      strongest: "Energy",
+      weakest: "Banks",
+    });
+  });
+});
+
+describe("getMarketPortfolioNote", () => {
+  it("flags meaningful positive participation in the watched portfolio", () => {
+    const note = getMarketPortfolioNote({
+      holdingsWatch: {
+        deltaPercent: 1.6,
+        deltaValue: 1600,
+        items: [],
+        lagMover: "Debt Fund",
+        leadMover: "Index Core",
+        trackedTotal: 100000,
+        updatedTotal: 101600,
+      },
+      sectorBreadth: {
+        advancing: 4,
+        declining: 1,
+        flat: 0,
+        strongest: "IT",
+        weakest: "Banks",
+      },
+      sentiment: "Constructive",
+    });
+
+    assert.equal(note.title, "Your tracked watch is broadly participating");
+    assert.match(note.detail, /Index Core/);
   });
 });
 

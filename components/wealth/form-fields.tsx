@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,10 +12,13 @@ export function NumberField({
   onChange: (value: number) => void;
   value: number;
 }) {
+  const fieldId = useId();
+
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <Label htmlFor={fieldId}>{label}</Label>
       <Input
+        id={fieldId}
         min={0}
         type="number"
         value={value}
@@ -33,10 +37,12 @@ export function TextField({
   onChange: (value: string) => void;
   value: string;
 }) {
+  const fieldId = useId();
+
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
-      <Input value={value} onChange={(event) => onChange(event.target.value)} />
+      <Label htmlFor={fieldId}>{label}</Label>
+      <Input id={fieldId} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
@@ -52,10 +58,13 @@ export function SelectField({
   options: Array<[string, string]>;
   value: string;
 }) {
+  const fieldId = useId();
+
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <Label htmlFor={fieldId}>{label}</Label>
       <select
+        id={fieldId}
         className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={value}
         onChange={(event) => onChange(event.target.value)}

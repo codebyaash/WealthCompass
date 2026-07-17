@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildIntegrationOperationsSummary,
   appendIntegrationSyncEvent,
   buildIntegrationSyncTelemetry,
   buildIntegrationSchedulerPlan,
@@ -9,6 +10,7 @@ import {
   executeIntegrationSyncBatch,
   formatSyncTimeLabel,
   getConnectorAttentionSummary,
+  getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
@@ -38,17 +40,27 @@ const activeConnection: IntegrationConnection = {
   syncCadenceMinutes: 120,
 };
 
+const autoConnection: IntegrationConnection = {
+  ...activeConnection,
+  id: "integration-direct",
+  importStrategy: "sync-ready",
+  providerId: "paytm-money-direct",
+  providerName: "Paytm Money Direct",
+  sourceHint: "Reserve auth for direct account access.",
+  syncCadenceMinutes: 120,
+};
+
 describe("integration sync helpers", () => {
   it("calculates the next sync timestamp from cadence", () => {
     assert.equal(
-      getNextIntegrationSyncAt(activeConnection, new Date("2026-07-11T09:00:00.000Z")),
+      getNextIntegrationSyncAt(autoConnection, new Date("2026-07-11T09:00:00.000Z")),
       "2026-07-11T10:00:00.000Z",
     );
   });
 
   it("flags overdue and paused connections clearly", () => {
     assert.deepEqual(
-      getIntegrationSyncState(activeConnection, new Date("2026-07-11T11:30:00.000Z")),
+      getIntegrationSyncState(autoConnection, new Date("2026-07-11T11:30:00.000Z")),
       {
         detail: "Overdue by 90 min.",
         label: "Due now",
@@ -58,7 +70,7 @@ describe("integration sync helpers", () => {
 
     assert.deepEqual(
       getIntegrationSyncState({
-        ...activeConnection,
+        ...autoConnection,
         status: "paused",
       }),
       {
@@ -69,37 +81,71 @@ describe("integration sync helpers", () => {
     );
   });
 
-  it("creates an import job from a scheduled sync checkpoint", () => {
-    const job = createSyncImportJob(activeConnection, new Date("2026-07-11T10:15:00.000Z"));
+  it("treats manual import connectors as on-demand instead of overdue", () => {
+    assert.equal(
+      getNextIntegrationSyncAt(
+        activeConnection,
+        new Date("2026-07-11T09:00:00.000Z"),
+      ),
+      null,
+    );
 
-    assert.equal(job.providerId, "paytm-money");
-    assert.equal(job.providerName, "Paytm Money");
-    assert.equal(job.documentKind, "pdf-statement");
+    assert.deepEqual(
+      getIntegrationSyncState(
+        activeConnection,
+        new Date("2026-07-11T11:30:00.000Z"),
+      ),
+      {
+        detail: "Last import activity 210 min ago.",
+        label: "On demand",
+        tone: "healthy",
+      },
+    );
+
+    assert.deepEqual(
+      getIntegrationSyncState({
+        ...activeConnection,
+        lastSyncAt: null,
+      }),
+      {
+        detail: "Runs when you upload a fresh statement.",
+        label: "On demand",
+        tone: "idle",
+      },
+    );
+  });
+
+  it("creates an import job from a scheduled sync checkpoint", () => {
+    const job = createSyncImportJob(autoConnection, new Date("2026-07-11T10:15:00.000Z"));
+
+    assert.equal(job.providerId, "paytm-money-direct");
+    assert.equal(job.providerName, "Paytm Money Direct");
+    assert.equal(job.documentKind, "table-export");
     assert.equal(job.status, "received");
-    assert.match(job.summary, /exports|statements/i);
+    assert.match(job.summary, /direct|auth|fetch/i);
   });
 
   it("builds telemetry from a sync run", () => {
     const telemetry = buildIntegrationSyncTelemetry(
-      activeConnection,
+      autoConnection,
       new Date("2026-07-11T10:15:00.000Z"),
     );
 
-    assert.equal(telemetry.lastImportedFileCount, 1);
-    assert.equal(telemetry.lastSyncStatus, "success");
-    assert.match(telemetry.lastSyncMessage, /statement-driven payload/i);
+    assert.equal(telemetry.lastImportedFileCount, 0);
+    assert.equal(telemetry.lastSyncStatus, "warning");
+    assert.match(telemetry.lastSyncMessage, /direct-sync lane|auth is still pending/i);
   });
 
   it("creates and appends sync events", () => {
     const event = createIntegrationSyncEvent(
-      activeConnection,
+      autoConnection,
       new Date("2026-07-11T10:15:00.000Z"),
     );
     const history = appendIntegrationSyncEvent(activeConnection, event);
 
     assert.equal(history.length, 1);
-    assert.equal(history[0].status, "success");
-    assert.equal(history[0].importedFileCount, 1);
+    assert.equal(history[0].status, "warning");
+    assert.equal(history[0].importedFileCount, 0);
   });
 
   it("aggregates connector health metrics from sync history", () => {
@@ -187,23 +233,96 @@ describe("integration sync helpers", () => {
     );
   });
 
+  it("builds a compact operations summary for settings", () => {
+    const summary = buildIntegrationOperationsSummary(
+      [
+        {
+          ...autoConnection,
+          id: "due-source",
+          lastSyncAt: "2026-07-11T07:00:00.000Z",
+        },
+        {
+          ...activeConnection,
+          id: "manual-source",
+        },
+        {
+          ...activeConnection,
+          id: "paused-source",
+          status: "paused",
+        },
+      ],
+      new Date("2026-07-11T10:00:00.000Z"),
+    );
+
+    assert.deepEqual(summary, {
+      activeCount: 2,
+      attentionCount: 1,
+      autoCount: 1,
+      dueNowCount: 1,
+      manualCount: 1,
+      pausedCount: 1,
+    });
+  });
+
+  it("lists the highest-priority attention items first", () => {
+    const items = getIntegrationAttentionItems(
+      [
+        {
+          ...autoConnection,
+          id: "warning-source",
+          providerName: "Warning Source",
+          syncHistory: [
+            {
+              detectedProviderSummary: "",
+              id: "warn-1",
+              importedFileCount: 0,
+              message: "Recent warning",
+              status: "warning",
+              syncedAt: "2026-07-11T10:00:00.000Z",
+            },
+            {
+              detectedProviderSummary: "",
+              id: "warn-2",
+              importedFileCount: 0,
+              message: "Older warning",
+              status: "warning",
+              syncedAt: "2026-07-11T09:00:00.000Z",
+            },
+          ],
+        },
+        {
+          ...autoConnection,
+          id: "error-source",
+          providerName: "Error Source",
+          status: "error",
+        },
+      ],
+      new Date("2026-07-11T10:00:00.000Z"),
+    );
+
+    assert.equal(items[0]?.providerName, "Error Source");
+    assert.equal(items[0]?.severity, "error");
+    assert.equal(items[1]?.statusLabel, "Due now");
+  });
+
   it("builds a scheduler plan for cron-style connector checks", () => {
     const plan = buildIntegrationSchedulerPlan(
       [
         {
           ...activeConnection,
+          ...autoConnection,
           id: "ready-source",
           lastSyncAt: null,
           providerName: "Ready Source",
         },
         {
-          ...activeConnection,
+          ...autoConnection,
           id: "overdue-source",
           lastSyncAt: "2026-07-11T07:00:00.000Z",
           providerName: "Overdue Source",
         },
         {
-          ...activeConnection,
+          ...autoConnection,
           id: "future-source",
           lastSyncAt: "2026-07-11T09:30:00.000Z",
           providerName: "Future Source",
@@ -234,12 +353,13 @@ describe("integration sync helpers", () => {
       [
         {
           ...activeConnection,
+          ...autoConnection,
           id: "due-source",
           lastSyncAt: "2026-07-11T07:00:00.000Z",
           providerName: "Due Source",
         },
         {
-          ...activeConnection,
+          ...autoConnection,
           id: "future-source",
           lastSyncAt: "2026-07-11T09:45:00.000Z",
           providerName: "Future Source",
@@ -272,6 +392,30 @@ describe("integration sync helpers", () => {
     assert.equal(result.integrations[1].lastSchedulerCheckAt, "2026-07-11T10:00:00.000Z");
     assert.equal(result.integrations[1].lastSchedulerStatus, "idle");
     assert.equal(result.integrations[1].lastSyncAt, "2026-07-11T09:45:00.000Z");
+  });
+
+  it("does not schedule statement-upload connectors in due batches", () => {
+    const result = executeIntegrationSyncBatch(
+      [
+        {
+          ...activeConnection,
+          id: "manual-groww",
+          importStrategy: "statement-upload",
+          lastSyncAt: "2026-07-11T07:00:00.000Z",
+          providerName: "Groww",
+        },
+      ],
+      {
+        importJobs: [],
+        mode: "due",
+        now: new Date("2026-07-11T10:00:00.000Z"),
+        origin: "scheduled",
+      },
+    );
+
+    assert.deepEqual(result.syncedConnectionIds, []);
+    assert.equal(result.importJobs.length, 0);
+    assert.equal(result.integrations[0].lastSchedulerStatus, "idle");
   });
 
   it("merges configured and requested user IDs for scheduled syncs", () => {

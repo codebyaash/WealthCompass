@@ -11,9 +11,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { MetricMini } from "@/components/wealth/metric-mini";
 import { formatMoney } from "@/lib/formatters";
 import {
   getMentorAnswer,
+  getSuggestedMentorQuestions,
   mentorQuestions,
   type MentorQuestionId,
 } from "@/lib/mentor-rules";
@@ -42,6 +44,10 @@ export function MentorPanel({
     profile,
     questionId: activeQuestion.id,
   });
+  const suggestedQuestions = getSuggestedMentorQuestions({
+    answers,
+    assets,
+  });
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
@@ -49,10 +55,34 @@ export function MentorPanel({
         <CardHeader>
           <CardTitle>Investment Mentor</CardTitle>
           <CardDescription>
-            Rule-based explanations now, AI-powered personalization later.
+            Guided explanations tuned to your profile, portfolio, and current setup stage.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2">
+        <CardContent className="grid gap-4">
+          <div className="rounded-md border bg-muted/40 p-4">
+            <p className="text-sm font-medium">Recommended now</p>
+            <div className="mt-3 grid gap-2">
+              {suggestedQuestions.map((questionId) => {
+                const question = mentorQuestions.find((item) => item.id === questionId);
+                if (!question) return null;
+
+                return (
+                  <Button
+                    key={question.id}
+                    type="button"
+                    variant={activeQuestion.id === question.id ? "default" : "secondary"}
+                    className="h-auto min-h-11 justify-start whitespace-normal text-left leading-5"
+                    onClick={() => setActiveQuestionId(question.id)}
+                  >
+                    <MessageCircleQuestion className="h-4 w-4 shrink-0" />
+                    {question.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <p className="text-sm font-medium">Question library</p>
           {mentorQuestions.map((question) => (
             <Button
               key={question.id}
@@ -65,6 +95,7 @@ export function MentorPanel({
               {question.label}
             </Button>
           ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -73,11 +104,21 @@ export function MentorPanel({
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.personality}</Badge>
             <Badge variant="outline">{profile.band}</Badge>
+            <Badge variant="outline">{answer.focusLabel}</Badge>
           </div>
           <CardTitle>{activeQuestion.title}</CardTitle>
           <CardDescription>{answer.summary}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            {answer.checkpoints.map((checkpoint) => (
+              <MetricMini
+                key={checkpoint.label}
+                label={checkpoint.label}
+                value={checkpoint.value}
+              />
+            ))}
+          </div>
           <div className="rounded-md border bg-muted/40 p-4 text-sm leading-6">
             {answer.explanation}
           </div>
@@ -94,6 +135,27 @@ export function MentorPanel({
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {answer.personalNote}
             </p>
+          </div>
+          <div className="rounded-md border bg-background p-4">
+            <p className="text-sm font-medium">Keep going with</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {answer.followUps.map((questionId) => {
+                const question = mentorQuestions.find((item) => item.id === questionId);
+                if (!question) return null;
+
+                return (
+                  <Button
+                    key={question.id}
+                    type="button"
+                    variant="outline"
+                    className="h-9"
+                    onClick={() => setActiveQuestionId(question.id)}
+                  >
+                    {question.label}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
       </Card>

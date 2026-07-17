@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Cloud,
   Copy,
   Database,
@@ -51,8 +52,10 @@ import type {
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
 import {
+  buildIntegrationOperationsSummary,
   buildIntegrationSchedulerPlan,
   formatSyncTimeLabel,
+  getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
@@ -74,6 +77,7 @@ import {
   type WealthGoal,
 } from "@/lib/local-storage";
 import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 export function DataSettings({
   answers,
@@ -156,6 +160,8 @@ export function DataSettings({
   const [syncPreview, setSyncPreview] = useState<ProviderSyncPreview | null>(null);
   const [syncExecution, setSyncExecution] = useState<ProviderSyncExecutionResult | null>(null);
   const [syncPreviewProviderId, setSyncPreviewProviderId] = useState<string | null>(null);
+  const [jobFilter, setJobFilter] = useState<"all" | "completed" | "open" | "failed">("all");
+  const [jobSearch, setJobSearch] = useState("");
   const integrationHealthSummary = useMemo(() => {
     const metrics = integrations.map(getIntegrationHealthMetrics);
     const activeCount = integrations.filter((integration) => integration.status === "active").length;
@@ -176,6 +182,54 @@ export function DataSettings({
     () => buildIntegrationSchedulerPlan(integrations),
     [integrations],
   );
+  const operationsSummary = useMemo(
+    () => buildIntegrationOperationsSummary(integrations),
+    [integrations],
+  );
+  const attentionItems = useMemo(
+    () => getIntegrationAttentionItems(integrations).slice(0, 4),
+    [integrations],
+  );
+  const importJobSummary = useMemo(() => {
+    const openCount = importJobs.filter(
+      (job) => job.status === "received" || job.status === "reviewed",
+    ).length;
+    const completedCount = importJobs.filter((job) => job.status === "completed").length;
+    const failedCount = importJobs.filter((job) => job.status === "failed").length;
+    const ocrCount = importJobs.filter((job) => job.usedOcr).length;
+
+    return {
+      completedCount,
+      failedCount,
+      ocrCount,
+      openCount,
+    };
+  }, [importJobs]);
+  const filteredImportJobs = useMemo(() => {
+    const query = jobSearch.trim().toLowerCase();
+
+    return importJobs.filter((job) => {
+      const matchesFilter =
+        jobFilter === "all"
+          ? true
+          : jobFilter === "open"
+            ? job.status === "received" || job.status === "reviewed"
+            : job.status === jobFilter;
+
+      if (!matchesFilter) return false;
+      if (!query) return true;
+
+      return [
+        job.providerName,
+        job.fileName,
+        job.summary,
+        job.notes,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [importJobs, jobFilter, jobSearch]);
   const inboxConnectionMap = useMemo(
     () =>
       new Map(
@@ -221,6 +275,38 @@ export function DataSettings({
       transactions,
     ],
   );
+  const setupChecklist = useMemo(
+    () => [
+      {
+        detail: isSupabaseConfigured()
+          ? userEmail
+            ? `Signed in as ${userEmail}. Cloud sync and connector auth are available.`
+            : "Supabase keys are configured. Sign in from /auth to enable cloud sync and connector auth."
+          : "Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY in .env.local.",
+        done: isSupabaseConfigured() && Boolean(userEmail),
+        label: "Sign-in and cloud sync",
+      },
+      {
+        detail:
+          "Add ALPHA_VANTAGE_API_KEY in .env.local to replace fallback market snapshots with live refreshes.",
+        done: false,
+        label: "Live market feed",
+      },
+      {
+        detail:
+          "Paytm Money is ready through CSV, statement text, email, and PDF imports today.",
+        done: true,
+        label: "Paytm import flow",
+      },
+      {
+        detail:
+          "Direct broker API sync is implemented for Zerodha only right now. Paytm Money live account linking still needs its own connector.",
+        done: false,
+        label: "Paytm live account link",
+      },
+    ],
+    [userEmail],
+  );
 
   async function handleCopySnapshot() {
     if (!navigator.clipboard) {
@@ -245,12 +331,16 @@ export function DataSettings({
 
   function handleResetPortfolio() {
     onResetPortfolio();
-    setActionMessage("Portfolio restored to demo holdings.");
+    setActionMessage(
+      userEmail
+        ? "Tracked portfolio data cleared for this signed-in workspace."
+        : "Portfolio restored to demo holdings.",
+    );
   }
 
   function handleRestoreDemoWorkspace() {
     onRestoreDemoWorkspace();
-    setActionMessage("Demo workspace restored.");
+    setActionMessage(userEmail ? "Signed-in workspace cleared." : "Demo workspace restored.");
   }
 
   function handleImportWorkspace() {
@@ -608,6 +698,28 @@ export function DataSettings({
           <CardDescription>Manage the free MVP workspace, live market behavior, and connection records.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div>
+              <p className="text-sm font-medium">Demo setup checklist</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                This is the shortest path from local MVP to a credible live demo.
+              </p>
+            </div>
+            <div className="grid gap-3">
+              {setupChecklist.map((item) => (
+                <div key={item.label} className="rounded-md border bg-background p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{item.label}</p>
+                    <Badge variant={item.done ? "secondary" : "outline"}>
+                      {item.done ? "Ready" : "Pending"}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="rounded-md border bg-muted/30 p-4">
             <div className="flex items-center gap-2">
               <Cloud className="h-4 w-4 text-primary" />
@@ -700,6 +812,64 @@ export function DataSettings({
             <MetricMini label="Avg sync success" value={`${integrationHealthSummary.averageSuccessRate}%`} />
             <MetricMini label="Sync runs" value={`${integrationHealthSummary.totalRuns}`} />
             <MetricMini label="Warning streaks" value={`${integrationHealthSummary.warningConnections}`} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Operations pulse</CardTitle>
+            <CardDescription>
+              See which sources are healthy, which ones are due, and which imports still need a human pass.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <MetricMini label="Active sources" value={`${operationsSummary.activeCount}`} />
+              <MetricMini label="Auto syncs" value={`${operationsSummary.autoCount}`} />
+              <MetricMini label="Manual sources" value={`${operationsSummary.manualCount}`} />
+              <MetricMini label="Due now" value={`${operationsSummary.dueNowCount}`} />
+              <MetricMini label="Need attention" value={`${operationsSummary.attentionCount}`} />
+              <MetricMini label="Open imports" value={`${importJobSummary.openCount}`} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-sm font-medium">Connector queue</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Next scheduled activity {formatSyncTimeLabel(schedulerPlan.nextRunAt)} with {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} ready for a first run and {schedulerPlan.pausedCount} paused.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-4">
+                <p className="text-sm font-medium">Import queue</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {importJobSummary.completedCount} completed, {importJobSummary.failedCount} failed, and {importJobSummary.ocrCount} OCR-backed import{importJobSummary.ocrCount === 1 ? "" : "s"} recorded so far.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-background p-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-primary" />
+                <p className="text-sm font-medium">Needs attention now</p>
+              </div>
+              {attentionItems.length ? (
+                <div className="grid gap-2">
+                  {attentionItems.map((item) => (
+                    <div key={item.id} className="rounded-md border bg-muted/30 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium">{item.providerName}</p>
+                        <Badge variant={item.severity === "error" ? "secondary" : "outline"}>
+                          {item.statusLabel}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Nothing urgent right now. Sources are either on cadence or waiting for manual input.
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -1182,7 +1352,33 @@ export function DataSettings({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
-            {importJobs.map((job) => (
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <MetricMini label="Open review" value={`${importJobSummary.openCount}`} />
+                <MetricMini label="Completed" value={`${importJobSummary.completedCount}`} />
+                <MetricMini label="Failed" value={`${importJobSummary.failedCount}`} />
+                <MetricMini label="OCR-backed" value={`${importJobSummary.ocrCount}`} />
+              </div>
+              <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
+                <SegmentedControl
+                  label="Status filter"
+                  options={[
+                    ["all", "All"],
+                    ["open", "Open"],
+                    ["completed", "Completed"],
+                    ["failed", "Failed"],
+                  ]}
+                  value={jobFilter}
+                  onChange={(value) => setJobFilter(value as typeof jobFilter)}
+                />
+                <TextField
+                  label="Search imports"
+                  value={jobSearch}
+                  onChange={setJobSearch}
+                />
+              </div>
+            </div>
+            {filteredImportJobs.length ? filteredImportJobs.map((job) => (
               <ImportJobCard
                 key={job.id}
                 correctionDraft={jobCorrectionDrafts[job.id] ?? ""}
@@ -1223,7 +1419,11 @@ export function DataSettings({
                   onReprocessImportJob(job.id)
                 }
               />
-            ))}
+            )) : (
+              <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
+                No import jobs match this filter yet.
+              </div>
+            )}
           </CardContent>
         </Card>
 

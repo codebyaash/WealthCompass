@@ -1,4 +1,8 @@
-import type { PortfolioAsset, WealthGoal } from "./local-storage";
+import type {
+  PortfolioAsset,
+  PortfolioTransaction,
+  WealthGoal,
+} from "./local-storage";
 import { formatMoney } from "./formatters";
 import type { RiskProfile } from "./wealth-rules";
 
@@ -16,6 +20,11 @@ export type DashboardAction = {
 export type GoalPortfolioInsight = {
   detail: string;
   title: string;
+};
+
+export type PortfolioTrajectoryPoint = {
+  month: string;
+  value: number;
 };
 
 export function getDashboardAction({
@@ -115,4 +124,79 @@ export function getGoalPortfolioInsight({
     detail: `Your portfolio covers about ${coverage}% of current goal targets. Start checking whether concentration and timing still match each goal.`,
     title: "Portfolio and goals are starting to converge",
   } satisfies GoalPortfolioInsight;
+}
+
+export function buildPortfolioTrajectory({
+  transactions,
+  windowMonths = 6,
+}: {
+  transactions: PortfolioTransaction[];
+  windowMonths?: number;
+}) {
+  if (!transactions.length || windowMonths <= 0) {
+    return [] satisfies PortfolioTrajectoryPoint[];
+  }
+
+  const datedTransactions = transactions
+    .map((transaction) => ({
+      ...transaction,
+      parsedDate: new Date(transaction.date),
+    }))
+    .filter((transaction) => !Number.isNaN(transaction.parsedDate.getTime()))
+    .sort((left, right) => left.parsedDate.getTime() - right.parsedDate.getTime());
+
+  if (!datedTransactions.length) {
+    return [] satisfies PortfolioTrajectoryPoint[];
+  }
+
+  const endMonth = new Date(datedTransactions[datedTransactions.length - 1].parsedDate);
+  endMonth.setDate(1);
+  endMonth.setHours(0, 0, 0, 0);
+
+  const startMonth = new Date(endMonth);
+  startMonth.setMonth(startMonth.getMonth() - (windowMonths - 1));
+
+  let runningValue = 0;
+  let cursor = 0;
+  const points: PortfolioTrajectoryPoint[] = [];
+
+  while (
+    cursor < datedTransactions.length &&
+    datedTransactions[cursor].parsedDate < startMonth
+  ) {
+    runningValue += getSignedTransactionAmount(datedTransactions[cursor]);
+    cursor += 1;
+  }
+
+  for (let offset = 0; offset < windowMonths; offset += 1) {
+    const monthStart = new Date(startMonth);
+    monthStart.setMonth(startMonth.getMonth() + offset);
+    const nextMonthStart = new Date(monthStart);
+    nextMonthStart.setMonth(monthStart.getMonth() + 1);
+
+    while (
+      cursor < datedTransactions.length &&
+      datedTransactions[cursor].parsedDate >= monthStart &&
+      datedTransactions[cursor].parsedDate < nextMonthStart
+    ) {
+      runningValue += getSignedTransactionAmount(datedTransactions[cursor]);
+      cursor += 1;
+    }
+
+    points.push({
+      month: monthStart.toLocaleString("en-US", { month: "short" }),
+      value: Math.max(Math.round(runningValue), 0),
+    });
+  }
+
+  return points;
+}
+
+function getSignedTransactionAmount(transaction: PortfolioTransaction) {
+  const baseAmount =
+    transaction.amount > 0 ? transaction.amount : transaction.quantity * transaction.price;
+
+  if (transaction.action === "sell") return -Math.abs(baseAmount);
+
+  return Math.abs(baseAmount);
 }

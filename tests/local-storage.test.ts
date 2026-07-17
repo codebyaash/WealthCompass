@@ -5,7 +5,11 @@ import {
   createIntegrationConnection,
   createWealthGoal,
   defaultSnapshot,
+  emptySignedInSnapshot,
+  loadSignedInWorkspaceCache,
   parseWorkspaceImport,
+  saveSignedInWorkspaceCache,
+  workspaceHasMeaningfulUserData,
 } from "../lib/local-storage";
 
 describe("parseWorkspaceImport", () => {
@@ -208,5 +212,98 @@ describe("createWealthGoal", () => {
     assert.equal(goal.priority, "aspirational");
     assert.equal(goal.targetAmount, 500000);
     assert.ok(goal.id.length > 0);
+  });
+});
+
+describe("signed-in workspace cache", () => {
+  it("stores and restores a user-scoped workspace cache entry", () => {
+    const storage = new Map<string, string>();
+    const previousWindow = globalThis.window;
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem(key: string) {
+            return storage.get(key) ?? null;
+          },
+          removeItem(key: string) {
+            storage.delete(key);
+          },
+          setItem(key: string, value: string) {
+            storage.set(key, value);
+          },
+        },
+      },
+    });
+
+    try {
+      saveSignedInWorkspaceCache({
+        riskHistory: [
+          {
+            band: "Balanced",
+            confidence: "Getting ready",
+            createdAt: "2026-07-15T00:00:00.000Z",
+            id: "risk-1",
+            personality: "Steady Explorer",
+            score: 54,
+            summary: "Saved locally.",
+          },
+        ],
+        snapshot: {
+          ...emptySignedInSnapshot,
+          answers: {
+            ...emptySignedInSnapshot.answers,
+            country: "India",
+          },
+          goals: [
+            {
+              annualReturn: 10,
+              currentAmount: 50000,
+              id: "goal-1",
+              name: "House",
+              priority: "important",
+              targetAmount: 500000,
+              years: 4,
+            },
+          ],
+        },
+        userId: "user-1",
+      });
+
+      const cached = loadSignedInWorkspaceCache("user-1");
+
+      assert.equal(cached?.snapshot.answers.country, "India");
+      assert.equal(cached?.snapshot.goals[0]?.name, "House");
+      assert.equal(cached?.riskHistory[0]?.personality, "Steady Explorer");
+      assert.equal(cached?.userId, "user-1");
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: previousWindow,
+      });
+    }
+  });
+});
+
+describe("workspaceHasMeaningfulUserData", () => {
+  it("returns false for the empty signed-in baseline", () => {
+    assert.equal(workspaceHasMeaningfulUserData(emptySignedInSnapshot, []), false);
+  });
+
+  it("returns true when profile answers differ from the empty baseline", () => {
+    assert.equal(
+      workspaceHasMeaningfulUserData(
+        {
+          ...emptySignedInSnapshot,
+          answers: {
+            ...emptySignedInSnapshot.answers,
+            monthlyInvestment: emptySignedInSnapshot.answers.monthlyInvestment + 500,
+          },
+        },
+        [],
+      ),
+      true,
+    );
   });
 });

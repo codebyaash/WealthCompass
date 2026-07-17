@@ -1,7 +1,203 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createImportJob } from "../lib/local-storage";
-import { persistCloudImportJob } from "../lib/supabase-sync";
+import { loadCloudSnapshot, persistCloudImportJob } from "../lib/supabase-sync";
+
+describe("loadCloudSnapshot", () => {
+  it("clears connector-only cloud residue into an empty signed-in workspace", async () => {
+    const profileRow = {
+      age: 29,
+      annual_income: 1200000,
+      country: "India",
+      debt_level: "manageable",
+      emergency_months: 4,
+      experience: "new",
+      horizon_years: 8,
+      market_drop_response: "wait",
+      monthly_investment: 12000,
+      monthly_savings: 30000,
+      primary_goal: "home",
+      tax_awareness: "low",
+      time_available: "medium",
+    };
+
+    const supabase = {
+      from(table: string) {
+        return {
+          eq() {
+            return this;
+          },
+          maybeSingle: async () => {
+            if (table === "profiles") {
+              return { data: profileRow, error: null };
+            }
+
+            if (table === "market_preferences") {
+              return {
+                data: {
+                  auto_refresh: true,
+                  include_holdings_watch: true,
+                  polling_interval_seconds: 60,
+                  preferred_source: "alpha-vantage",
+                },
+                error: null,
+              };
+            }
+
+            return { data: null, error: null };
+          },
+          order() {
+            return this;
+          },
+          returns: async () => {
+            if (table === "import_sources") {
+              return {
+                data: [
+                  {
+                    channel: "broker",
+                    id: "integration-groww",
+                    last_synced_at: "2026-07-11T10:00:00.000Z",
+                    metadata: {
+                      lastSyncMessage: "Needs review.",
+                      lastSyncStatus: "warning",
+                    },
+                    provider_id: "groww",
+                    provider_name: "Groww",
+                    status: "active",
+                  },
+                ],
+                error: null,
+              };
+            }
+
+            if (table === "import_jobs") {
+              return {
+                data: [
+                  {
+                    created_assets: 0,
+                    created_at: "2026-07-11T10:00:00.000Z",
+                    created_transactions: 0,
+                    error_message: null,
+                    id: "job-1",
+                    import_document_id: "doc-1",
+                    job_payload: {
+                      documentId: "doc-1",
+                      fileName: "groww.pdf",
+                      localStatus: "reviewed",
+                      providerId: "groww",
+                      providerName: "Groww",
+                      summary: "Needs review.",
+                    },
+                    status: "completed",
+                  },
+                ],
+                error: null,
+              };
+            }
+
+            return { data: [], error: null };
+          },
+          select() {
+            return this;
+          },
+        };
+      },
+    } as const;
+
+    const snapshot = await loadCloudSnapshot(supabase as never, "user-1");
+
+    assert.equal(snapshot.assets.length, 0);
+    assert.equal(snapshot.transactions.length, 0);
+    assert.equal(snapshot.goals.length, 0);
+    assert.equal(snapshot.integrations.length, 0);
+    assert.equal(snapshot.importJobs.length, 0);
+    assert.equal(snapshot.answers.country, "India");
+  });
+
+  it("keeps meaningful import history and merges job payload with document metadata", async () => {
+    const supabase = {
+      from(table: string) {
+        return {
+          eq() {
+            return this;
+          },
+          maybeSingle: async () => ({ data: null, error: null }),
+          order() {
+            return this;
+          },
+          returns: async () => {
+            if (table === "import_jobs") {
+              return {
+                data: [
+                  {
+                    created_assets: 0,
+                    created_at: "2026-07-11T10:00:00.000Z",
+                    created_transactions: 0,
+                    error_message: null,
+                    id: "job-1",
+                    import_document_id: "doc-1",
+                    job_payload: {
+                      documentId: "doc-1",
+                      fileName: "paytm.pdf",
+                      localStatus: "reviewed",
+                      providerId: "paytm-money",
+                      providerName: "Paytm Money",
+                      summary: "Needs review.",
+                    },
+                    status: "completed",
+                  },
+                ],
+                error: null,
+              };
+            }
+
+            if (table === "import_documents") {
+              return {
+                data: [
+                  {
+                    created_at: "2026-07-11T10:00:00.000Z",
+                    detected_provider: "paytm-money",
+                    extracted_text: "raw statement text",
+                    file_name: "paytm.pdf",
+                    file_type: "pdf-statement",
+                    id: "doc-1",
+                    import_status: "needs_review",
+                    parse_summary: {
+                      duplicateCount: 1,
+                      normalizedText: "normalized statement text",
+                      providerConfidence: "medium",
+                      providerId: "paytm-money",
+                      providerName: "Paytm Money",
+                      rowWarnings: ["Units missing."],
+                      selectedAssetCount: 2,
+                      summary: "Paytm statement needs review.",
+                      usedOcr: true,
+                    },
+                    storage_path: "import-documents/doc-1/paytm.pdf",
+                  },
+                ],
+                error: null,
+              };
+            }
+
+            return { data: [], error: null };
+          },
+          select() {
+            return this;
+          },
+        };
+      },
+    } as const;
+
+    const snapshot = await loadCloudSnapshot(supabase as never, "user-1");
+
+    assert.equal(snapshot.importJobs.length, 1);
+    assert.equal(snapshot.importJobs[0]?.documentStoragePath, "import-documents/doc-1/paytm.pdf");
+    assert.equal(snapshot.importJobs[0]?.assetCount, 2);
+    assert.equal(snapshot.importJobs[0]?.usedOcr, true);
+    assert.equal(snapshot.importJobs[0]?.status, "reviewed");
+  });
+});
 
 describe("persistCloudImportJob", () => {
   it("upserts the profile, import document, and import job for a signed-in user", async () => {
@@ -105,6 +301,7 @@ describe("persistCloudImportJob", () => {
         created_assets: 0,
         created_transactions: 0,
         error_message: null,
+        id: job.id,
         import_document_id: "document-1",
         job_payload: {
           attemptCount: 1,
@@ -114,6 +311,7 @@ describe("persistCloudImportJob", () => {
           duplicateCount: 0,
           fileName: "paytm-money.pdf",
           lastActionAt: null,
+          localStatus: "reviewed",
           normalizationApplied: [],
           normalizedText: "",
           parserProfileId: null,
@@ -126,7 +324,7 @@ describe("persistCloudImportJob", () => {
           summary: "Paytm statement needs review.",
           usedOcr: false,
         },
-        status: "reviewed",
+        status: "completed",
         user_id: "user-1",
       },
       table: "import_jobs",

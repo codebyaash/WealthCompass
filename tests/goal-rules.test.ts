@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 import {
   calculateGoalFundingGap,
   calculateGoalProgress,
+  getGoalMilestones,
   getGoalMonthlySplit,
   getGoalPlanningChecks,
+  getGoalScenarioRows,
   getGoalSummary,
 } from "../lib/goal-rules";
 import type { WealthGoal } from "../lib/local-storage";
@@ -70,6 +72,7 @@ describe("getGoalPlanningChecks", () => {
     assert.deepEqual(
       getGoalPlanningChecks({
         formatMoney: (value) => `$${value}`,
+        goals,
         monthlyGoal: 120000,
         priorityCount: 0,
         totalProgress: 5,
@@ -90,7 +93,32 @@ describe("getGoalPlanningChecks", () => {
           status: "Add an essential goal",
           value: "0",
         },
+        {
+          label: "Nearest deadline",
+          status: "Time-sensitive",
+          value: "2y",
+        },
+        {
+          label: "Stretch pressure",
+          status: "Targets look realistic",
+          value: "0",
+        },
       ],
     );
+  });
+});
+
+describe("goal scenario helpers", () => {
+  it("builds scenario rows and milestone ladder", () => {
+    const scenarios = getGoalScenarioRows(goals[0]);
+    const milestones = getGoalMilestones(goals[0]);
+
+    assert.equal(scenarios.length, 3);
+    assert.equal(scenarios[0]?.label, "Conservative");
+    assert.ok((scenarios[0]?.monthly ?? 0) >= (scenarios[2]?.monthly ?? 0));
+
+    assert.equal(milestones.length, 4);
+    assert.equal(milestones[0]?.label, "25% funded");
+    assert.equal(milestones[3]?.targetAmount, 100000);
   });
 });

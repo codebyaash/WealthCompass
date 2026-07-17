@@ -258,6 +258,10 @@ function parsePortfolioStatementText(statementText: string): CsvImportResult {
 
   if (labelledResult.assets.length) return labelledResult;
 
+  const genericResult = parseGenericStatement(statementText);
+
+  if (genericResult.assets.length) return genericResult;
+
   return {
     assets: [],
     errors: [
@@ -490,6 +494,66 @@ function parseLabelledStatement(statementText: string): CsvImportResult {
   });
 
   return { assets, errors: [] };
+}
+
+function parseGenericStatement(statementText: string): CsvImportResult {
+  const lines = statementText
+    .split(/\r?\n/)
+    .map((line) => stripThousandsSeparators(line.trim()))
+    .filter(Boolean);
+  const assets = lines.flatMap((line) => {
+    if (isSummaryRow(line)) return [];
+
+    const split =
+      splitLineByNumericTail(line, 4) ??
+      splitLineByNumericTail(line, 3) ??
+      splitLineByNumericTail(line, 2);
+
+    if (!split) return [];
+
+    const [name, ...tail] = split;
+    const numericTail = tail.map((value) => parseNumber(value));
+    const parsedValue = numericTail[0];
+    const investedValue = finiteOrZero(numericTail[1]);
+    const quantity = finiteOrZero(numericTail[2]);
+    const price = numericTail[3];
+    const value = deriveHoldingValue({
+      investedValue,
+      parsedValue,
+      price,
+      quantity,
+    });
+
+    if (!name || !Number.isFinite(value) || value <= 0) return [];
+
+    return [
+      {
+        gain: deriveHoldingGain({
+          gain: Number.NaN,
+          investedValue,
+          value,
+        }),
+        investedValue,
+        name,
+        price: deriveHoldingPrice({ price, quantity, value }),
+        quantity,
+        source: "Imported statement",
+        type: inferAssetType({ name, sourceType: "" }),
+        value,
+      } satisfies PortfolioAsset,
+    ];
+  });
+
+  const contextLooksLikeStatement =
+    /current value|market value|invested|units|nav|ltp|folio|isin|portfolio|statement/i.test(
+      statementText,
+    );
+
+  if (assets.length >= 2 || (assets.length >= 1 && contextLooksLikeStatement)) {
+    return { assets, errors: [] };
+  }
+
+  return { assets: [], errors: [] };
 }
 
 function createPortfolioAssetFromRow(

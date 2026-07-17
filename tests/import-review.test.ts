@@ -28,4 +28,20 @@ describe("analyzeImportDocument", () => {
     assert.deepEqual(review.normalizationApplied, []);
     assert.equal(review.parseReadiness, "low");
   });
+
+  it("explains when pasted text is only a transaction summary", () => {
+    const review = analyzeImportDocument({
+      text: `Transaction Summary
+Investment Activity
+Fresh Purchase: 3000
+Withdrawal: 0`,
+    });
+
+    assert.ok(review.cues.includes("Transaction summary markers"));
+    assert.ok(
+      review.guidance.some((item) =>
+        /transaction or activity summary, not the holdings section/i.test(item),
+      ),
+    );
+  });
 });

@@ -160,6 +160,7 @@ describe("goal mappers", () => {
     assert.deepEqual(mapGoalToInsert(goal, "user-1"), {
       current_amount: 10000,
       expected_return: 7,
+      id: "goal-1",
       name: "Education",
       priority: "essential",
       target_amount: 500000,
@@ -293,6 +294,7 @@ describe("integration mappers", () => {
 
     assert.deepEqual(mapIntegrationToImportSourceInsert(mapped, "user-1"), {
       channel: "broker",
+      id: "integration-1",
       last_synced_at: null,
       metadata: {
         importStrategy: "statement-upload",
@@ -377,6 +379,7 @@ describe("import job mappers", () => {
         duplicateCount: 1,
         fileName: "cams.pdf",
         lastActionAt: "2026-07-11T01:00:00.000Z",
+        localStatus: "completed",
         normalizationApplied: ["Removed common registrar footer and pagination text"],
         normalizedText: "Scheme Name\tCurrent Value",
         parserProfileId: "cams",
@@ -404,6 +407,7 @@ describe("import job mappers", () => {
       created_assets: 4,
       created_transactions: 0,
       error_message: null,
+      id: "job-1",
       import_document_id: "document-1",
       job_payload: {
         attemptCount: 2,
@@ -413,6 +417,7 @@ describe("import job mappers", () => {
         duplicateCount: 1,
         fileName: "cams.pdf",
         lastActionAt: "2026-07-11T01:00:00.000Z",
+        localStatus: "completed",
         normalizationApplied: ["Removed common registrar footer and pagination text"],
         normalizedText: "Scheme Name\tCurrent Value",
         parserProfileId: "cams",

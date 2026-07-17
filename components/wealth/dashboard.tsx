@@ -32,6 +32,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Roadmap } from "@/components/wealth/roadmap";
 import {
+  buildPortfolioTrajectory,
   getDashboardAction,
   getGoalPortfolioInsight,
 } from "@/lib/dashboard-rules";
@@ -39,19 +40,15 @@ import { formatMoney } from "@/lib/formatters";
 import { getConnectorAttentionSummary } from "@/lib/integration-sync";
 import { marketNotes } from "@/lib/sample-data";
 import { calculateGoalMonthlyInvestment, type RiskProfile } from "@/lib/wealth-rules";
-import type { IntegrationConnection, PortfolioAsset, WealthGoal } from "@/lib/local-storage";
+import type {
+  IntegrationConnection,
+  PortfolioAsset,
+  PortfolioTransaction,
+  WealthGoal,
+} from "@/lib/local-storage";
 import type { ActiveView } from "@/components/wealth/app-sidebar";
 
 export type DashboardNavigationTarget = ActiveView;
-
-const performanceData = [
-  { month: "Jan", value: 380000 },
-  { month: "Feb", value: 392000 },
-  { month: "Mar", value: 386000 },
-  { month: "Apr", value: 415000 },
-  { month: "May", value: 432000 },
-  { month: "Jun", value: 464000 },
-];
 
 const colors = [
   "var(--color-chart-1)",
@@ -76,6 +73,7 @@ export function Dashboard({
   onNavigate,
   portfolioTotal,
   profile,
+  transactions,
 }: {
   assets: PortfolioAsset[];
   goals: WealthGoal[];
@@ -85,6 +83,7 @@ export function Dashboard({
   onNavigate: (view: DashboardNavigationTarget) => void;
   portfolioTotal: number;
   profile: RiskProfile;
+  transactions: PortfolioTransaction[];
 }) {
   const totalGoalTarget = goals.reduce((sum, goal) => sum + goal.targetAmount, 0);
   const totalGoalCurrent = goals.reduce((sum, goal) => sum + goal.currentAmount, 0);
@@ -115,34 +114,73 @@ export function Dashboard({
     portfolioTotal,
   });
   const connectorAttention = getConnectorAttentionSummary(integrations);
+  const isFreshWorkspace =
+    portfolioTotal <= 0 &&
+    goals.length === 0 &&
+    assets.length === 0 &&
+    integrations.length === 0;
+  const trajectoryData = buildPortfolioTrajectory({ transactions });
+  const hasTrajectory = trajectoryData.some((point) => point.value > 0);
 
   return (
     <div className="grid gap-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Gauge} label="Risk Score" value={`${profile.score}/100`} detail={profile.band} />
-        <MetricCard icon={ShieldCheck} label="Health Score" value={`${healthScore}/100`} detail="Foundation check" />
-        <MetricCard icon={WalletCards} label="Tracked Value" value={formatMoney(portfolioTotal)} detail="Manual entries" />
-        <MetricCard icon={Calculator} label="Goal SIP" value={formatMoney(monthlyGoal)} detail="Monthly target" />
+        <MetricCard
+          icon={Gauge}
+          label="Risk Score"
+          value={isFreshWorkspace ? "--" : `${profile.score}/100`}
+          detail={isFreshWorkspace ? "Complete onboarding" : profile.band}
+        />
+        <MetricCard
+          icon={ShieldCheck}
+          label="Health Score"
+          value={isFreshWorkspace ? "--" : `${healthScore}/100`}
+          detail={isFreshWorkspace ? "Complete onboarding" : "Foundation check"}
+        />
+        <MetricCard
+          icon={WalletCards}
+          label="Tracked Value"
+          value={formatMoney(portfolioTotal)}
+          detail={isFreshWorkspace ? "No holdings yet" : "Manual entries"}
+        />
+        <MetricCard
+          icon={Calculator}
+          label="Goal SIP"
+          value={formatMoney(monthlyGoal)}
+          detail={isFreshWorkspace ? "No goals yet" : "Monthly target"}
+        />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
             <CardTitle>Next best action</CardTitle>
-            <CardDescription>{action.reason}</CardDescription>
+            <CardDescription>
+              {isFreshWorkspace
+                ? "Start with onboarding, then add your first holding or goal."
+                : action.reason}
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="rounded-md border bg-muted/40 p-4">
               <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{action.badge}</Badge>
-                <Badge variant="outline">{profile.confidence}</Badge>
+                <Badge variant="secondary">{isFreshWorkspace ? "Setup" : action.badge}</Badge>
+                <Badge variant="outline">
+                  {isFreshWorkspace ? "Getting started" : profile.confidence}
+                </Badge>
               </div>
-              <p className="mt-3 text-lg font-semibold">{action.title}</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{action.detail}</p>
+              <p className="mt-3 text-lg font-semibold">
+                {isFreshWorkspace ? "Build your first real workspace" : action.title}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {isFreshWorkspace
+                  ? "Complete onboarding, connect or import holdings, and add at least one goal so the dashboard can personalize around your actual data."
+                  : action.detail}
+              </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button type="button" onClick={() => onNavigate(action.view)}>
-                {action.cta}
+              <Button type="button" onClick={() => onNavigate(isFreshWorkspace ? "onboarding" : action.view)}>
+                {isFreshWorkspace ? "Complete onboarding" : action.cta}
               </Button>
               <Button type="button" variant="outline" onClick={() => onNavigate("mentor")}>
                 Ask Mentor
@@ -185,24 +223,38 @@ export function Dashboard({
         <Card>
           <CardHeader>
             <CardTitle>Portfolio trajectory</CardTitle>
-            <CardDescription>Manual tracking with CSV, statement, and PDF import support.</CardDescription>
+            <CardDescription>
+              {hasTrajectory
+                ? "Net invested capital built from recorded transactions."
+                : "Manual tracking with CSV, statement, and PDF import support."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={performanceData}>
-                <defs>
-                  <linearGradient id="wealth" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="var(--color-chart-1)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${value / 1000}k`} />
-                <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                <Area type="monotone" dataKey="value" stroke="var(--color-chart-1)" fill="url(#wealth)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {hasTrajectory ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trajectoryData}>
+                  <defs>
+                    <linearGradient id="wealth" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="var(--color-chart-1)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${value / 1000}k`} />
+                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                  <Area type="monotone" dataKey="value" stroke="var(--color-chart-1)" fill="url(#wealth)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : portfolioTotal > 0 ? (
+              <div className="flex h-full items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                Your holdings are tracked, but the trajectory needs transaction history. Add manual transactions or import a statement with dated activity to unlock the chart.
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                Add holdings or import statements to start building your portfolio history.
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -212,32 +264,40 @@ export function Dashboard({
             <CardDescription>Manual holdings grouped by asset type.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-5 md:grid-cols-[0.9fr_1.1fr]">
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={allocationData} dataKey="value" innerRadius={54} outerRadius={86} paddingAngle={3}>
-                    {allocationData.map((entry, index) => (
-                      <Cell key={entry.name} fill={colors[index % colors.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid content-center gap-3">
-              {allocationData.map((item, index) => (
-                <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-3 w-3 rounded-sm"
-                      style={{ backgroundColor: colors[index % colors.length] }}
-                    />
-                    <span className="text-sm font-medium">{item.name}</span>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{formatMoney(item.value)}</span>
+            {allocationData.length ? (
+              <>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={allocationData} dataKey="value" innerRadius={54} outerRadius={86} paddingAngle={3}>
+                        {allocationData.map((entry, index) => (
+                          <Cell key={entry.name} fill={colors[index % colors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
+                <div className="grid content-center gap-3">
+                  {allocationData.map((item, index) => (
+                    <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-3 w-3 rounded-sm"
+                          style={{ backgroundColor: colors[index % colors.length] }}
+                        />
+                        <span className="text-sm font-medium">{item.name}</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">{formatMoney(item.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="md:col-span-2 flex min-h-64 items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                Allocation will appear after you add your first tracked holding.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -249,33 +309,41 @@ export function Dashboard({
             <CardDescription>{goals.length} active goals in the planner.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div>
-              <div className="mb-2 flex justify-between text-sm">
-                <span>{formatMoney(totalGoalCurrent)}</span>
-                <span>{formatMoney(totalGoalTarget)}</span>
-              </div>
-              <Progress value={goalProgress} />
-            </div>
-            <div className="grid gap-3">
-              {goals.slice(0, 3).map((goal) => (
-                <div key={goal.id} className="rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{goal.name}</p>
-                    <Badge variant="outline">{goalPriorityLabels[goal.priority]}</Badge>
+            {goals.length ? (
+              <>
+                <div>
+                  <div className="mb-2 flex justify-between text-sm">
+                    <span>{formatMoney(totalGoalCurrent)}</span>
+                    <span>{formatMoney(totalGoalTarget)}</span>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {formatMoney(calculateGoalMonthlyInvestment(goal))} monthly target
-                  </p>
+                  <Progress value={goalProgress} />
                 </div>
-              ))}
-            </div>
-            <div className="rounded-md border bg-muted/40 p-3">
-              <p className="text-sm font-medium">{goalInsight.title}</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{goalInsight.detail}</p>
-            </div>
-            <Button type="button" variant="outline" onClick={() => onNavigate("goals")}>
-              Open Goals
-            </Button>
+                <div className="grid gap-3">
+                  {goals.slice(0, 3).map((goal) => (
+                    <div key={goal.id} className="rounded-md border bg-muted/30 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">{goal.name}</p>
+                        <Badge variant="outline">{goalPriorityLabels[goal.priority]}</Badge>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {formatMoney(calculateGoalMonthlyInvestment(goal))} monthly target
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-md border bg-muted/40 p-3">
+                  <p className="text-sm font-medium">{goalInsight.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{goalInsight.detail}</p>
+                </div>
+                <Button type="button" variant="outline" onClick={() => onNavigate("goals")}>
+                  Open Goals
+                </Button>
+              </>
+            ) : (
+              <div className="flex min-h-64 items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                Add your first goal to see progress, funding targets, and planning insights here.
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -313,8 +381,7 @@ export function Dashboard({
           </CardContent>
         </Card>
       </div>
-
-      <Roadmap profile={profile} />
+      {!isFreshWorkspace && <Roadmap profile={profile} />}
     </div>
   );
 }

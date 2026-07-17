@@ -5,6 +5,8 @@ import {
   calculateLargestHoldingConcentration,
   calculatePortfolioGainPercent,
   derivePortfolioAssetsFromTransactions,
+  getAllocationInsights,
+  getPortfolioDiversificationScore,
   getPortfolioHealthChecks,
   getSuggestedIndexFundCore,
 } from "../lib/portfolio-rules";
@@ -115,6 +117,62 @@ describe("getPortfolioHealthChecks", () => {
         label: "Detail coverage",
         status: "Import quality strong",
         value: "100%",
+      },
+      {
+        label: "Diversification score",
+        status: "Improving",
+        value: "67/100",
+      },
+    ]);
+  });
+});
+
+describe("portfolio analytics helpers", () => {
+  it("returns diversification and allocation insights", () => {
+    const assets = [
+      asset({ investedValue: 50000 }),
+      asset({ investedValue: 35000, name: "Debt", type: "Debt", value: 40000 }),
+    ];
+    const profile = calculateRiskProfile(answers);
+
+    assert.equal(
+      getPortfolioDiversificationScore({
+        assets,
+        portfolioTotal: 100000,
+      }),
+      67,
+    );
+
+    assert.deepEqual(getAllocationInsights({ assets, portfolioTotal: 100000, profile }), [
+      {
+        bucket: "Cash",
+        currentShare: 0,
+        status: "Below target",
+        suggestedShare: 12,
+      },
+      {
+        bucket: "Debt",
+        currentShare: 40,
+        status: "Above target",
+        suggestedShare: 28,
+      },
+      {
+        bucket: "Index Funds",
+        currentShare: 60,
+        status: "Above target",
+        suggestedShare: 45,
+      },
+      {
+        bucket: "Gold",
+        currentShare: 0,
+        status: "Below target",
+        suggestedShare: 10,
+      },
+      {
+        bucket: "Stocks",
+        currentShare: 0,
+        status: "Near target",
+        suggestedShare: 5,
       },
     ]);
   });
