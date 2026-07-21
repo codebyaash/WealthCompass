@@ -25,7 +25,10 @@ export async function GET(request: Request) {
       const { data, error } = await supabase.auth.getUser(accessToken);
 
       if (!error && data.user) {
-        const cloudSnapshot = await loadCloudSnapshot(supabase, data.user.id);
+        const { snapshot: cloudSnapshot } = await loadCloudSnapshot(
+          supabase,
+          data.user.id,
+        );
         const effectivePreferences = {
           ...cloudSnapshot.marketPreferences,
           preferredSource:

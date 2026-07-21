@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Plus, Target, TimerReset, Trash2 } from "lucide-react";
 import { HealthCheck } from "@/components/wealth/health-check";
 import { MetricMini } from "@/components/wealth/metric-mini";
 import { NumberField, SelectField, TextField } from "@/components/wealth/form-fields";
@@ -55,7 +55,7 @@ export function Goals({
   onDeleteGoal: (goalId: string) => void;
   onUpdateGoal: (goalId: string, goal: WealthGoal) => void;
 }) {
-  const { priorityCount, totalProgress, totalTarget } = getGoalSummary(goals);
+  const { priorityCount, totalCurrent, totalProgress, totalTarget } = getGoalSummary(goals);
   const chartData = getGoalMonthlySplit(goals);
   const planningChecks = getGoalPlanningChecks({
     formatMoney,
@@ -64,17 +64,132 @@ export function Goals({
     priorityCount,
     totalProgress,
   });
+  const essentialShare = goals.length
+    ? Math.round((priorityCount / goals.length) * 100)
+    : 0;
+  const planningHeadline =
+    goals.length === 0
+      ? "Start with one real goal, not five vague ones"
+      : totalProgress < 10
+        ? "Your goal map exists, now it needs sequencing"
+        : totalProgress < 40
+          ? "Progress is visible, so funding order matters more"
+          : "The plan is taking shape, now keep it realistic and consistent";
+  const planningDetail =
+    goals.length === 0
+      ? "A simple first goal with a target amount, timeline, and rough return assumption is enough to make the planner useful."
+      : totalProgress < 10
+        ? "This stage is mostly about choosing which goal deserves the first serious monthly commitment."
+        : totalProgress < 40
+          ? "You have enough momentum now that essential goals and shorter deadlines should stay clearly ahead of aspirational ones."
+          : "This is where you keep the plan honest by checking stretch assumptions, deadlines, and contribution load.";
+  const planningReadinessLabel =
+    goals.length === 0
+      ? "Setup in progress"
+      : totalProgress < 10
+        ? "Needs sequencing"
+        : totalProgress < 40
+          ? "Funding in motion"
+          : "Plan taking shape";
 
   return (
     <div className="grid gap-5">
-      <Card>
+      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+        <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Goal planning desk</Badge>
+              <Badge variant="outline">{planningReadinessLabel}</Badge>
+              <Badge variant="outline">{goals.length || 0} goals</Badge>
+              <Badge variant="outline">{totalProgress}% funded</Badge>
+            </div>
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+                Give every rupee a destination before goals start competing in the dark.
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                This page works best when each goal has a real amount, a real timeline, and a clear priority. Once that is in place, monthly pressure, scenario drift, and milestone pacing become much easier to judge.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Target className="h-3.5 w-3.5" />
+                  Goal load
+                </div>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {goals.length > 0
+                    ? `${goals.length} active goals are sharing ${formatMoney(monthlyGoal)} of monthly funding pressure.`
+                    : "No active goals yet, so the planner is waiting on the first real target."}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <TimerReset className="h-3.5 w-3.5" />
+                  Sequence risk
+                </div>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {priorityCount > 0
+                    ? `${priorityCount} essential goal${priorityCount === 1 ? "" : "s"} should stay ahead of aspirational funding.`
+                    : "Mark the truly non-negotiable goals first so the plan can sequence them correctly."}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Funding pace
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {monthlyGoal > 0
+                    ? `${formatMoney(monthlyGoal)} per month is the current combined contribution pace.`
+                    : "Monthly pace is still unclear because the goals need more detail."}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" data-testid="goals-header-add" onClick={onAddGoal}>
+                <Plus className="h-4 w-4" />
+                Add goal
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 content-start">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Planner read
+              </p>
+              <p className="mt-3 text-base font-semibold text-foreground">{planningHeadline}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{planningDetail}</p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best next move
+              </p>
+              <p className="mt-3 text-sm leading-6 text-foreground">
+                {goals.length === 0
+                  ? "Start with one goal you truly intend to fund in the next 12 months."
+                  : planningChecks[0]?.status ??
+                    "Tighten the highest-priority goal first, then make sure the monthly number still feels livable."}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">{goals.length || 0} goals</Badge>
+            <Badge variant="outline">{priorityCount} essential</Badge>
+            <Badge variant="outline">{totalProgress}% funded</Badge>
+          </div>
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
             <div>
               <CardTitle>Multi-goal planner</CardTitle>
               <CardDescription>Plan emergency, lifestyle, and long-term goals together.</CardDescription>
             </div>
-            <Button type="button" onClick={onAddGoal}>
+            <Button type="button" variant="outline" onClick={onAddGoal}>
               <Plus className="h-4 w-4" />
               Add Goal
             </Button>
@@ -88,18 +203,110 @@ export function Goals({
         </CardContent>
       </Card>
 
+      <Card className="border-border/70 bg-card/95 shadow-sm">
+        <CardHeader>
+          <CardTitle>Planning posture</CardTitle>
+          <CardDescription>{planningHeadline}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <p className="text-sm leading-6 text-muted-foreground">{planningDetail}</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  1. Protect first
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  Emergency, near-term, and non-negotiable goals should be visible before lifestyle goals compete for the same money.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  2. Date the goal
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  A goal without a timeline becomes a wish list. The year matters as much as the amount.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  3. Stress the plan
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  Use the scenario view to see whether the monthly number still feels livable when returns are less generous.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Money already assigned
+              </p>
+              <p className="mt-2 text-lg font-semibold">{formatMoney(totalCurrent)}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Already working toward active goals
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Essential share
+              </p>
+              <p className="mt-2 text-lg font-semibold">{essentialShare}%</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Of active goals marked essential
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Planner read
+              </p>
+              <p className="mt-2 text-sm leading-6">
+                {goals.length === 0
+                  ? "Start with one goal you genuinely intend to fund in the next 12 months."
+                  : monthlyGoal > 0
+                    ? `${formatMoney(monthlyGoal)} per month is the current combined pace across all active goals.`
+                    : "Your current goals still need target and timeline detail before a useful monthly pace appears."}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-5 xl:grid-cols-[1fr_0.75fr]">
         <div className="grid gap-4">
           {goals.length === 0 ? (
-            <Card>
+            <Card className="border-border/70 bg-card/95 shadow-sm">
               <CardHeader>
                 <CardTitle>No goals yet</CardTitle>
-                <CardDescription>Add a goal to calculate monthly investing targets.</CardDescription>
+                <CardDescription>
+                  Add one real goal to unlock monthly targets, scenario checks, and funding milestones.
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <Button type="button" onClick={onAddGoal}>
+              <CardContent className="grid gap-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                    <p className="text-sm font-medium">Emergency buffer</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Best first goal when cash resilience still feels thin.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                    <p className="text-sm font-medium">Home down payment</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Good when the amount is known and the timeline is real.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                    <p className="text-sm font-medium">Retirement base</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Good for long-horizon compounding even if the final number is rough today.
+                    </p>
+                  </div>
+                </div>
+                <Button type="button" data-testid="goals-empty-add" onClick={onAddGoal}>
                   <Plus className="h-4 w-4" />
-                  Add Goal
+                  Add your first goal
                 </Button>
               </CardContent>
             </Card>
@@ -116,7 +323,7 @@ export function Goals({
         </div>
 
         <div className="grid gap-5">
-          <Card>
+          <Card className="border-border/70 bg-card/95 shadow-sm">
             <CardHeader>
               <CardTitle>Monthly split</CardTitle>
               <CardDescription>Required monthly investment by goal.</CardDescription>
@@ -138,7 +345,7 @@ export function Goals({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-border/70 bg-card/95 shadow-sm">
             <CardHeader>
               <CardTitle>Planning checks</CardTitle>
               <CardDescription>Rule-based warnings for unrealistic timelines.</CardDescription>
@@ -150,7 +357,7 @@ export function Goals({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-border/70 bg-card/95 shadow-sm">
             <CardHeader>
               <CardTitle>Funding posture</CardTitle>
               <CardDescription>Read the plan before the plan reads you.</CardDescription>
@@ -164,7 +371,7 @@ export function Goals({
                 label="Essential goal share"
                 value={goals.length ? `${Math.round((priorityCount / goals.length) * 100)}%` : "0%"}
               />
-              <div className="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
                 Essential goals should usually be funded before aspirational ones start competing for the same monthly cash flow.
               </div>
             </CardContent>

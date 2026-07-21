@@ -66,7 +66,7 @@ async function runScheduledMarketRefresh(
   const results = await Promise.all(
     userIds.map(async (userId) => {
       try {
-        const snapshot = await loadCloudSnapshot(supabase, userId);
+        const { snapshot } = await loadCloudSnapshot(supabase, userId);
         const refreshed = await refreshStoredMarketSnapshot({
           apiKey,
           assets: snapshot.assets,

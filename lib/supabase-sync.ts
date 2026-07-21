@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { ImportJob, RiskHistoryItem, WealthCompassSnapshot } from "./local-storage";
 import { emptySignedInSnapshot } from "./local-storage";
 import {
+  coerceSupabaseUuid,
   mapAnswersToProfile,
   mapAssetToPortfolioInsert,
   mapGoalRowToGoal,
@@ -34,20 +35,23 @@ import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
 export async function loadCloudSnapshot(
   supabase: SupabaseClient,
   userId: User["id"],
-): Promise<WealthCompassSnapshot> {
+): Promise<{
+  snapshot: WealthCompassSnapshot;
+  updatedAt: string | null;
+}> {
   const [profileResult, assetsResult, goalsResult, transactionsResult, integrationsResult, importJobsResult, importDocumentsResult, marketPreferencesResult] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", userId).maybeSingle<ProfileRow>(),
     supabase
       .from("portfolio_assets")
       .select(
-        "name, asset_type, current_value, current_price, invested_value, quantity, gain_percent, source_label",
+        "name, asset_type, current_value, current_price, invested_value, quantity, gain_percent, source_label, created_at, updated_at",
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .returns<PortfolioRow[]>(),
     supabase
       .from("goals")
-      .select("id, name, target_amount, current_amount, years, expected_return, priority")
+      .select("id, name, target_amount, current_amount, years, expected_return, priority, updated_at")
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .returns<GoalRow[]>(),
@@ -61,15 +65,15 @@ export async function loadCloudSnapshot(
       .returns<PortfolioTransactionRow[]>(),
     supabase
       .from("import_sources")
-      .select("id, provider_id, provider_name, channel, status, last_synced_at, metadata")
+      .select("id, provider_id, provider_name, channel, status, last_synced_at, metadata, created_at, updated_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .returns<ImportSourceRow[]>(),
     supabase
       .from("import_jobs")
-      .select("id, status, error_message, created_assets, created_transactions, import_document_id, created_at, job_payload")
+      .select("id, status, error_message, created_assets, created_transactions, import_document_id, started_at, completed_at, job_payload")
       .eq("user_id", userId)
-      .order("created_at", { ascending: false })
+      .order("started_at", { ascending: false })
       .returns<ImportJobRow[]>(),
     supabase
       .from("import_documents")
@@ -79,7 +83,7 @@ export async function loadCloudSnapshot(
       .returns<ImportDocumentRow[]>(),
     supabase
       .from("market_preferences")
-      .select("auto_refresh, include_holdings_watch, polling_interval_seconds, preferred_source")
+      .select("auto_refresh, include_holdings_watch, polling_interval_seconds, preferred_source, created_at, updated_at")
       .eq("user_id", userId)
       .maybeSingle<MarketPreferenceRow>(),
   ]);
@@ -104,7 +108,10 @@ export async function loadCloudSnapshot(
     Boolean(marketPreferencesResult.data);
 
   if (!hasStoredWorkspace) {
-    return emptySignedInSnapshot;
+    return {
+      snapshot: emptySignedInSnapshot,
+      updatedAt: null,
+    };
   }
 
   const snapshot = {
@@ -131,16 +138,32 @@ export async function loadCloudSnapshot(
       ? transactionsResult.data.map(mapTransactionRowToTransaction)
       : emptySignedInSnapshot.transactions,
   };
+  const cloudUpdatedAt = getLatestCloudWorkspaceTimestamp({
+    assets: assetsResult.data,
+    goals: goalsResult.data,
+    importDocuments: importDocumentsResult.data,
+    importJobs: importJobsResult.data,
+    integrations: integrationsResult.data,
+    marketPreferences: marketPreferencesResult.data,
+    profile: profileResult.data,
+    transactions: transactionsResult.data,
+  });
 
   if (shouldTreatCloudSnapshotAsEmpty(snapshot)) {
     return {
-      ...emptySignedInSnapshot,
-      answers: snapshot.answers,
-      marketPreferences: snapshot.marketPreferences,
+      snapshot: {
+        ...emptySignedInSnapshot,
+        answers: snapshot.answers,
+        marketPreferences: snapshot.marketPreferences,
+      },
+      updatedAt: cloudUpdatedAt,
     };
   }
 
-  return snapshot;
+  return {
+    snapshot,
+    updatedAt: cloudUpdatedAt,
+  };
 }
 
 export async function saveCloudSnapshot({
@@ -240,7 +263,10 @@ export async function saveCloudSnapshot({
 
   if (snapshot.importJobs.length) {
     const integrationSourceIdByProvider = new Map(
-      snapshot.integrations.map((integration) => [integration.providerId, integration.id]),
+      snapshot.integrations.map((integration) => [
+        integration.providerId,
+        coerceSupabaseUuid(integration.id),
+      ]),
     );
     const importDocumentsResult = await supabase.from("import_documents").insert(
       snapshot.importJobs.map((job) => ({
@@ -329,6 +355,7 @@ function mergeCloudImportJobs(
         mappedJob.summary !== "Import job synced from cloud."
           ? mappedJob.summary
           : existing?.summary ?? mappedJob.summary,
+      transactionCount: mappedJob.transactionCount || existing?.transactionCount || 0,
       usedOcr: mappedJob.usedOcr || existing?.usedOcr || false,
     });
   }
@@ -336,6 +363,48 @@ function mergeCloudImportJobs(
   return [...mergedByDocumentId.values()].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
   );
+}
+
+function getLatestCloudWorkspaceTimestamp({
+  assets,
+  goals,
+  importDocuments,
+  importJobs,
+  integrations,
+  marketPreferences,
+  profile,
+  transactions,
+}: {
+  assets: PortfolioRow[];
+  goals: GoalRow[];
+  importDocuments: ImportDocumentRow[];
+  importJobs: ImportJobRow[];
+  integrations: ImportSourceRow[];
+  marketPreferences: MarketPreferenceRow | null;
+  profile: ProfileRow | null;
+  transactions: PortfolioTransactionRow[];
+}) {
+  const timestamps = [
+    profile?.updated_at ?? null,
+    ...assets.flatMap((asset) => [asset.updated_at ?? null, asset.created_at ?? null]),
+    ...goals.map((goal) => goal.updated_at ?? null),
+    ...transactions.map((transaction) => transaction.created_at ?? null),
+    ...integrations.flatMap((integration) => [
+      integration.updated_at ?? null,
+      integration.created_at ?? null,
+      integration.last_synced_at ?? null,
+    ]),
+    ...importJobs.flatMap((job) => [job.started_at ?? null, job.completed_at ?? null]),
+    ...importDocuments.map((document) => document.created_at ?? null),
+    marketPreferences?.updated_at ?? null,
+    marketPreferences?.created_at ?? null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => ({ parsed: Date.parse(value), value }))
+    .filter((entry) => Number.isFinite(entry.parsed))
+    .sort((left, right) => right.parsed - left.parsed);
+
+  return timestamps[0]?.value ?? null;
 }
 
 export async function saveRiskProfileHistory({

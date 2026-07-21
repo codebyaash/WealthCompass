@@ -27,6 +27,16 @@ export type AcademyUseCase = {
   title: string;
 };
 
+import type { RiskAnswers, RiskProfile } from "./wealth-rules";
+
+export type AcademyTrackPlan = {
+  categoryIds: string[];
+  description: string;
+  id: "understand" | "rehearse" | "activate";
+  title: string;
+  useCaseIds: string[];
+};
+
 export const categoryLibrary: AcademyCategory[] = [
   {
     id: "index-funds",
@@ -610,6 +620,68 @@ export function buildComparisonSummary(left: AcademyCategory, right: AcademyCate
   };
 }
 
+export function buildAcademyTrackPlans({
+  answers,
+  profile,
+}: {
+  answers: RiskAnswers;
+  profile: RiskProfile;
+}): AcademyTrackPlan[] {
+  const needsFoundation = profile.confidence === "Needs foundation";
+  const retirementLikeGoal =
+    answers.primaryGoal === "retirement" || answers.primaryGoal === "wealth";
+  const taxNeedsAttention = answers.taxAwareness === "low";
+  const wantsGlobalDiversification = profile.band !== "Conservative";
+
+  const understandUseCases = [
+    needsFoundation ? "emergency-and-short-term" : "first-long-term-sip",
+    taxNeedsAttention ? "tax-aware-conservative" : "goal-dated-debt",
+  ];
+  if (wantsGlobalDiversification) {
+    understandUseCases.push("diversification-layer");
+  }
+
+  const rehearseUseCases = [
+    "first-long-term-sip",
+    wantsGlobalDiversification ? "diversification-layer" : "goal-dated-debt",
+  ];
+
+  const activateUseCases = [
+    needsFoundation ? "emergency-and-short-term" : "first-long-term-sip",
+    retirementLikeGoal ? "tax-aware-conservative" : "goal-dated-debt",
+  ];
+  if (profile.band === "Growth") {
+    activateUseCases.push("high-conviction-satellite");
+  }
+
+  return [
+    {
+      id: "understand",
+      title: "Understand the Plan",
+      description:
+        "Start with the categories that explain your current plan, so the labels stop feeling abstract.",
+      useCaseIds: uniqueIds(understandUseCases),
+      categoryIds: collectCategoryIdsFromUseCases(understandUseCases),
+    },
+    {
+      id: "rehearse",
+      title: "Build Investing Reps",
+      description:
+        "Practice comparing similar-looking products so you can tell role, risk, and effort apart before money is on the line.",
+      useCaseIds: uniqueIds(rehearseUseCases),
+      categoryIds: collectCategoryIdsFromUseCases(rehearseUseCases),
+    },
+    {
+      id: "activate",
+      title: "Put Money to Work",
+      description:
+        "Use the shortlist that is most usable right now, based on your goal timing and current readiness.",
+      useCaseIds: uniqueIds(activateUseCases),
+      categoryIds: collectCategoryIdsFromUseCases(activateUseCases),
+    },
+  ];
+}
+
 function pickCategories(categoryIds: string[]) {
   return categoryIds
     .map((categoryId) => categoryLibrary.find((item) => item.id === categoryId))
@@ -624,6 +696,18 @@ function scoreLiquidity(liquidity: string) {
   if (value.includes("market hours")) return 3;
   if (value.includes("medium")) return 2;
   return 1;
+}
+
+function uniqueIds(ids: string[]) {
+  return Array.from(new Set(ids));
+}
+
+function collectCategoryIdsFromUseCases(useCaseIds: string[]) {
+  const ids = uniqueIds(useCaseIds)
+    .map((useCaseId) => academyUseCases.find((item) => item.id === useCaseId))
+    .flatMap((useCase) => useCase?.categoryIds ?? []);
+
+  return uniqueIds(ids).slice(0, 5);
 }
 
 function scoreEffort(effort: string) {

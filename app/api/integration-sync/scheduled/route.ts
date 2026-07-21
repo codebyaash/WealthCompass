@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import {
+  appendBrokerSyncEvent,
+  loadBrokerConnectionWithSecrets,
+  upsertBrokerConnection,
+} from "@/lib/broker-connections";
+import {
   executeIntegrationSyncBatch,
   resolveScheduledSyncUserIds,
 } from "@/lib/integration-sync";
+import { applyRuntimeBrokerSyncResult } from "@/lib/runtime-connector-sync";
 import { getSupabaseServiceRoleClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { loadCloudSnapshot, saveCloudSnapshot } from "@/lib/supabase-sync";
+import { syncZerodhaHoldings } from "@/lib/zerodha-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -67,26 +74,108 @@ async function runScheduledSync(
   const results = await Promise.all(
     userIds.map(async (userId) => {
       try {
-        const snapshot = await loadCloudSnapshot(supabase, userId);
-        const batch = executeIntegrationSyncBatch(snapshot.integrations, {
-          importJobs: snapshot.importJobs,
+        const { snapshot } = await loadCloudSnapshot(supabase, userId);
+        const liveSchedulerMessage = "Scheduler ran 1 live connector sync.";
+        let nextSnapshot = snapshot;
+        let liveSyncedConnectionIds: string[] = [];
+
+        for (const connection of snapshot.integrations) {
+          if (
+            connection.providerId !== "zerodha" ||
+            connection.importStrategy !== "sync-ready" ||
+            connection.status !== "active"
+          ) {
+            continue;
+          }
+
+          const brokerConnection = await loadBrokerConnectionWithSecrets(
+            supabase,
+            userId,
+            "zerodha",
+          );
+
+          if (!brokerConnection?.accessToken || brokerConnection.status !== "connected") {
+            continue;
+          }
+
+          const sync = await syncZerodhaHoldings({
+            accessToken: brokerConnection.accessToken,
+            accountLabel: brokerConnection.accountLabel ?? "Zerodha account",
+          });
+          const syncedAt = new Date().toISOString();
+          const applied = applyRuntimeBrokerSyncResult({
+            connection,
+            currentImportJobs: nextSnapshot.importJobs,
+            origin: "scheduled",
+            payload: sync,
+            schedulerMessage: liveSchedulerMessage,
+            syncedAt,
+          });
+
+          nextSnapshot = {
+            ...nextSnapshot,
+            assets: applied.nextAssets,
+            importJobs: applied.nextImportJobs,
+            integrations: nextSnapshot.integrations.map((integration) =>
+              integration.id === connection.id ? applied.nextConnection : integration
+            ),
+          };
+          liveSyncedConnectionIds = [...liveSyncedConnectionIds, connection.id];
+
+          await upsertBrokerConnection(supabase, userId, {
+            accessToken: brokerConnection.accessToken,
+            accountLabel: brokerConnection.accountLabel,
+            errorMessage: "",
+            externalAccountId: brokerConnection.externalAccountId,
+            lastSyncedAt: syncedAt,
+            metadata: appendBrokerSyncEvent(brokerConnection.metadata, {
+              id: crypto.randomUUID(),
+              importedFileCount: sync.assets.length,
+              message: sync.job.summary,
+              status: sync.assets.length ? "success" : "warning",
+              syncedAt,
+            }),
+            provider: "zerodha",
+            scopes: brokerConnection.scopes,
+            status: "connected",
+          });
+        }
+
+        const remainingIntegrations = nextSnapshot.integrations.filter(
+          (integration) => !liveSyncedConnectionIds.includes(integration.id),
+        );
+        const batch = executeIntegrationSyncBatch(remainingIntegrations, {
+          importJobs: nextSnapshot.importJobs,
           mode: "due",
           origin: "scheduled",
         });
 
-        if (snapshot.integrations.length) {
+        const mergedSyncedConnectionIds = [
+          ...liveSyncedConnectionIds,
+          ...batch.syncedConnectionIds.filter(
+            (connectionId) => !liveSyncedConnectionIds.includes(connectionId),
+          ),
+        ];
+        const mergedSnapshot = {
+          ...nextSnapshot,
+          importJobs: batch.importJobs,
+          integrations: nextSnapshot.integrations.map((integration) =>
+            liveSyncedConnectionIds.includes(integration.id)
+              ? integration
+              : batch.integrations.find((candidate) => candidate.id === integration.id) ??
+                integration,
+          ),
+        };
+
+        if (mergedSnapshot.integrations.length) {
           await saveCloudSnapshot({
-            snapshot: {
-              ...snapshot,
-              importJobs: batch.importJobs,
-              integrations: batch.integrations,
-            },
+            snapshot: mergedSnapshot,
             supabase,
             userId,
           });
         }
 
-        if (!batch.syncedConnectionIds.length) {
+        if (!mergedSyncedConnectionIds.length) {
           return {
             message: snapshot.integrations.length
               ? "Scheduler checked this user and nothing was due."
@@ -101,13 +190,13 @@ async function runScheduledSync(
         return {
           executedAt: batch.executedAt,
           message:
-            batch.syncedConnectionIds.length === 1
-              ? "1 connector checkpoint was saved."
-              : `${batch.syncedConnectionIds.length} connector checkpoints were saved.`,
+            mergedSyncedConnectionIds.length === 1
+              ? "1 connector sync was saved."
+              : `${mergedSyncedConnectionIds.length} connector syncs were saved.`,
           ok: true,
           status: "synced",
-          syncedConnectionIds: batch.syncedConnectionIds,
-          syncedCount: batch.syncedConnectionIds.length,
+          syncedConnectionIds: mergedSyncedConnectionIds,
+          syncedCount: mergedSyncedConnectionIds.length,
           userId,
         };
       } catch (error) {

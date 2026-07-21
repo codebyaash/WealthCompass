@@ -14,20 +14,27 @@ export type ProfileRow = {
   age: number | null;
   annual_income: number | null;
   country: string | null;
+  decision_style: RiskAnswers["decisionStyle"] | null;
   debt_level: RiskAnswers["debtLevel"] | null;
+  dependents: number | null;
   emergency_months: number | null;
   experience: RiskAnswers["experience"] | null;
   horizon_years: number | null;
+  income_stability: RiskAnswers["incomeStability"] | null;
+  liquidity_needs: RiskAnswers["liquidityNeeds"] | null;
   market_drop_response: RiskAnswers["marketDropResponse"] | null;
+  post_learning_drop_response: RiskAnswers["postLearningDropResponse"] | null;
   monthly_investment: number | null;
   monthly_savings: number | null;
   primary_goal: RiskAnswers["primaryGoal"] | null;
   tax_awareness: RiskAnswers["taxAwareness"] | null;
   time_available: RiskAnswers["timeAvailable"] | null;
+  updated_at?: string | null;
 };
 
 export type PortfolioRow = {
   asset_type: string;
+  created_at?: string | null;
   current_value: number;
   current_price: number | null;
   gain_percent: number | null;
@@ -35,6 +42,7 @@ export type PortfolioRow = {
   name: string;
   quantity: number | null;
   source_label: string | null;
+  updated_at?: string | null;
 };
 
 export type GoalRow = {
@@ -44,6 +52,7 @@ export type GoalRow = {
   name: string;
   priority: WealthGoal["priority"] | null;
   target_amount: number;
+  updated_at?: string | null;
   years: number;
 };
 
@@ -73,6 +82,7 @@ export type RiskProfileHistoryRow = {
 
 export type ImportSourceRow = {
   channel: IntegrationConnection["channel"] | null;
+  created_at?: string | null;
   id: string;
   last_synced_at: string | null;
   metadata: {
@@ -93,18 +103,20 @@ export type ImportSourceRow = {
   provider_id: string;
   provider_name: string;
   status: IntegrationConnection["status"] | null;
+  updated_at?: string | null;
 };
 
 export type MarketPreferenceRow = {
   auto_refresh: boolean | null;
+  created_at?: string | null;
   include_holdings_watch: boolean | null;
   polling_interval_seconds: number | null;
   preferred_source: MarketPreferences["preferredSource"] | null;
+  updated_at?: string | null;
 };
 
 export type ImportJobRow = {
   created_assets: number | null;
-  created_at: string;
   created_transactions: number | null;
   error_message: string | null;
   id: string;
@@ -130,6 +142,8 @@ export type ImportJobRow = {
     lastActionAt?: string | null;
     localStatus?: ImportJob["status"];
   } | null;
+  completed_at?: string | null;
+  started_at?: string | null;
   status: "completed" | "failed" | "processing" | "queued" | null;
 };
 
@@ -152,21 +166,53 @@ export type ImportDocumentRow = {
     reviewedCorrections?: string[];
     rowWarnings?: string[];
     selectedAssetCount?: number;
+    selectedTransactionCount?: number;
     summary?: string;
     usedOcr?: boolean;
   } | null;
 };
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function coerceSupabaseUuid(value: string) {
+  if (uuidPattern.test(value)) return value;
+
+  const normalized = value.trim().toLowerCase() || "wealthcompass";
+  const hashes = [0x811c9dc5, 0x9e3779b1, 0xc2b2ae35, 0x27d4eb2f];
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const code = normalized.charCodeAt(index);
+    for (let hashIndex = 0; hashIndex < hashes.length; hashIndex += 1) {
+      hashes[hashIndex] ^= code + hashIndex * 17;
+      hashes[hashIndex] = Math.imul(hashes[hashIndex], 16777619);
+      hashes[hashIndex] >>>= 0;
+    }
+  }
+
+  const hex = hashes.map((hash) => hash.toString(16).padStart(8, "0")).join("");
+  const versioned = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${
+    ["8", "9", "a", "b"][Number.parseInt(hex.slice(16, 17), 16) % 4]
+  }${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+
+  return versioned;
+}
 
 export function mapAnswersToProfile(answers: RiskAnswers) {
   return {
     age: answers.age,
     annual_income: answers.annualIncome,
     country: answers.country,
+    decision_style: answers.decisionStyle,
     debt_level: answers.debtLevel,
+    dependents: answers.dependents,
     emergency_months: answers.emergencyMonths,
     experience: answers.experience,
     horizon_years: answers.horizonYears,
+    income_stability: answers.incomeStability,
+    liquidity_needs: answers.liquidityNeeds,
     market_drop_response: answers.marketDropResponse,
+    post_learning_drop_response: answers.postLearningDropResponse,
     monthly_investment: answers.monthlyInvestment,
     monthly_savings: answers.monthlySavings,
     primary_goal: answers.primaryGoal,
@@ -181,13 +227,22 @@ export function mapProfileToAnswers(row: ProfileRow): RiskAnswers {
     age: row.age ?? defaultSnapshot.answers.age,
     annualIncome: row.annual_income ?? defaultSnapshot.answers.annualIncome,
     country: row.country ?? defaultSnapshot.answers.country,
+    decisionStyle: row.decision_style ?? defaultSnapshot.answers.decisionStyle,
     debtLevel: row.debt_level ?? defaultSnapshot.answers.debtLevel,
+    dependents: row.dependents ?? defaultSnapshot.answers.dependents,
     emergencyMonths:
       row.emergency_months ?? defaultSnapshot.answers.emergencyMonths,
     experience: row.experience ?? defaultSnapshot.answers.experience,
     horizonYears: row.horizon_years ?? defaultSnapshot.answers.horizonYears,
+    incomeStability:
+      row.income_stability ?? defaultSnapshot.answers.incomeStability,
+    liquidityNeeds:
+      row.liquidity_needs ?? defaultSnapshot.answers.liquidityNeeds,
     marketDropResponse:
       row.market_drop_response ?? defaultSnapshot.answers.marketDropResponse,
+    postLearningDropResponse:
+      row.post_learning_drop_response ??
+      defaultSnapshot.answers.postLearningDropResponse,
     monthlyInvestment:
       row.monthly_investment ?? defaultSnapshot.answers.monthlyInvestment,
     monthlySavings: row.monthly_savings ?? defaultSnapshot.answers.monthlySavings,
@@ -240,7 +295,7 @@ export function mapGoalToInsert(goal: WealthGoal, userId: string) {
   return {
     current_amount: goal.currentAmount,
     expected_return: goal.annualReturn,
-    id: goal.id,
+    id: coerceSupabaseUuid(goal.id),
     name: goal.name,
     priority: goal.priority,
     target_amount: goal.targetAmount,
@@ -338,7 +393,7 @@ export function mapIntegrationToImportSourceInsert(
 ) {
   return {
     channel: integration.channel,
-    id: integration.id,
+    id: coerceSupabaseUuid(integration.id),
     last_synced_at: integration.lastSyncAt,
     metadata: {
       importStrategy: integration.importStrategy,
@@ -392,10 +447,13 @@ export function mapMarketPreferencesToInsert(
 }
 
 export function mapImportJobRowToJob(row: ImportJobRow): ImportJob {
+  const createdAt = row.started_at ?? row.completed_at ?? new Date().toISOString();
+
   return {
     assetCount: row.created_assets ?? 0,
     attemptCount: row.job_payload?.attemptCount ?? 1,
-    createdAt: row.created_at,
+    createdAt,
+    transactionCount: row.created_transactions ?? 0,
     documentId: row.job_payload?.documentId ?? row.import_document_id ?? crypto.randomUUID(),
     documentKind:
       row.job_payload?.documentKind ??
@@ -432,15 +490,17 @@ export function mapImportJobToInsert(
   job: ImportJob,
   userId: string,
 ) {
+  const documentId = coerceSupabaseUuid(job.documentId);
+
   return {
     created_assets: job.assetCount,
-    created_transactions: 0,
+    created_transactions: job.transactionCount,
     error_message: job.status === "failed" ? job.notes || job.summary : null,
-    id: job.id,
-    import_document_id: job.documentId,
+    id: coerceSupabaseUuid(job.id),
+    import_document_id: documentId,
     job_payload: {
       attemptCount: job.attemptCount,
-      documentId: job.documentId,
+      documentId,
       documentKind: job.documentKind,
       documentStoragePath: job.documentStoragePath,
       duplicateCount: job.duplicateCount,
@@ -469,6 +529,7 @@ export function mapImportDocumentRowToJob(row: ImportDocumentRow): ImportJob {
     assetCount: numberOrDefault(row.parse_summary?.selectedAssetCount, 0),
     attemptCount: 1,
     createdAt: row.created_at,
+    transactionCount: numberOrDefault(row.parse_summary?.selectedTransactionCount, 0),
     documentId: row.id,
     documentKind: row.file_type,
     documentStoragePath: row.storage_path,
@@ -494,7 +555,7 @@ export function mapImportDocumentRowToJob(row: ImportDocumentRow): ImportJob {
 
 export function mapImportJobToDocumentInsert(job: ImportJob, userId: string) {
   return {
-    id: job.documentId,
+    id: coerceSupabaseUuid(job.documentId),
     detected_provider: job.providerId,
     extracted_text: job.rawText,
     file_name: job.fileName,
@@ -511,6 +572,7 @@ export function mapImportJobToDocumentInsert(job: ImportJob, userId: string) {
       reviewedCorrections: job.reviewedCorrections,
       rowWarnings: job.rowWarnings,
       selectedAssetCount: job.assetCount,
+      selectedTransactionCount: job.transactionCount,
       summary: job.summary,
       usedOcr: job.usedOcr,
     },

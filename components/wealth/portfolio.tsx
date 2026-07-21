@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  ArrowRight,
   Check,
   Copy,
   Download,
@@ -46,19 +47,28 @@ import {
   samplePortfolioCsv,
   type PortfolioImportMode,
 } from "@/lib/csv-import";
+import { buildCombinedImportOverview } from "@/lib/combined-import-overview";
+import type { CombinedImportOverview } from "@/lib/combined-import-overview";
 import { formatMoney } from "@/lib/formatters";
 import {
   describeReadiness,
   detectImportSource,
   importSourceDescriptors,
 } from "@/lib/import-sources";
+import {
+  resolveUploadedImportText,
+  type ImportUploadExtraction,
+} from "@/lib/import-upload";
 import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
 import {
   analyzeImportDocument,
   type ImportReview,
 } from "@/lib/import-review";
-import { createImportJobFromReview } from "@/lib/import-jobs";
+import {
+  createImportJobFromReview,
+  filterNewImportedTransactions,
+} from "@/lib/import-jobs";
 import { buildImportDiagnostics, type ImportDiagnostics } from "@/lib/import-diagnostics";
 import { parseImportedTransactions } from "@/lib/transaction-import";
 import {
@@ -78,12 +88,7 @@ import {
 } from "@/lib/portfolio-rules";
 import type { RiskProfile } from "@/lib/wealth-rules";
 
-type PdfExtractResult = {
-  pageCount: number;
-  text: string;
-  usedOcr: boolean;
-  warnings: string[];
-};
+type PdfExtractResult = ImportUploadExtraction;
 
 const importModeOptions: Array<[PortfolioImportMode, string]> = [
   ["merge", "Merge duplicates"],
@@ -140,14 +145,23 @@ export function Portfolio({
   const [importArtifacts, setImportArtifacts] = useState<ImportDiagnostics | null>(null);
   const [selectedImportKeys, setSelectedImportKeys] = useState<string[]>([]);
   const [isReviewingImport, setIsReviewingImport] = useState(false);
+  const [uploadedFileLabel, setUploadedFileLabel] = useState<string | null>(null);
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
+  const [uploadedImportText, setUploadedImportText] = useState<string>("");
+  const [uploadedImportStatus, setUploadedImportStatus] = useState<
+    "idle" | "selected" | "processing" | "ready" | "error"
+  >("idle");
   const [draftTransaction, setDraftTransaction] = useState<PortfolioTransaction>(
     createPortfolioTransaction(),
   );
   const safeAssets = useMemo(() => coercePortfolioAssets(assets, []), [assets]);
   const exportedCsv = useMemo(() => portfolioAssetsToCsv(safeAssets), [safeAssets]);
+  const hasUploadedImport = uploadedImportText.trim().length > 0;
+  const activeImportText = hasUploadedImport ? uploadedImportText : csvText;
+  const activeImportFileName = uploadedFileLabel?.trim() || "manual-import.txt";
   const importPreview = useMemo(
-    () => previewPortfolioImport(csvText, safeAssets),
-    [safeAssets, csvText],
+    () => previewPortfolioImport(activeImportText, safeAssets),
+    [activeImportText, safeAssets],
   );
   const selectedImportedAssets = useMemo(
     () =>
@@ -184,8 +198,35 @@ export function Portfolio({
     [transactions],
   );
   const transactionImportPreview = useMemo(
-    () => parseImportedTransactions(csvText),
-    [csvText],
+    () => parseImportedTransactions(activeImportText),
+    [activeImportText],
+  );
+  const newTransactionImportPreview = useMemo(
+    () =>
+      filterNewImportedTransactions(transactionImportPreview.transactions, transactions),
+    [transactionImportPreview.transactions, transactions],
+  );
+  const duplicateTransactionCount = useMemo(
+    () =>
+      transactionImportPreview.transactions.length - newTransactionImportPreview.length,
+    [newTransactionImportPreview.length, transactionImportPreview.transactions.length],
+  );
+  const combinedImportOverview = useMemo(
+    () =>
+      buildCombinedImportOverview({
+        preview: importPreview,
+        selectedAssets: selectedImportedAssets,
+        transactionDuplicateCount: duplicateTransactionCount,
+        transactionParsedCount: transactionImportPreview.transactions.length,
+        transactionReadyCount: newTransactionImportPreview.length,
+      }),
+    [
+      duplicateTransactionCount,
+      importPreview,
+      newTransactionImportPreview.length,
+      selectedImportedAssets,
+      transactionImportPreview.transactions.length,
+    ],
   );
   const realizedGain = useMemo(
     () => calculateRealizedGainFromTransactions(transactions),
@@ -207,6 +248,38 @@ export function Portfolio({
     () => getAllocationInsights({ assets: safeAssets, portfolioTotal, profile }),
     [portfolioTotal, profile, safeAssets],
   );
+  const importTrack =
+    profile.actionBaskets.find((basket) => basket.id === "activate") ??
+    profile.actionBaskets[0];
+  const learningTrack =
+    profile.actionBaskets.find((basket) => basket.id === "understand") ??
+    profile.actionBaskets[0];
+  const portfolioHeadline =
+    safeAssets.length === 0
+      ? "Start with one holding or one imported statement"
+      : safeAssets.length < 4
+        ? "Keep building coverage before judging the portfolio too hard"
+        : "Now you can judge mix, concentration, and alignment more usefully";
+  const portfolioSubcopy =
+    safeAssets.length === 0
+      ? "The fastest useful start is either a single manual holding or an imported statement with current values and units."
+      : safeAssets.length < 4
+        ? "You already have a base. The next step is to capture more of the real portfolio so the health checks stop feeling approximate."
+        : "Your portfolio has enough shape for the tracker, import review, and allocation checks to become more decision-useful.";
+  const portfolioReadinessLabel =
+    safeAssets.length === 0
+      ? "Setup in progress"
+      : importPreview.errors.length > 0 || transactionImportPreview.errors.length > 0
+        ? "Needs review"
+        : "Tracking live";
+  const operatingHeadline =
+    safeAssets.length === 0
+      ? "Start with coverage, then let the tracker shape the portfolio story."
+      : "Track what you own, what you paid, and where the mix is drifting.";
+  const operatingSubcopy =
+    safeAssets.length === 0
+      ? "Load a statement, add a first holding, or start the transaction journal so allocation, health checks, and coaching can become specific."
+      : "This page works best when holdings, invested basis, and transactions are all captured well enough to support cleaner allocation and health signals.";
 
   useEffect(() => {
     setSelectedImportKeys(
@@ -215,16 +288,40 @@ export function Portfolio({
   }, [importPreview.assets]);
 
   function handleCsvImport() {
-    const rawText = importArtifacts?.rawText || csvText;
-    const normalizedText = importArtifacts?.normalizedText || csvText;
+    const rawText = importArtifacts?.rawText || activeImportText;
+    const normalizedText = importArtifacts?.normalizedText || activeImportText;
     const rowWarnings = importArtifacts?.rowWarnings ?? importPreview.errors;
 
-    if (!importPreview.assets.length && transactionImportPreview.transactions.length) {
-      transactionImportPreview.transactions.forEach((transaction) => {
+    if (!importPreview.assets.length && newTransactionImportPreview.length) {
+      newTransactionImportPreview.forEach((transaction) => {
         onAddTransaction(transaction);
       });
+      if (importReview) {
+        onLogImportJob(
+          createImportJobFromReview({
+            assetCount: 0,
+            duplicateCount: 0,
+            fileName: activeImportFileName,
+            notes: "Transaction import completed successfully.",
+            normalizationApplied: importReview.normalizationApplied,
+            normalizedText,
+            rawText,
+            review: importReview,
+            rowWarnings,
+            status: "completed",
+            transactionCount: newTransactionImportPreview.length,
+          }),
+        );
+      }
       setCsvMessage(
-        `Imported ${transactionImportPreview.transactions.length} transaction${transactionImportPreview.transactions.length === 1 ? "" : "s"} into the journal.`,
+        [
+          `Imported ${newTransactionImportPreview.length} transaction${newTransactionImportPreview.length === 1 ? "" : "s"} into the journal.`,
+          duplicateTransactionCount > 0
+            ? `Skipped ${duplicateTransactionCount} transaction duplicate${duplicateTransactionCount === 1 ? "" : "s"} already in the journal.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
       return;
     }
@@ -238,7 +335,7 @@ export function Portfolio({
           createImportJobFromReview({
             assetCount: 0,
             duplicateCount: 0,
-            fileName: "manual-import.txt",
+            fileName: activeImportFileName,
             notes: importPreview.errors.join(" "),
             normalizedText,
             rawText,
@@ -268,7 +365,7 @@ export function Portfolio({
         createImportJobFromReview({
           assetCount: selectedImportedAssets.length,
           duplicateCount: selectedDuplicateCount,
-          fileName: "manual-import.txt",
+          fileName: activeImportFileName,
           notes:
             selectedDuplicateCount && importMode === "merge"
               ? "Import completed with duplicate merge handling."
@@ -279,13 +376,29 @@ export function Portfolio({
           review: importReview,
           rowWarnings,
           status: "completed",
+          transactionCount: newTransactionImportPreview.length,
         }),
       );
     }
+    if (newTransactionImportPreview.length > 0) {
+      newTransactionImportPreview.forEach((transaction) => {
+        onAddTransaction(transaction);
+      });
+    }
     setCsvMessage(
-      selectedDuplicateCount && importMode === "merge"
-        ? `Imported ${selectedImportedAssets.length} holdings and merged ${selectedDuplicateCount} duplicates.`
-        : `Imported ${selectedImportedAssets.length} holdings.`,
+      [
+        selectedDuplicateCount && importMode === "merge"
+          ? `Imported ${selectedImportedAssets.length} holdings and merged ${selectedDuplicateCount} duplicates.`
+          : `Imported ${selectedImportedAssets.length} holdings.`,
+        newTransactionImportPreview.length > 0
+          ? `Added ${newTransactionImportPreview.length} transaction${newTransactionImportPreview.length === 1 ? "" : "s"} to the journal.`
+          : "",
+        duplicateTransactionCount > 0
+          ? `Skipped ${duplicateTransactionCount} transaction duplicate${duplicateTransactionCount === 1 ? "" : "s"} already in the journal.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
     );
   }
 
@@ -360,12 +473,30 @@ export function Portfolio({
 
     try {
       setIsReviewingImport(true);
+      setPendingUploadFile(file);
+      setUploadedFileLabel(file.name);
+      setUploadedImportText("");
+      setUploadedImportStatus("processing");
+      setCsvText("");
+      setImportArtifacts(null);
+      setImportReview(null);
       const isPdf =
         file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      const serverPdfResult = isPdf ? await extractImportTextFromUpload(file) : null;
-      const pdfResult =
-        serverPdfResult ?? (isPdf ? await extractTextFromPdfOnDemand(file) : null);
-      const rawText = pdfResult ? pdfResult.text : await file.text();
+      const fileText = await readFileText(file);
+      const extractedUpload = isPdf ? await extractImportTextFromUpload(file) : null;
+      const resolvedUpload = resolveUploadedImportText({
+        extractedUpload,
+        fallbackPdfResult: null,
+        fileText,
+      });
+      const rawText = resolvedUpload.text;
+
+      if (!rawText.trim()) {
+        throw new Error(
+          "We could open that file, but no readable statement text was extracted. Paste the statement text directly or export a cleaner file.",
+        );
+      }
+
       const detectedSource = detectImportSource({
         fileName: file.name,
         text: rawText,
@@ -376,47 +507,29 @@ export function Portfolio({
       });
       const text = normalized.text;
       const filePreview = previewPortfolioImport(text, safeAssets);
-      const diagnostics = buildImportDiagnostics({
-        normalizedText: text,
-        preview: filePreview,
-        rawText,
-      });
-      const pdfWarnings = pdfResult?.warnings ?? [];
-      const reviewWarnings = [...pdfWarnings, ...diagnostics.rowWarnings];
+      const usedOcr = resolvedUpload.usedOcr;
+      const pageCount = resolvedUpload.pageCount;
+      const extractedAnyRows =
+        filePreview.assets.length > 0 || parseImportedTransactions(text).transactions.length > 0;
 
-      setCsvText(text);
-      const review = await reviewImportDocument({
-        fileName: file.name,
-        text,
-        normalizationApplied: normalized.applied,
-        usedOcr: pdfResult?.usedOcr ?? false,
-      });
-      setImportReview(review);
-      setImportArtifacts(diagnostics);
-      onLogImportJob(
-        createImportJobFromReview({
-          assetCount: filePreview.assets.length,
-          duplicateCount: filePreview.duplicates.length,
-          fileName: file.name,
-          notes: "Statement reviewed and ready for import.",
-          normalizationApplied: normalized.applied,
-          normalizedText: text,
-          rawText,
-          review,
-          rowWarnings: reviewWarnings,
-          status: "reviewed",
-        }),
-      );
+      setUploadedImportText(text);
+      setUploadedImportStatus("ready");
       setCsvMessage(
         isPdf
-          ? pdfResult?.usedOcr
-            ? `${file.name} looked scanned, so OCR was used on ${pdfResult.pageCount} page${pdfResult.pageCount === 1 ? "" : "s"}.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Review the extracted text and duplicate preview, then import.`
-            : `${file.name} converted from PDF.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Review the extracted text and duplicate preview, then import.`
-          : `${file.name} loaded.${detectedSource ? ` Detected ${detectedSource.name}.` : ""}${normalized.applied.length ? " Provider cleanup applied." : ""} Review the import preview, then import.`,
+          ? usedOcr
+            ? `${file.name} uploaded. OCR was used on ${pageCount} page${pageCount === 1 ? "" : "s"}.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Click Analyze uploaded file to review it.`
+            : `${file.name} uploaded from PDF.${detectedSource ? ` Detected ${detectedSource.name}.` : ""} Click Analyze uploaded file to review it.`
+          : `${file.name} uploaded.${detectedSource ? ` Detected ${detectedSource.name}.` : ""}${normalized.applied.length ? " Provider cleanup applied." : ""}${
+              extractedAnyRows
+                ? " Click Analyze uploaded file to review it."
+                : " We extracted the file text, but this source still needs a review pass before anything can be imported."
+            }`,
       );
     } catch (error) {
       setImportReview(null);
       setImportArtifacts(null);
+      setUploadedImportText("");
+      setUploadedImportStatus("error");
       setCsvMessage(
         error instanceof Error
           ? error.message
@@ -427,47 +540,90 @@ export function Portfolio({
     }
   }
 
+  function handleSelectUploadFile(file: File | null) {
+    setPendingUploadFile(file);
+    setUploadedFileLabel(file?.name ?? null);
+    setUploadedImportText("");
+    setUploadedImportStatus(file ? "selected" : "idle");
+    setImportArtifacts(null);
+    setImportReview(null);
+    if (file) {
+      setCsvText("");
+      setCsvMessage(`${file.name} selected. Click Upload file to extract the statement text.`);
+    }
+  }
+
+  async function handleConfirmUpload() {
+    if (!pendingUploadFile) {
+      setCsvMessage("Choose a file before uploading.");
+      return;
+    }
+
+    await handleCsvFileUpload(pendingUploadFile);
+  }
+
   async function handleAnalyzeCurrentText() {
     setIsReviewingImport(true);
 
     try {
+      const sourceText = activeImportText;
+      const sourceFileName = activeImportFileName;
+
+      if (!sourceText.trim()) {
+        throw new Error("Upload a file or paste statement text before analyzing the import.");
+      }
+
       const detectedSource = detectImportSource({
-        text: csvText,
+        fileName: uploadedFileLabel ?? undefined,
+        text: sourceText,
       });
       const normalized = normalizeImportTextForProvider({
         providerId: detectedSource?.id,
-        text: csvText,
+        text: sourceText,
       });
-      if (normalized.text !== csvText) {
+      if (!hasUploadedImport && normalized.text !== csvText) {
         setCsvText(normalized.text);
+      }
+      if (hasUploadedImport && normalized.text !== uploadedImportText) {
+        setUploadedImportText(normalized.text);
       }
       const normalizedPreview = previewPortfolioImport(normalized.text, safeAssets);
       const diagnostics = buildImportDiagnostics({
         normalizedText: normalized.text,
         preview: normalizedPreview,
-        rawText: csvText,
+        rawText: sourceText,
       });
       const review = await reviewImportDocument({
+        fileName: uploadedFileLabel ?? undefined,
         text: normalized.text,
         normalizationApplied: normalized.applied,
       });
       setImportReview(review);
       setImportArtifacts(diagnostics);
+      if (hasUploadedImport) {
+        setUploadedImportStatus("ready");
+      }
       onLogImportJob(
         createImportJobFromReview({
           assetCount: normalizedPreview.assets.length,
           duplicateCount: normalizedPreview.duplicates.length,
-          fileName: "manual-import.txt",
-          notes: "Text analyzed from the editor.",
+          fileName: sourceFileName,
+          notes: hasUploadedImport
+            ? "Uploaded file analyzed from the import workflow."
+            : "Text analyzed from the editor.",
           normalizationApplied: normalized.applied,
           normalizedText: normalized.text,
-          rawText: csvText,
+          rawText: sourceText,
           review,
           rowWarnings: diagnostics.rowWarnings,
           status: "reviewed",
         }),
       );
-      setCsvMessage("Import text analyzed. Review the cues before importing.");
+      setCsvMessage(
+        hasUploadedImport
+          ? `${sourceFileName} analyzed. Review the cues before importing.`
+          : "Import text analyzed. Review the cues before importing.",
+      );
     } catch (error) {
       setImportReview(null);
       setImportArtifacts(null);
@@ -501,9 +657,110 @@ export function Portfolio({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-      <Card>
+    <div className="grid gap-5">
+      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+        <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.2fr_0.8fr] lg:p-7">
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Portfolio operating desk</Badge>
+              <Badge variant="outline">{portfolioReadinessLabel}</Badge>
+              <Badge variant="outline">
+                {safeAssets.length} holding{safeAssets.length === 1 ? "" : "s"}
+              </Badge>
+              <Badge variant="outline">
+                {transactions.length} transaction{transactions.length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+                {operatingHeadline}
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                {operatingSubcopy}
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Coverage
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {safeAssets.length > 0
+                    ? `${safeAssets.length} holdings are shaping the live allocation view.`
+                    : "No holdings yet, so allocation and health checks are still waiting on real inputs."}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Journal depth
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {transactions.length > 0
+                    ? `${transactions.length} transaction entries are available for trajectory and realized P&L.`
+                    : "Transaction history is still light, so portfolio trajectory is mostly inferred from holdings."}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Import lane
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {uploadedImportStatus === "ready"
+                    ? "A statement is ready for review before you merge anything into the portfolio."
+                    : "CSV, email text, HTML tables, and OCR-backed PDFs can all flow through the same review lane."}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  if (!draftAsset.name || draftAsset.value <= 0) return;
+                  onAddAsset(syncHoldingNumbers(draftAsset));
+                  setDraftAsset(defaultDraftAsset);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Add first-class holding
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+              <Button type="button" variant="outline" onClick={handleCopyCsv}>
+                <Copy className="h-4 w-4" />
+                Copy export
+              </Button>
+              <Button type="button" variant="outline" onClick={handleDownloadCsv}>
+                <Download className="h-4 w-4" />
+                Download CSV
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 content-start">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Current read
+              </p>
+              <p className="mt-3 text-base font-semibold text-foreground">{portfolioHeadline}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{portfolioSubcopy}</p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best next move
+              </p>
+              <p className="mt-3 text-sm leading-6 text-foreground">{importTrack.items[0]}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">{profile.band}</Badge>
+            <Badge variant="outline">{profile.confidence}</Badge>
+            <Badge variant="outline">{importTrack.title}</Badge>
+          </div>
           <div className="flex items-center justify-between gap-3">
             <div>
               <CardTitle>Manual portfolio tracker</CardTitle>
@@ -533,23 +790,72 @@ export function Portfolio({
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">{portfolioHeadline}</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {portfolioSubcopy}
+                </p>
+              </div>
+              <div className="min-w-56 rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6">{importTrack.items[0]}</p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  1. Add coverage
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  Use import when you already have a broker, registrar, or email statement.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  2. Clean the details
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  Make sure name, current value, invested value, units, and source are filled.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  3. Compare the mix
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  Once coverage is decent, use allocation and health checks to tighten the plan.
+                </p>
+              </div>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-4">
             <MetricMini label="Tracked value" value={formatMoney(portfolioTotal)} />
             <MetricMini label="Invested basis" value={formatMoney(investedValue)} />
             <MetricMini label="Unrealized P&L" value={formatMoney(unrealizedGain)} />
             <MetricMini label="Diversification" value={`${diversificationScore}/100`} />
           </div>
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div
+            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+          >
             <div>
-              <p className="text-sm font-medium">Add one holding</p>
+              <p className="text-sm font-medium">Manual holding entry</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Manual entry is useful for quick edits, fixing import gaps, and demo data.
+                Best for quick edits, fixing import gaps, or adding a missing holding without waiting for a fresh export.
               </p>
             </div>
             <HoldingFields asset={draftAsset} onChange={setDraftAsset} />
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div
+            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+            data-testid="transaction-journal"
+            aria-label="Transaction journal"
+            role="group"
+          >
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Transaction journal</p>
@@ -607,15 +913,13 @@ export function Portfolio({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
-            <div>
-              <p className="text-sm font-medium">Import channels</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Built for exported statements first, so holdings from Paytm Money, Jupiter,
-                Zerodha, Groww, CAMS, KFintech, and forwarded email statements can land in one
-                intake flow.
-              </p>
-            </div>
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium">Supported intake lanes</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Built around exported statements first, so broker files, registrar PDFs, and forwarded email statements can land in one review flow.
+                </p>
+              </div>
             <div className="grid gap-2 md:grid-cols-2">
               {importSourceDescriptors.map((source) => (
                 <div
@@ -656,7 +960,7 @@ export function Portfolio({
           <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
-                <p className="text-sm font-medium">Portfolio import</p>
+                <p className="text-sm font-medium">Import and review</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Supports CSV/TSV, pasted email text, OCR-backed PDF statements,
                   HTML tables, scheme/security name, current value, invested value, units,
@@ -669,12 +973,84 @@ export function Portfolio({
                 onClick={handleCsvImport}
                 disabled={
                   !selectedImportedAssets.length &&
-                  !transactionImportPreview.transactions.length
+                  !newTransactionImportPreview.length
                 }
               >
                 <Upload className="h-4 w-4" />
-                Import {selectedImportedAssets.length || transactionImportPreview.transactions.length || ""}
+                Import {selectedImportedAssets.length || newTransactionImportPreview.length || ""}
               </Button>
+            </div>
+            <div className="grid gap-3 rounded-md border border-border/70 bg-background p-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="grid gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">{importTrack.title}</Badge>
+                  <Badge variant="outline">
+                    {uploadedImportStatus === "ready"
+                      ? "Upload ready"
+                      : uploadedImportStatus === "processing"
+                        ? "Upload processing"
+                        : hasUploadedImport
+                          ? "Upload loaded"
+                          : "Manual review lane"}
+                  </Badge>
+                  <Badge variant="outline">{importMode === "merge" ? "Merge duplicates" : "Keep all rows"}</Badge>
+                </div>
+                <div>
+                  <p className="text-base font-semibold text-foreground">
+                    Treat imports like a review lane, not a blind upload.
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {importTrack.items[0] ??
+                      "A clean import is more useful than a fast import. Confirm holdings, transactions, duplicates, and provider fit before merging anything into the tracker."}
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      1. Load the source
+                    </p>
+                    <p className="mt-2 text-sm leading-6">
+                      Upload a statement or paste export text so the parser can read the real shape of the data.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      2. Inspect the review
+                    </p>
+                    <p className="mt-2 text-sm leading-6">
+                      Check provider fit, cleanup, parsed rows, and warnings before trusting the preview.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      3. Import selectively
+                    </p>
+                    <p className="mt-2 text-sm leading-6">
+                      Select only the holdings and transactions that improve coverage without muddying the portfolio.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-3">
+                <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                  <p className="text-sm font-medium">Best next move</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {uploadedImportStatus === "ready"
+                      ? "Run the import review now, then decide whether the parsed output is clean enough to stage or import."
+                      : hasUploadedImport
+                        ? "Use the extracted upload text as the primary source, review the parser output, and only keep the rows that add real coverage."
+                        : "Paste a real statement or upload a file first, then let the review layer tell you what the parser actually understood."}
+                  </p>
+                </div>
+                <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                  <p className="text-sm font-medium">Import read</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {importPreview.assets.length > 0 || transactionImportPreview.transactions.length > 0
+                      ? `${importPreview.assets.length} holding${importPreview.assets.length === 1 ? "" : "s"} and ${transactionImportPreview.transactions.length} transaction row${transactionImportPreview.transactions.length === 1 ? "" : "s"} are currently in preview.`
+                      : "No parsed rows yet. The review starts becoming useful once real statement text or a file has been loaded."}
+                  </p>
+                </div>
+              </div>
             </div>
             <SegmentedControl
               label="Duplicate handling"
@@ -685,18 +1061,67 @@ export function Portfolio({
             <Input
               accept=".csv,.tsv,.txt,.html,.pdf,text/csv,text/tab-separated-values,text/plain,text/html,application/pdf"
               type="file"
-              onChange={(event) => void handleCsvFileUpload(event.target.files?.[0] ?? null)}
+              onClick={(event) => {
+                event.currentTarget.value = "";
+              }}
+              onChange={(event) => handleSelectUploadFile(event.target.files?.[0] ?? null)}
             />
+            <p className="text-xs text-muted-foreground">
+              {uploadedImportStatus === "processing" && uploadedFileLabel
+                ? `Processing ${uploadedFileLabel}...`
+                : uploadedImportStatus === "ready" && uploadedFileLabel
+                  ? `Uploaded: ${uploadedFileLabel}`
+                  : uploadedImportStatus === "selected" && uploadedFileLabel
+                    ? `Selected: ${uploadedFileLabel}`
+                    : uploadedFileLabel
+                      ? `Loaded from upload: ${uploadedFileLabel}`
+                  : "Choose a CSV, TXT, HTML, or PDF statement to load it into the import editor."}
+            </p>
             <textarea
               className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={csvText}
               onChange={(event) => {
                 setCsvText(event.target.value);
+                setUploadedFileLabel(null);
+                setUploadedImportText("");
+                setUploadedImportStatus("idle");
                 setImportArtifacts(null);
                 setImportReview(null);
               }}
+              placeholder="Paste statement text, CSV rows, or email content here for manual analysis."
             />
+            {uploadedFileLabel && !isReviewingImport ? (
+              <p className="text-xs text-muted-foreground">
+                {uploadedImportStatus === "ready"
+                  ? "Upload complete. Click Analyze uploaded file to review the extracted statement."
+                  : uploadedImportStatus === "selected"
+                    ? "File selected. Click Upload file to extract the statement text."
+                  : "Uploaded file is queued for analysis and preview independently from the manual paste box."}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleConfirmUpload()}
+                disabled={!pendingUploadFile || uploadedImportStatus === "processing"}
+              >
+                <Upload className="h-4 w-4" />
+                {uploadedImportStatus === "processing" ? "Uploading..." : "Upload file"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleAnalyzeCurrentText()}
+                disabled={uploadedImportStatus !== "ready"}
+              >
+                <ScanSearch className="h-4 w-4" />
+                {isReviewingImport && hasUploadedImport
+                  ? "Analyzing upload..."
+                  : "Analyze uploaded file"}
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -704,7 +1129,9 @@ export function Portfolio({
                 onClick={() => void handleAnalyzeCurrentText()}
               >
                 <ScanSearch className="h-4 w-4" />
-                {isReviewingImport ? "Analyzing..." : "Analyze import text"}
+                {isReviewingImport && !uploadedFileLabel
+                  ? "Analyzing..."
+                  : "Analyze import text"}
               </Button>
             </div>
             {importReview && (
@@ -713,9 +1140,17 @@ export function Portfolio({
                 review={importReview}
               />
             )}
+            {(importPreview.assets.length > 0 || transactionImportPreview.transactions.length > 0) && (
+              <CombinedImportOverviewCard
+                overview={combinedImportOverview}
+              />
+            )}
             {transactionImportPreview.transactions.length > 0 && (
               <TransactionImportPreview
-                transactions={transactionImportPreview.transactions}
+                duplicateCount={
+                  duplicateTransactionCount
+                }
+                transactions={newTransactionImportPreview}
               />
             )}
             <ImportPreview
@@ -730,6 +1165,42 @@ export function Portfolio({
               <Button type="button" variant="ghost" size="sm" onClick={onResetAssets}>
                 Reset demo data
               </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">What makes this tracker useful</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Good portfolio decisions come from enough coverage plus clean detail quality.
+                </p>
+              </div>
+              <Badge variant="outline">{learningTrack.title}</Badge>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Coverage
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {safeAssets.length} holding{safeAssets.length === 1 ? "" : "s"} tracked
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Transactions
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {transactions.length} journal entr{transactions.length === 1 ? "y" : "ies"}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Learning edge
+                </p>
+                <p className="mt-2 text-sm leading-6">{learningTrack.items[0]}</p>
+              </div>
             </div>
           </div>
 
@@ -805,12 +1276,36 @@ export function Portfolio({
       </Card>
 
       <div className="grid gap-5">
-        <Card>
+        <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader>
             <CardTitle>Current allocation</CardTitle>
-            <CardDescription>Compare your tracked mix with your suggested profile.</CardDescription>
+            <CardDescription>
+              Compare your tracked mix with your suggested profile once enough holdings are captured.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="h-72">
+          <CardContent className="grid gap-4">
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+              <div>
+                <p className="text-sm font-medium">What this chart is telling you</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {chartData.length === 0
+                    ? "Once holdings are tracked, this chart becomes the fastest way to see where most of the portfolio value is actually sitting."
+                    : chartData.length < 3
+                      ? "Right now the chart is directionally useful, but the mix may still look simpler than your real portfolio until more holdings are captured."
+                      : "This view is now good enough to judge whether the portfolio is leaning too hard into one part of the market."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {allocationInsights[0]?.status ??
+                    "Capture more holdings, then compare the real mix against the suggested buckets below."}
+                </p>
+              </div>
+            </div>
+            <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -824,34 +1319,71 @@ export function Portfolio({
                 <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="var(--color-chart-3)" />
               </BarChart>
             </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader>
             <CardTitle>Portfolio health checks</CardTitle>
-            <CardDescription>Rule-based review before AI review exists.</CardDescription>
+            <CardDescription>
+              Rule-based checks on concentration, detail quality, core allocation, and diversification.
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+              <div>
+                <p className="text-sm font-medium">How to read these checks</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  These aren’t predictions. They are operating checks that tell you whether the portfolio is detailed enough, diversified enough, and aligned enough to support better decisions.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Coaching read
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {portfolioChecks[0]?.status ??
+                    "Once more holdings are captured, these checks will start turning into clearer portfolio guidance."}
+                </p>
+              </div>
+            </div>
             {portfolioChecks.map((check) => (
               <HealthCheck key={check.label} {...check} />
             ))}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader>
             <CardTitle>Allocation alignment</CardTitle>
             <CardDescription>Compare your current mix with the suggested profile buckets.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+              <div>
+                <p className="text-sm font-medium">What alignment means here</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Alignment is not about matching every bucket perfectly. It is about noticing where the real portfolio is underweight, overconcentrated, or missing the core shape suggested by your profile.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Suggested posture
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {allocationInsights[0]?.status ??
+                    "Add holdings or imported transactions to make the alignment check meaningful."}
+                </p>
+              </div>
+            </div>
             {allocationInsights.length ? (
               allocationInsights.map((insight) => (
                 <div
                   key={insight.bucket}
-                  className="flex items-center justify-between gap-4 rounded-md border bg-background p-3"
+                  className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-[1fr_auto]"
                 >
                   <div>
                     <p className="text-sm font-medium">{insight.bucket}</p>
-                    <p className="text-xs text-muted-foreground">{insight.status}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{insight.status}</p>
                   </div>
                   <div className="text-right text-xs text-muted-foreground">
                     <p>Current {insight.currentShare}%</p>
@@ -868,54 +1400,54 @@ export function Portfolio({
         </Card>
         <Roadmap profile={profile} compact />
       </div>
+      </div>
     </div>
   );
 }
 
-async function extractTextFromPdfOnDemand(file: File): Promise<PdfExtractResult> {
-  const { extractTextFromPdf } = await import("@/lib/pdf-import");
+async function extractImportTextFromUpload(file: File): Promise<PdfExtractResult | null> {
+  const body = await file.arrayBuffer();
 
-  return extractTextFromPdf(file);
+  const response = await fetch("/api/import-extract", {
+    body,
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-file-name": encodeURIComponent(file.name),
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Upload extraction route unavailable.");
+  }
+
+  const payload = JSON.parse(await response.text()) as {
+    error?: string;
+    fileName?: string;
+    isPdf: boolean;
+    pageCount: number;
+    text: string;
+    usedOcr: boolean;
+    warnings: string[];
+  };
+
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+
+  return {
+    fileName: payload.fileName,
+    isPdf: payload.isPdf,
+    pageCount: payload.pageCount,
+    text: payload.text,
+    usedOcr: payload.usedOcr,
+    warnings: payload.warnings,
+  };
 }
 
-async function extractImportTextFromUpload(file: File): Promise<PdfExtractResult | null> {
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch("/api/import-extract", {
-      body: formData,
-      method: "POST",
-    });
-
-    if (!response.ok) {
-      throw new Error("Upload extraction route unavailable.");
-    }
-
-    const payload = (await response.json()) as {
-      error?: string;
-      isPdf: boolean;
-      pageCount: number;
-      text: string;
-      usedOcr: boolean;
-      warnings: string[];
-    };
-
-    if (payload.error) {
-      throw new Error(payload.error);
-    }
-
-    return payload.isPdf
-      ? {
-          pageCount: payload.pageCount,
-          text: payload.text,
-          usedOcr: payload.usedOcr,
-          warnings: payload.warnings,
-        }
-      : null;
-  } catch {
-    return null;
-  }
+async function readFileText(file: File) {
+  const buffer = await file.arrayBuffer();
+  return new TextDecoder().decode(buffer);
 }
 
 async function reviewImportDocument({
@@ -954,6 +1486,11 @@ function ImportReviewCard({
   review: ImportReview;
 }) {
   const parserProfile = getProviderParserProfile(review.detectedSource?.id);
+  const operatorFocus = review.operatorFocus ?? {
+    detail: review.guidance[0] ?? "Review the parsed preview before importing.",
+    label: "Review recommended",
+    tone: "idle" as const,
+  };
 
   return (
     <div className="grid gap-3 rounded-md border bg-background p-3">
@@ -968,10 +1505,47 @@ function ImportReviewCard({
           <Badge variant="outline">{review.qualityScore}/100</Badge>
         </div>
       </div>
+      <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">What we understood</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            {review.detectedSource?.name ?? "Unknown provider table export"}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {review.documentKind} · {review.parseReadiness} · {review.providerConfidence} provider fit
+          </p>
+        </div>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">What to check next</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{operatorFocus.label}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{operatorFocus.detail}</p>
+        </div>
+      </div>
       <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
         <span>Type {review.documentKind}</span>
         <span>Provider {review.detectedSource?.name ?? "Not detected"}</span>
         <span>Text length {review.textLength}</span>
+      </div>
+      <div
+        className={`grid gap-2 rounded-md border p-3 text-xs ${
+          operatorFocus.tone === "healthy"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : operatorFocus.tone === "attention"
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-border bg-muted/30"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium text-foreground">Review focus</p>
+          <Badge
+            variant={
+              operatorFocus.tone === "healthy" ? "secondary" : "outline"
+            }
+          >
+            {operatorFocus.label}
+          </Badge>
+        </div>
+        <p className="leading-5 text-muted-foreground">{operatorFocus.detail}</p>
       </div>
       {artifacts && <ImportDiagnosticsSummary artifacts={artifacts} />}
       {review.cues.length > 0 && (
@@ -1119,8 +1693,10 @@ function ParsedImportRows({
 }
 
 function TransactionImportPreview({
+  duplicateCount,
   transactions,
 }: {
+  duplicateCount: number;
   transactions: PortfolioTransaction[];
 }) {
   return (
@@ -1128,9 +1704,14 @@ function TransactionImportPreview({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-foreground">Parsed transactions</p>
         <p className="text-xs text-muted-foreground">
-          {transactions.length} row{transactions.length === 1 ? "" : "s"}
+          {transactions.length} new row{transactions.length === 1 ? "" : "s"}
         </p>
       </div>
+      {duplicateCount > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {duplicateCount} transaction duplicate{duplicateCount === 1 ? "" : "s"} already exist in the journal and will be skipped.
+        </p>
+      ) : null}
       <div className="grid gap-2">
         {transactions.slice(0, 8).map((transaction) => (
           <div
@@ -1155,6 +1736,60 @@ function TransactionImportPreview({
               <span>Amount {formatMoney(transaction.amount)}</span>
               <span>{transaction.notes}</span>
             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CombinedImportOverviewCard({
+  overview,
+}: {
+  overview: CombinedImportOverview;
+}) {
+  const items = [
+    ["Holdings parsed", overview.holdingsParsed.toString()],
+    ["Holdings selected", overview.holdingsSelected.toString()],
+    ["Holding duplicates", overview.holdingsDuplicates.toString()],
+    ["Transactions new", overview.transactionsNew.toString()],
+    ["Transactions skipped", overview.transactionDuplicates.toString()],
+    ["Transactions parsed", overview.transactionsParsed.toString()],
+    ["Selected current", formatMoney(overview.selectedCurrentValue)],
+    ["Selected invested", formatMoney(overview.selectedInvestedValue)],
+  ];
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-3">
+      <div>
+        <p className="text-sm font-medium">Import decision summary</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{overview.headline}</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">Selected impact</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            {overview.holdingsSelected} holding{overview.holdingsSelected === 1 ? "" : "s"} selected
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {formatMoney(overview.selectedCurrentValue)} current value and {formatMoney(overview.selectedInvestedValue)} invested value are currently marked to import.
+          </p>
+        </div>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">Transaction effect</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            {overview.transactionsNew} new transaction{overview.transactionsNew === 1 ? "" : "s"}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {overview.transactionDuplicates} duplicate transaction{overview.transactionDuplicates === 1 ? "" : "s"} will be skipped if they already exist in the journal.
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map(([label, value]) => (
+          <div key={label} className="rounded-md border bg-muted/30 p-3">
+            <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
+            <p className="mt-1 text-sm font-semibold">{value}</p>
           </div>
         ))}
       </div>
@@ -1249,11 +1884,13 @@ function TransactionFields({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <TextField
+        inputTestId="transaction-asset-name"
         label="Asset name"
         value={transaction.assetName}
         onChange={(value) => onChange({ ...transaction, assetName: value })}
       />
       <TextField
+        inputTestId="transaction-type"
         label="Type"
         value={transaction.type}
         onChange={(value) => onChange({ ...transaction, type: value })}
@@ -1272,11 +1909,13 @@ function TransactionFields({
         }
       />
       <TextField
+        inputTestId="transaction-date"
         label="Date"
         value={transaction.date}
         onChange={(value) => onChange({ ...transaction, date: value })}
       />
       <NumberField
+        inputTestId="transaction-units"
         label="Units"
         value={transaction.quantity}
         onChange={(value) =>
@@ -1290,6 +1929,7 @@ function TransactionFields({
         }
       />
       <NumberField
+        inputTestId="transaction-price"
         label="Price"
         value={transaction.price}
         onChange={(value) =>
@@ -1303,6 +1943,7 @@ function TransactionFields({
         }
       />
       <NumberField
+        inputTestId="transaction-amount"
         label="Amount"
         value={transaction.amount}
         onChange={(value) =>
@@ -1315,12 +1956,14 @@ function TransactionFields({
         }
       />
       <TextField
+        inputTestId="transaction-source"
         label="Source"
         value={transaction.source}
         onChange={(value) => onChange({ ...transaction, source: value })}
       />
       <div className="md:col-span-2">
         <TextField
+          inputTestId="transaction-notes"
           label="Notes"
           value={transaction.notes}
           onChange={(value) => onChange({ ...transaction, notes: value })}
@@ -1369,6 +2012,32 @@ function ImportPreview({
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>{preview.duplicates.length} duplicates · {preview.newAssets.length} new</span>
           <span>{selectedCount} selected · {formatMoney(selectedValue)}</span>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">Preview meaning</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            {preview.assets.length > 0
+              ? "These are the holdings the parser believes it found."
+              : "No holdings parsed yet."}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Duplicate rows are shown so you can decide whether to merge them into existing holdings or keep them separate.
+          </p>
+        </div>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">Best next move</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            {preview.errors.length > 0
+              ? "Fix the missing fields first"
+              : selectedCount > 0
+                ? "Import the selected rows"
+                : "Select the rows that improve coverage"}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            The preview is most useful when you import only the rows that make the portfolio cleaner and more complete.
+          </p>
         </div>
       </div>
       {preview.errors.length > 0 && (

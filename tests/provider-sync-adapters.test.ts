@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applySyncExecutionToPortfolio,
+  buildSyncExecutionOverview,
   buildProviderSyncPreview,
+  createImportJobFromSyncExecution,
   executeProviderSync,
 } from "../lib/provider-sync-adapters";
 import type { IntegrationConnection } from "../lib/local-storage";
@@ -106,6 +109,8 @@ describe("buildProviderSyncPreview", () => {
 
     assert.equal(execution.artifacts[0].label, "forwarded-statement.txt");
     assert.equal(execution.artifacts[2].kind, "payload");
+    assert.equal(execution.parsedAssetCount, 1);
+    assert.equal(execution.parsedTransactionCount, 0);
     assert.match(execution.message, /provided source text|forwarded-statement\.txt/i);
     assert.equal(execution.jobStatus, "reviewed");
   });
@@ -125,5 +130,197 @@ describe("buildProviderSyncPreview", () => {
     assert.equal(execution.importedFileCount, 0);
     assert.equal(execution.artifacts[0].kind, "payload");
     assert.equal(execution.steps[2].status, "pending");
+  });
+
+  it("creates a reviewed import job from sync execution input", () => {
+    const job = createImportJobFromSyncExecution(
+      createTestConnection({
+        channel: "email",
+        id: "integration-email-forward",
+        importStrategy: "email-forward",
+        providerId: "email-forward",
+        providerName: "Email Forward",
+        sourceHint: "Forward broker statements to yourself and paste or upload them here.",
+        syncCadenceMinutes: 1440,
+      }),
+      {
+        fileName: "forwarded-statement.txt",
+        sourceText:
+          "Forwarded message\nSubject: Statement attached\nScheme Name\tCurrent Value\tInvested Value\tUnits\nIndex Core\t180000\t158000\t734.69",
+      },
+    );
+
+    assert.equal(job.fileName, "forwarded-statement.txt");
+    assert.equal(job.assetCount, 1);
+    assert.equal(job.status, "reviewed");
+    assert.equal(job.transactionCount, 0);
+    assert.match(job.summary, /email|statement/i);
+    assert.match(job.notes, /prepared 1 import candidate/i);
+  });
+
+  it("captures transaction counts when sync execution input is transaction-only", () => {
+    const job = createImportJobFromSyncExecution(
+      createTestConnection({
+        channel: "broker",
+        id: "integration-paytm-money",
+        importStrategy: "statement-upload",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        sourceHint: "Upload account statements or CSV exports first.",
+      }),
+      {
+        fileName: "paytm-transactions.txt",
+        sourceText: `### Investment Transaction Summary
+
+| Date        | Mutual Fund Scheme Name                                      | Folio No.    | Type           | Units |         NAV |    Amount | Status    |
+| ----------- | ------------------------------------------------------------ | ------------ | -------------- | ----: | ----------: | --------: | --------- |
+| 03 Jul 2026 | HDFC Large Cap Fund Direct Plan-Growth (Equity - Large Cap)  | 43268646     | Purchase - SIP | 0.810 | ₹1,234.1590 | ₹1,000.00 | Confirmed |`,
+      },
+    );
+
+    assert.equal(job.assetCount, 0);
+    assert.equal(job.transactionCount, 1);
+    assert.equal(job.status, "reviewed");
+  });
+
+  it("creates a received fallback job when sync execution has no import text", () => {
+    const job = createImportJobFromSyncExecution(
+      createTestConnection({
+        channel: "broker",
+        id: "integration-direct",
+        importStrategy: "sync-ready",
+        providerId: "paytm-money",
+        providerName: "Paytm Money Direct",
+        sourceHint: "Reserve auth for direct account access.",
+        syncCadenceMinutes: 60,
+      }),
+    );
+
+    assert.equal(job.status, "received");
+    assert.equal(job.documentKind, "table-export");
+    assert.equal(job.assetCount, 0);
+    assert.match(job.fileName, /^paytm-money-/);
+  });
+
+  it("applies reviewed sync execution holdings into the portfolio with merge behavior", () => {
+    const result = applySyncExecutionToPortfolio(
+      createTestConnection({
+        channel: "email",
+        id: "integration-email-forward",
+        importStrategy: "email-forward",
+        providerId: "email-forward",
+        providerName: "Email Forward",
+        sourceHint: "Forward broker statements to yourself and paste or upload them here.",
+        syncCadenceMinutes: 1440,
+      }),
+      [
+        {
+          gain: 12,
+          investedValue: 150000,
+          name: "Index Core Fund",
+          price: 240,
+          quantity: 734.69,
+          source: "Manual",
+          type: "Mutual Fund",
+          value: 176000,
+        },
+      ],
+      [],
+      {
+        fileName: "forwarded-statement.txt",
+        sourceText:
+          "Forwarded message\nSubject: Statement attached\nScheme Name\tCurrent Value\tInvested Value\tUnits\nIndex Core Fund\t180000\t158000\t734.69\nGold Saver ETF\t42000\t39000\t600",
+      },
+      "merge",
+    );
+
+    assert.ok(result);
+    assert.equal(result.appliedAssetCount, 2);
+    assert.equal(result.importJob.status, "completed");
+    assert.equal(result.nextAssets.length, 2);
+    assert.equal(result.nextAssets.some((asset) => asset.name === "Index Core Fund"), true);
+    assert.equal(result.nextAssets.some((asset) => asset.name === "Gold Saver ETF"), true);
+    assert.match(result.importJob.notes, /applied/i);
+  });
+
+  it("applies transaction-only sync execution input into the journal", () => {
+    const result = applySyncExecutionToPortfolio(
+      createTestConnection({
+        channel: "broker",
+        id: "integration-paytm-money",
+        importStrategy: "statement-upload",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        sourceHint: "Upload account statements or CSV exports first.",
+      }),
+      [],
+      [],
+      {
+        fileName: "paytm-transactions.txt",
+        sourceText: `### Investment Transaction Summary
+
+| Date        | Mutual Fund Scheme Name                                      | Folio No.    | Type           | Units |         NAV |    Amount | Status    |
+| ----------- | ------------------------------------------------------------ | ------------ | -------------- | ----: | ----------: | --------: | --------- |
+| 03 Jul 2026 | HDFC Large Cap Fund Direct Plan-Growth (Equity - Large Cap)  | 43268646     | Purchase - SIP | 0.810 | ₹1,234.1590 | ₹1,000.00 | Confirmed |`,
+      },
+      "merge",
+    );
+
+    assert.ok(result);
+    assert.equal(result.appliedAssetCount, 0);
+    assert.equal(result.appliedTransactionCount, 1);
+    assert.equal(result.nextTransactions.length, 1);
+    assert.equal(result.importJob.transactionCount, 1);
+  });
+});
+
+describe("buildSyncExecutionOverview", () => {
+  it("summarizes transaction-only plans as ready to apply transactions", () => {
+    const execution = executeProviderSync(
+      createTestConnection({
+        channel: "broker",
+        id: "integration-paytm-money",
+        importStrategy: "statement-upload",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        sourceHint: "Upload account statements or CSV exports first.",
+      }),
+      {
+        fileName: "paytm-transactions.txt",
+        sourceText: `### Investment Transaction Summary
+
+| Date        | Mutual Fund Scheme Name                                      | Folio No.    | Type           | Units |         NAV |    Amount | Status    |
+| ----------- | ------------------------------------------------------------ | ------------ | -------------- | ----: | ----------: | --------: | --------- |
+| 03 Jul 2026 | HDFC Large Cap Fund Direct Plan-Growth (Equity - Large Cap)  | 43268646     | Purchase - SIP | 0.810 | ₹1,234.1590 | ₹1,000.00 | Confirmed |`,
+      },
+    );
+
+    const overview = buildSyncExecutionOverview(execution);
+
+    assert.equal(overview.canApply, true);
+    assert.equal(overview.applyLabel, "Apply transactions");
+    assert.match(overview.headline, /transactions/i);
+    assert.match(overview.importReadyLabel, /1 transactions ready/i);
+  });
+
+  it("keeps planned direct connectors in a non-applicable waiting state", () => {
+    const execution = executeProviderSync(
+      createTestConnection({
+        channel: "broker",
+        id: "integration-direct",
+        importStrategy: "sync-ready",
+        providerId: "paytm-money",
+        providerName: "Paytm Money Direct",
+        sourceHint: "Reserve auth for direct account access.",
+        syncCadenceMinutes: 60,
+      }),
+    );
+
+    const overview = buildSyncExecutionOverview(execution);
+
+    assert.equal(overview.canApply, false);
+    assert.equal(overview.canStage, true);
+    assert.equal(overview.applyLabel, "Apply unavailable");
+    assert.match(overview.headline, /waiting on direct connector auth/i);
   });
 });

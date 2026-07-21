@@ -214,6 +214,15 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
   const missingHeaders = [indexes.name === -1 ? "name" : "", !hasValueSource ? "value" : ""].filter(Boolean);
 
   if (missingHeaders.length) {
+    if (isTransactionOnlyStatement(importText)) {
+      return {
+        assets: [],
+        errors: [
+          "This statement only includes transaction activity. Import the holdings section with current value if you want portfolio holdings from this file.",
+        ],
+      };
+    }
+
     const statementResult = parsePortfolioStatementText(importText);
 
     if (statementResult.assets.length) return statementResult;
@@ -246,6 +255,15 @@ export function parsePortfolioCsv(csvText: string): CsvImportResult {
 }
 
 function parsePortfolioStatementText(statementText: string): CsvImportResult {
+  if (isTransactionOnlyStatement(statementText)) {
+    return {
+      assets: [],
+      errors: [
+        "This statement only includes transaction activity. Import the holdings section with current value if you want portfolio holdings from this file.",
+      ],
+    };
+  }
+
   const providerSpecificResult = parseProviderSpecificStatement(statementText);
 
   if (providerSpecificResult.assets.length) return providerSpecificResult;
@@ -434,6 +452,10 @@ function parseJupiterStatementLines(lines: string[]): CsvImportResult {
 }
 
 function parseLabelledStatement(statementText: string): CsvImportResult {
+  if (isTransactionOnlyStatement(statementText)) {
+    return { assets: [], errors: [] };
+  }
+
   const records: Record<string, string>[] = [];
   let currentRecord: Record<string, string> = {};
 
@@ -497,6 +519,10 @@ function parseLabelledStatement(statementText: string): CsvImportResult {
 }
 
 function parseGenericStatement(statementText: string): CsvImportResult {
+  if (isTransactionOnlyStatement(statementText)) {
+    return { assets: [], errors: [] };
+  }
+
   const lines = statementText
     .split(/\r?\n/)
     .map((line) => stripThousandsSeparators(line.trim()))
@@ -868,6 +894,20 @@ function splitJupiterNameAndType(prefix: string) {
 
 function isSummaryRow(name: string) {
   return /^(grand\s+)?total|summary|net worth$/i.test(name.trim());
+}
+
+function isTransactionOnlyStatement(text: string) {
+  const lowerText = text.toLowerCase();
+  const hasTransactionMarkers =
+    /investment transaction summary|transaction summary|investment activity|fresh purchase|withdrawal|redemption|purchase - sip|purchase -/i.test(
+      text,
+    );
+  const hasHoldingsHeaders =
+    /current value|market value|invested value|holding value|portfolio value|scheme name\s+current value/i.test(
+      lowerText,
+    );
+
+  return hasTransactionMarkers && !hasHoldingsHeaders;
 }
 
 function getRecordValue(record: Record<string, string>, aliases: string[]) {

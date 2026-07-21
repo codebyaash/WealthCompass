@@ -2,10 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   academyUseCases,
+  buildAcademyTrackPlans,
   buildComparisonSummary,
   getAcademyComparisonOptions,
   normalizeComparisonSelection,
 } from "../lib/academy-rules";
+import { calculateRiskProfile, type RiskAnswers } from "../lib/wealth-rules";
+
+const baseAnswers: RiskAnswers = {
+  age: 33,
+  annualIncome: 90000,
+  country: "US",
+  decisionStyle: "guided",
+  debtLevel: "manageable",
+  dependents: 0,
+  emergencyMonths: 6,
+  experience: "new",
+  horizonYears: 8,
+  incomeStability: "steady",
+  liquidityNeeds: "medium",
+  marketDropResponse: "wait",
+  postLearningDropResponse: "buy",
+  monthlyInvestment: 900,
+  monthlySavings: 2200,
+  primaryGoal: "wealth",
+  taxAwareness: "medium",
+  timeAvailable: "medium",
+};
 
 test("academy comparison options exclude the category already selected on the other side", () => {
   const options = getAcademyComparisonOptions("index-funds");
@@ -38,4 +61,33 @@ test("academy use cases include a broad emergency and short-term shortlist", () 
     "liquid-funds",
     "overnight-funds",
   ]);
+});
+
+test("academy track plans personalize the top learning lanes from profile context", () => {
+  const profile = calculateRiskProfile(baseAnswers);
+  const plans = buildAcademyTrackPlans({
+    answers: baseAnswers,
+    profile,
+  });
+
+  assert.equal(plans.length, 3);
+  assert.equal(plans[0]?.title, "Understand the Plan");
+  assert.ok(plans[0]?.useCaseIds.includes("first-long-term-sip"));
+  assert.ok(plans[1]?.categoryIds.length > 0);
+});
+
+test("academy track plans keep emergency learning visible when foundation is weak", () => {
+  const stressedAnswers: RiskAnswers = {
+    ...baseAnswers,
+    debtLevel: "heavy",
+    emergencyMonths: 1,
+    primaryGoal: "emergency",
+  };
+  const plans = buildAcademyTrackPlans({
+    answers: stressedAnswers,
+    profile: calculateRiskProfile(stressedAnswers),
+  });
+
+  assert.ok(plans[0]?.useCaseIds.includes("emergency-and-short-term"));
+  assert.ok(plans[2]?.useCaseIds.includes("emergency-and-short-term"));
 });

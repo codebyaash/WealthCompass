@@ -6,6 +6,7 @@ import {
   createWealthGoal,
   defaultSnapshot,
   emptySignedInSnapshot,
+  loadSnapshot,
   loadSignedInWorkspaceCache,
   parseWorkspaceImport,
   saveSignedInWorkspaceCache,
@@ -277,6 +278,90 @@ describe("signed-in workspace cache", () => {
       assert.equal(cached?.snapshot.goals[0]?.name, "House");
       assert.equal(cached?.riskHistory[0]?.personality, "Steady Explorer");
       assert.equal(cached?.userId, "user-1");
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: previousWindow,
+      });
+    }
+  });
+});
+
+describe("loadSnapshot", () => {
+  it("uses the provided clean fallback when storage is empty", () => {
+    const storage = new Map<string, string>();
+    const previousWindow = globalThis.window;
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem(key: string) {
+            return storage.get(key) ?? null;
+          },
+          removeItem(key: string) {
+            storage.delete(key);
+          },
+          setItem(key: string, value: string) {
+            storage.set(key, value);
+          },
+        },
+      },
+    });
+
+    try {
+      const snapshot = loadSnapshot(emptySignedInSnapshot);
+
+      assert.deepEqual(snapshot, emptySignedInSnapshot);
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: previousWindow,
+      });
+    }
+  });
+
+  it("keeps sparse auth-aware snapshots clean instead of backfilling demo sections", () => {
+    const storage = new Map<string, string>();
+    const previousWindow = globalThis.window;
+
+    storage.set(
+      "wealthcompass:snapshot:v1",
+      JSON.stringify({
+        answers: {
+          ...emptySignedInSnapshot.answers,
+          country: "India",
+        },
+      }),
+    );
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem(key: string) {
+            return storage.get(key) ?? null;
+          },
+          removeItem(key: string) {
+            storage.delete(key);
+          },
+          setItem(key: string, value: string) {
+            storage.set(key, value);
+          },
+        },
+      },
+    });
+
+    try {
+      const snapshot = loadSnapshot(emptySignedInSnapshot);
+
+      assert.equal(snapshot.answers.country, "India");
+      assert.deepEqual(snapshot.assets, []);
+      assert.deepEqual(snapshot.goals, []);
+      assert.deepEqual(snapshot.integrations, []);
+      assert.deepEqual(snapshot.importJobs, []);
+      assert.deepEqual(snapshot.transactions, []);
+      assert.deepEqual(snapshot.marketPreferences, emptySignedInSnapshot.marketPreferences);
     } finally {
       Object.defineProperty(globalThis, "window", {
         configurable: true,

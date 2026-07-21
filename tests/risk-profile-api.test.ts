@@ -15,6 +15,7 @@ describe("normalizeRiskProfileRequest", () => {
       experience: "confident",
       horizonYears: "12",
       marketDropResponse: "buy",
+      postLearningDropResponse: "buy",
       monthlyInvestment: "1500",
       monthlySavings: "2500",
       primaryGoal: "retirement",
@@ -35,6 +36,7 @@ describe("normalizeRiskProfileRequest", () => {
       debtLevel: "unknown",
       experience: "expert",
       marketDropResponse: "panic",
+      postLearningDropResponse: "panic",
       monthlySavings: Number.POSITIVE_INFINITY,
       primaryGoal: "lottery",
       taxAwareness: "none",
@@ -45,6 +47,7 @@ describe("normalizeRiskProfileRequest", () => {
     assert.equal(answers.debtLevel, "manageable");
     assert.equal(answers.experience, "new");
     assert.equal(answers.marketDropResponse, "wait");
+    assert.equal(answers.postLearningDropResponse, "wait");
     assert.equal(answers.monthlySavings, 1);
     assert.equal(answers.primaryGoal, "wealth");
     assert.equal(answers.taxAwareness, "low");
@@ -58,6 +61,7 @@ describe("createRiskProfileResponse", () => {
       emergencyMonths: 8,
       horizonYears: 15,
       marketDropResponse: "buy",
+      postLearningDropResponse: "buy",
       monthlyInvestment: 1000,
       monthlySavings: 1500,
       primaryGoal: "wealth",

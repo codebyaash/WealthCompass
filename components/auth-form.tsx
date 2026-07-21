@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, LockKeyhole, Mail } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +17,10 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  getBrokerConnectorNotice,
+  getInboxConnectorNotice,
+} from "@/lib/auth-connector-notices";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export function AuthForm() {
@@ -32,24 +37,7 @@ export function AuthForm() {
   const connectorNotice = useMemo(() => {
     const broker = searchParams.get("broker");
     const inbox = searchParams.get("inbox");
-
-    if (broker === "zerodha-connected") {
-      return "Zerodha connected. Head back to the app and run a holdings sync from Settings.";
-    }
-
-    if (broker?.startsWith("zerodha-")) {
-      return "Zerodha connection did not finish cleanly. Try the broker connect step again from Settings.";
-    }
-
-    if (inbox?.endsWith("-connected")) {
-      return "Inbox connection added. You can now return to the app and continue the statement ingestion demo.";
-    }
-
-    if (inbox) {
-      return "Inbox connection did not finish cleanly. Reconnect the provider from Settings when you are ready.";
-    }
-
-    return "";
+    return getBrokerConnectorNotice(broker) || getInboxConnectorNotice(inbox);
   }, [searchParams]);
 
   useEffect(() => {
@@ -130,14 +118,17 @@ export function AuthForm() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-10">
+    <main className="market-grid flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
-        <Button asChild variant="ghost" className="mb-4">
-          <Link href="/">
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-        </Button>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <Button asChild variant="ghost">
+            <Link href="/">
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+          </Button>
+          <ThemeToggle />
+        </div>
         <Card>
           <CardHeader>
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -147,7 +138,10 @@ export function AuthForm() {
               {configured ? "Supabase connected" : "Local demo mode"}
             </Badge>
             <CardTitle>{mode === "signup" ? "Create account" : "Welcome back"}</CardTitle>
-            <CardDescription>Sign in to sync your WealthCompass workspace and run account-linked demos.</CardDescription>
+            <CardDescription>
+              Sign in to sync your WealthCompass workspace and carry your portfolio
+              intelligence across devices.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form className="grid gap-4" onSubmit={handleSubmit}>

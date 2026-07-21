@@ -102,6 +102,7 @@ export type ImportJob = {
   assetCount: number;
   attemptCount: number;
   createdAt: string;
+  transactionCount: number;
   documentId: string;
   documentKind: string;
   documentStoragePath: string | null;
@@ -200,11 +201,13 @@ const storageKey = "wealthcompass:snapshot:v1";
 const riskHistoryKey = "wealthcompass:risk-history:v1";
 const signedInWorkspaceCacheKey = "wealthcompass:signed-in-workspace-cache:v1";
 
-export function loadSnapshot() {
-  if (typeof window === "undefined") return defaultSnapshot;
+export function loadSnapshot(
+  fallbackSnapshot: WealthCompassSnapshot = defaultSnapshot,
+) {
+  if (typeof window === "undefined") return fallbackSnapshot;
 
   const rawSnapshot = window.localStorage.getItem(storageKey);
-  if (!rawSnapshot) return defaultSnapshot;
+  if (!rawSnapshot) return fallbackSnapshot;
 
   try {
     const parsedSnapshot = JSON.parse(rawSnapshot) as Partial<WealthCompassSnapshot> & {
@@ -213,22 +216,34 @@ export function loadSnapshot() {
 
     return {
       answers: {
-        ...defaultSnapshot.answers,
+        ...fallbackSnapshot.answers,
         ...parsedSnapshot.answers,
       },
-      assets: parsedSnapshot.assets ?? defaultSnapshot.assets,
-      goals: normalizeGoals(parsedSnapshot.goals ?? parsedSnapshot.goal) ?? defaultSnapshot.goals,
+      assets: parsedSnapshot.assets ?? fallbackSnapshot.assets,
+      goals:
+        parsedSnapshot.goals !== undefined || parsedSnapshot.goal !== undefined
+          ? normalizeGoals(parsedSnapshot.goals ?? parsedSnapshot.goal) ?? fallbackSnapshot.goals
+          : fallbackSnapshot.goals,
       integrations:
-        normalizeIntegrations(parsedSnapshot.integrations) ?? defaultSnapshot.integrations,
+        parsedSnapshot.integrations !== undefined
+          ? normalizeIntegrations(parsedSnapshot.integrations) ?? fallbackSnapshot.integrations
+          : fallbackSnapshot.integrations,
       importJobs:
-        normalizeImportJobs(parsedSnapshot.importJobs) ?? defaultSnapshot.importJobs,
+        parsedSnapshot.importJobs !== undefined
+          ? normalizeImportJobs(parsedSnapshot.importJobs) ?? fallbackSnapshot.importJobs
+          : fallbackSnapshot.importJobs,
       marketPreferences:
-        normalizeMarketPreferences(parsedSnapshot.marketPreferences) ??
-        defaultSnapshot.marketPreferences,
-      transactions: normalizeTransactions(parsedSnapshot.transactions) ?? defaultSnapshot.transactions,
+        parsedSnapshot.marketPreferences !== undefined
+          ? normalizeMarketPreferences(parsedSnapshot.marketPreferences) ??
+            fallbackSnapshot.marketPreferences
+          : fallbackSnapshot.marketPreferences,
+      transactions:
+        parsedSnapshot.transactions !== undefined
+          ? normalizeTransactions(parsedSnapshot.transactions) ?? fallbackSnapshot.transactions
+          : fallbackSnapshot.transactions,
     };
   } catch {
-    return defaultSnapshot;
+    return fallbackSnapshot;
   }
 }
 
@@ -507,6 +522,7 @@ export function createImportJob(
     assetCount: 0,
     attemptCount: 1,
     createdAt: new Date().toISOString(),
+    transactionCount: 0,
     documentId: crypto.randomUUID(),
     documentKind: "unclassified",
     documentStoragePath: null,
@@ -538,11 +554,32 @@ function normalizeRiskAnswers(value: unknown): RiskAnswers | null {
     age: numberOrDefault(value.age, defaultSnapshot.answers.age),
     annualIncome: numberOrDefault(value.annualIncome, defaultSnapshot.answers.annualIncome),
     country: stringOrDefault(value.country, defaultSnapshot.answers.country),
+    decisionStyle: enumOrDefault(
+      value.decisionStyle,
+      ["hands-off", "guided", "active"],
+      defaultSnapshot.answers.decisionStyle,
+    ),
     debtLevel: enumOrDefault(value.debtLevel, ["none", "manageable", "heavy"], defaultSnapshot.answers.debtLevel),
+    dependents: numberOrDefault(value.dependents, defaultSnapshot.answers.dependents),
     emergencyMonths: numberOrDefault(value.emergencyMonths, defaultSnapshot.answers.emergencyMonths),
     experience: enumOrDefault(value.experience, ["new", "some", "confident"], defaultSnapshot.answers.experience),
     horizonYears: numberOrDefault(value.horizonYears, defaultSnapshot.answers.horizonYears),
+    incomeStability: enumOrDefault(
+      value.incomeStability,
+      ["variable", "steady", "very-steady"],
+      defaultSnapshot.answers.incomeStability,
+    ),
+    liquidityNeeds: enumOrDefault(
+      value.liquidityNeeds,
+      ["high", "medium", "low"],
+      defaultSnapshot.answers.liquidityNeeds,
+    ),
     marketDropResponse: enumOrDefault(value.marketDropResponse, ["sell", "wait", "buy"], defaultSnapshot.answers.marketDropResponse),
+    postLearningDropResponse: enumOrDefault(
+      value.postLearningDropResponse,
+      ["sell", "wait", "buy"],
+      defaultSnapshot.answers.postLearningDropResponse,
+    ),
     monthlyInvestment: numberOrDefault(value.monthlyInvestment, defaultSnapshot.answers.monthlyInvestment),
     monthlySavings: numberOrDefault(value.monthlySavings, defaultSnapshot.answers.monthlySavings),
     primaryGoal: enumOrDefault(
@@ -688,6 +725,7 @@ function normalizeImportJobs(value: unknown): ImportJob[] | null {
       assetCount: numberOrDefault(job.assetCount, 0),
       attemptCount: numberOrDefault(job.attemptCount, 1),
       createdAt: stringOrDefault(job.createdAt, new Date().toISOString()),
+      transactionCount: numberOrDefault(job.transactionCount, 0),
       documentId: stringOrDefault(job.documentId, crypto.randomUUID()),
       documentKind: stringOrDefault(job.documentKind, "unclassified"),
       documentStoragePath:

@@ -14,11 +14,16 @@ const baseAnswers: RiskAnswers = {
   age: 35,
   annualIncome: 100000,
   country: "US",
+  decisionStyle: "guided",
   debtLevel: "manageable",
+  dependents: 0,
   emergencyMonths: 6,
   experience: "some",
   horizonYears: 8,
+  incomeStability: "steady",
+  liquidityNeeds: "medium",
   marketDropResponse: "wait",
+  postLearningDropResponse: "buy",
   monthlyInvestment: 1000,
   monthlySavings: 2500,
   primaryGoal: "wealth",
@@ -68,6 +73,8 @@ describe("getDashboardAction", () => {
 
     assert.equal(action.view, "onboarding");
     assert.equal(action.badge, "Foundation");
+    assert.match(action.trackTitle, /Put Money to Work|Understand|Build Investing Reps/i);
+    assert.ok(action.trackStep.length > 0);
   });
 
   it("points to goal planning when goals are underfunded", () => {
@@ -103,6 +110,7 @@ describe("getDashboardAction", () => {
 
     assert.equal(action.view, "academy");
     assert.equal(action.badge, "Learning");
+    assert.equal(action.trackTitle, "Understand the Plan");
   });
 });
 

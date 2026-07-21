@@ -10,9 +10,11 @@ import {
   Search,
   ShieldCheck,
   SplitSquareVertical,
+  Sparkles,
 } from "lucide-react";
 import {
   academyUseCases,
+  buildAcademyTrackPlans,
   buildComparisonSummary,
   categoryGroups,
   getAcademyComparisonOptions,
@@ -30,8 +32,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
 
-export function Academy() {
+export function Academy({
+  answers,
+  profile,
+}: {
+  answers: RiskAnswers;
+  profile: RiskProfile;
+}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [leftCategoryId, setLeftCategoryId] = useState("index-funds");
   const [rightCategoryId, setRightCategoryId] = useState("equity-mutual-funds");
@@ -90,10 +99,151 @@ export function Academy() {
     [leftCategoryId, rightCategoryId],
   );
   const comparisonSummary = buildComparisonSummary(leftCategory, rightCategory);
+  const trackPlans = useMemo(
+    () => buildAcademyTrackPlans({ answers, profile }),
+    [answers, profile],
+  );
+  const academyReadinessLabel =
+    normalizedQuery.length > 0
+      ? "Search in progress"
+      : trackPlans.length > 0
+        ? "Learning plan ready"
+        : "Explore categories";
 
   return (
     <div className="grid gap-5">
-      <Card>
+      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+        <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
+          <div className="grid gap-4">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">Investment learning desk</Badge>
+              <Badge variant="outline">{academyReadinessLabel}</Badge>
+              <Badge variant="outline">{profile.band}</Badge>
+              <Badge variant="outline">{profile.confidence}</Badge>
+            </div>
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+                Learn the category job first, then choose the product.
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                This page is meant to reduce decision noise. Use the guided tracks when you want a focused next step, the shortlists when you know the job to be done, and the comparator when two categories look similar on the surface.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Guided tracks
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  {trackPlans.length} personalized lane{trackPlans.length === 1 ? "" : "s"} built from your current profile and answers.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Compare on purpose
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  Put two categories side by side before you mistake similar labels for similar roles.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Start from the job
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-foreground">
+                  Use shortlists for growth, safety, liquidity, retirement, and near-term money decisions.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 content-start">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Current learning posture
+              </p>
+              <p className="mt-3 text-base font-semibold text-foreground">
+                {profile.personality}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Start with the learning lane that matches your current confidence and risk posture, then go deeper only where the next real decision needs it.
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best next move
+              </p>
+              <p className="mt-3 text-sm leading-6 text-foreground">
+                {trackPlans[0]?.description ??
+                  "Use the category finder or use-case shortlists to narrow the next topic worth learning."}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 bg-card/95 shadow-sm">
+        <CardHeader>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">{profile.personality}</Badge>
+            <Badge variant="outline">{profile.band}</Badge>
+            <Badge variant="outline">{profile.confidence}</Badge>
+          </div>
+          <CardTitle>Academy, mapped to your investing stage</CardTitle>
+          <CardDescription>
+            Start with the learning lane that fits your current readiness, then use the
+            library below when you want deeper category context.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 xl:grid-cols-3">
+          {trackPlans.map((plan) => (
+            <div key={plan.id} className="rounded-md border border-border/70 bg-background p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold">{plan.title}</p>
+                <Badge variant="outline">{plan.categoryIds.length} categories</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{plan.description}</p>
+              <div className="mt-4 rounded-md border border-border/70 bg-muted/20 p-3">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  What this track helps with
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Move from broad category confusion to a smaller set of products that fit your current stage, goal pressure, and learning confidence.
+                </p>
+              </div>
+              <div className="mt-4 grid gap-2">
+                {plan.useCaseIds.map((useCaseId) => {
+                  const useCase = academyUseCases.find((item) => item.id === useCaseId);
+                  if (!useCase) return null;
+
+                  return (
+                    <div key={useCase.id} className="rounded-md border border-border/70 bg-muted/20 p-3">
+                      <p className="text-sm font-medium">{useCase.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {useCase.description}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {plan.categoryIds.map((categoryId) => {
+                  const category = getCategoryById(categoryId);
+
+                  return (
+                    <Badge key={category.id} variant="outline">
+                      {category.name}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Investment Academy</CardTitle>
           <CardDescription>
@@ -124,7 +274,7 @@ export function Academy() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Beginner Navigation Map</CardTitle>
           <CardDescription>
@@ -150,7 +300,7 @@ export function Academy() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Category Finder</CardTitle>
           <CardDescription>Search by product name, role, or beginner use case.</CardDescription>
@@ -171,7 +321,7 @@ export function Academy() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Use-Case Shortlists</CardTitle>
           <CardDescription>
@@ -180,7 +330,7 @@ export function Academy() {
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredUseCases.map((useCase) => (
-            <div key={useCase.id} className="rounded-md border bg-background p-4">
+            <div key={useCase.id} className="rounded-md border border-border/70 bg-background p-4">
               <p className="text-sm font-semibold">{useCase.title}</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{useCase.description}</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -209,14 +359,14 @@ export function Academy() {
       ))}
 
       {!filteredGroups.length ? (
-        <Card>
+        <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardContent className="p-6 text-sm leading-6 text-muted-foreground">
             No academy categories matched that search yet. Try a product name, a goal type, or a role like growth, safety, or liquidity.
           </CardContent>
         </Card>
       ) : null}
 
-      <Card>
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Investment Comparator</CardTitle>
           <CardDescription>
@@ -224,7 +374,7 @@ export function Academy() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5">
-          <div className="grid gap-4 rounded-md border bg-muted/30 p-4">
+          <div className="grid gap-4 rounded-md border border-border/70 bg-muted/20 p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <SplitSquareVertical className="h-4 w-4 text-primary" />
               Compare what vs what
@@ -283,7 +433,7 @@ export function Academy() {
                   <button
                     key={`${leftId}-${rightId}`}
                     type="button"
-                    className="rounded-md border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                    className="rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                     onClick={() => {
                       setLeftCategoryId(left.id);
                       setRightCategoryId(right.id);
@@ -306,7 +456,7 @@ export function Academy() {
             <ComparisonOption option={rightCategory} emphasis={comparisonSummary.rightEdge} />
           </div>
 
-          <div className="rounded-md border bg-muted/40 p-4">
+          <div className="rounded-md border border-border/70 bg-muted/20 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">Beginner read</Badge>
               <span className="text-sm font-medium">{comparisonSummary.defaultPick}</span>

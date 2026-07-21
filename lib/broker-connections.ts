@@ -44,6 +44,14 @@ export type BrokerProviderDescriptor = {
   scopes: string[];
 };
 
+export type BrokerSyncEvent = {
+  id: string;
+  importedFileCount: number;
+  message: string;
+  status: "error" | "success" | "warning";
+  syncedAt: string;
+};
+
 export const brokerProviderDescriptors: BrokerProviderDescriptor[] = [
   {
     connectLabel: "Connect Zerodha",
@@ -53,6 +61,14 @@ export const brokerProviderDescriptors: BrokerProviderDescriptor[] = [
     scopes: ["holdings.read"],
   },
 ];
+
+export function getBrokerSyncHistory(connection: BrokerConnection | null | undefined) {
+  const history = connection?.metadata?.syncHistory;
+
+  if (!Array.isArray(history)) return [];
+
+  return history.filter(isBrokerSyncEvent);
+}
 
 export function mapBrokerConnectionRow(row: BrokerConnectionRow): BrokerConnection {
   return {
@@ -152,4 +168,32 @@ export async function upsertBrokerConnection(
   );
 
   if (result.error) throw result.error;
+}
+
+export function appendBrokerSyncEvent(
+  metadata: Record<string, unknown>,
+  event: BrokerSyncEvent,
+) {
+  const currentHistory = Array.isArray(metadata.syncHistory)
+    ? metadata.syncHistory.filter(isBrokerSyncEvent)
+    : [];
+
+  return {
+    ...metadata,
+    syncHistory: [event, ...currentHistory].slice(0, 6),
+  };
+}
+
+function isBrokerSyncEvent(value: unknown): value is BrokerSyncEvent {
+  if (!value || typeof value !== "object") return false;
+
+  const event = value as Partial<BrokerSyncEvent>;
+
+  return (
+    typeof event.id === "string" &&
+    typeof event.message === "string" &&
+    typeof event.syncedAt === "string" &&
+    typeof event.importedFileCount === "number" &&
+    (event.status === "error" || event.status === "success" || event.status === "warning")
+  );
 }

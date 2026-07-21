@@ -4,13 +4,18 @@ create table if not exists public.profiles (
   country text,
   age integer,
   annual_income numeric,
+  dependents integer,
+  income_stability text check (income_stability in ('variable', 'steady', 'very-steady')),
   monthly_savings numeric,
   monthly_investment numeric,
   emergency_months integer default 0,
   debt_level text check (debt_level in ('none', 'manageable', 'heavy')),
   experience text check (experience in ('new', 'some', 'confident')),
   horizon_years integer,
+  liquidity_needs text check (liquidity_needs in ('high', 'medium', 'low')),
   market_drop_response text check (market_drop_response in ('sell', 'wait', 'buy')),
+  post_learning_drop_response text check (post_learning_drop_response in ('sell', 'wait', 'buy')),
+  decision_style text check (decision_style in ('hands-off', 'guided', 'active')),
   primary_goal text check (
     primary_goal in ('emergency', 'home', 'retirement', 'wealth', 'education', 'travel')
   ),
@@ -18,6 +23,29 @@ create table if not exists public.profiles (
   tax_awareness text check (tax_awareness in ('low', 'medium', 'high')),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
+);
+
+alter table public.profiles
+add column if not exists dependents integer;
+
+alter table public.profiles
+add column if not exists income_stability text check (
+  income_stability in ('variable', 'steady', 'very-steady')
+);
+
+alter table public.profiles
+add column if not exists liquidity_needs text check (
+  liquidity_needs in ('high', 'medium', 'low')
+);
+
+alter table public.profiles
+add column if not exists post_learning_drop_response text check (
+  post_learning_drop_response in ('sell', 'wait', 'buy')
+);
+
+alter table public.profiles
+add column if not exists decision_style text check (
+  decision_style in ('hands-off', 'guided', 'active')
 );
 
 create table if not exists public.risk_profiles (

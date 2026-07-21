@@ -149,7 +149,7 @@ export function derivePortfolioAssetsFromTransactions(
         name: transaction.assetName,
         quantity: 0,
         source: transaction.source,
-        type: transaction.type,
+        type: normalizeTransactionHoldingType(transaction.assetName, transaction.type),
       };
 
     if (transaction.action === "buy" || transaction.action === "transfer") {
@@ -184,8 +184,12 @@ export function derivePortfolioAssetsFromTransactions(
         (asset) => createAssetKey(asset) === createAssetKey(position),
       );
       const price = fallbackAsset?.price || position.latestPrice;
-      const value = Number((position.quantity * price).toFixed(2));
       const investedValue = Number(position.investedValue.toFixed(2));
+      const marketDerivedValue = Number((position.quantity * price).toFixed(2));
+      const value =
+        !fallbackAsset && Math.abs(marketDerivedValue - investedValue) <= 1
+          ? investedValue
+          : marketDerivedValue;
 
       return {
         gain:
@@ -197,11 +201,26 @@ export function derivePortfolioAssetsFromTransactions(
         price,
         quantity: Number(position.quantity.toFixed(2)),
         source: `${position.source} · transaction-derived`,
-        type: position.type,
+        type: normalizeTransactionHoldingType(position.name, position.type),
         value,
       } satisfies PortfolioAsset;
     })
     .sort((left, right) => right.value - left.value);
+}
+
+export function resolveSnapshotPortfolioAssets(
+  transactions: PortfolioTransaction[],
+  savedAssets: PortfolioAsset[] = [],
+) {
+  if (savedAssets.length > 0) {
+    return savedAssets;
+  }
+
+  if (transactions.length === 0) {
+    return savedAssets;
+  }
+
+  return derivePortfolioAssetsFromTransactions(transactions, savedAssets);
 }
 
 export function calculateLargestHoldingConcentration({
@@ -387,5 +406,53 @@ function createAssetKey(asset: Pick<PortfolioAsset, "name" | "type">) {
 function createTransactionKey(
   transaction: Pick<PortfolioTransaction, "assetName" | "type">,
 ) {
-  return `${transaction.assetName.trim().toLowerCase()}::${transaction.type.trim().toLowerCase()}`;
+  return `${transaction.assetName.trim().toLowerCase()}::${normalizeTransactionHoldingType(
+    transaction.assetName,
+    transaction.type,
+  )
+    .trim()
+    .toLowerCase()}`;
+}
+
+function normalizeTransactionHoldingType(assetName: string, type: string) {
+  const normalizedType = type.trim();
+  const lowerName = assetName.trim().toLowerCase();
+  const lowerType = normalizedType.toLowerCase();
+
+  if (
+    lowerName.includes("small cap") &&
+    (lowerType === "mutual fund" || lowerType === "other" || lowerType === "imported holding")
+  ) {
+    return "Equity - Small Cap";
+  }
+
+  if (
+    lowerName.includes("mid cap") &&
+    (lowerType === "mutual fund" || lowerType === "other" || lowerType === "imported holding")
+  ) {
+    return "Equity - Mid Cap";
+  }
+
+  if (
+    lowerName.includes("large cap") &&
+    (lowerType === "mutual fund" || lowerType === "other" || lowerType === "imported holding")
+  ) {
+    return "Equity - Large Cap";
+  }
+
+  if (
+    lowerName.includes("liquid") &&
+    (lowerType === "mutual fund" || lowerType === "other" || lowerType === "imported holding")
+  ) {
+    return "Debt";
+  }
+
+  if (
+    lowerName.includes("gold") &&
+    (lowerType === "mutual fund" || lowerType === "other" || lowerType === "imported holding")
+  ) {
+    return "Gold";
+  }
+
+  return normalizedType;
 }

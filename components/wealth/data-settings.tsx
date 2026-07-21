@@ -33,6 +33,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  buildCombinedImportOverview,
+  type CombinedImportOverview,
+} from "@/lib/combined-import-overview";
+import { previewPortfolioImport } from "@/lib/csv-import";
+import {
   describeReadiness,
   importSourceDescriptors,
 } from "@/lib/import-sources";
@@ -42,11 +47,26 @@ import {
   describeConnectorTemplate,
   getConnectorTemplate,
 } from "@/lib/connector-templates";
+import { getConnectorSampleInput } from "@/lib/connector-samples";
 import {
+  buildSyncPlanSeedFromEmailResult,
+  buildSyncPlanSeedFromImportJob,
+} from "@/lib/connector-handoffs";
+import { formatMoney } from "@/lib/formatters";
+import {
+  applyImportJobToPortfolio,
+  describeImportHistoryApplyResult,
+  filterNewImportedTransactions,
+} from "@/lib/import-jobs";
+import {
+  getBrokerSyncHistory,
   brokerProviderDescriptors,
   type BrokerConnection,
 } from "@/lib/broker-connections";
 import {
+  getInboxSyncHistory,
+  buildInboxOperationsSummary,
+  getInboxConnectionHealth,
   inboxProviderDescriptors,
   type InboxConnection,
   type InboxProvider,
@@ -55,22 +75,44 @@ import type {
   EmailIngestionApiResponse,
   EmailIngestionResult,
 } from "@/lib/email-ingestion";
+import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
+import { parseImportedTransactions } from "@/lib/transaction-import";
 import {
+  getImportJobFlowMeta,
+  getImportJobHistoryActions,
+  getImportJobOutcomeStats,
+  getImportJobPrimaryAction,
+} from "@/lib/import-job-flow";
+import {
+  buildConnectorActivitySummary,
+  buildConnectorActivityFeed,
+  buildIntegrationDiagnosticsSummary,
   buildIntegrationOperationsSummary,
+  filterAndSortIntegrations,
+  recordManualIntegrationReview,
   buildIntegrationSchedulerPlan,
   formatSyncTimeLabel,
+  getAutoOpenIntegrationAction,
+  type IntegrationActivityFilter,
   type IntegrationActionItem,
   getIntegrationActionItems,
   getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
+  getIntegrationStrategyLabel,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
 } from "@/lib/integration-sync";
 import type {
+  ProviderSyncExecutionOverview,
   ProviderSyncExecutionResult,
   ProviderSyncPreview,
+} from "@/lib/provider-sync-adapters";
+import {
+  applySyncExecutionToPortfolio,
+  buildSyncExecutionOverview,
+  createImportJobFromSyncExecution,
 } from "@/lib/provider-sync-adapters";
 import {
   type ImportJob,
@@ -86,9 +128,27 @@ import {
 import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
+export type DataSettingsFocusSection =
+  | "broker"
+  | "connected-sources"
+  | "email-intake"
+  | "import-history"
+  | "inbox"
+  | "sync-plan";
+
+export type DataSettingsFocusRequest = {
+  importAction?: "apply-portfolio" | "none" | "open-sync-plan";
+  jobId?: string;
+  providerId?: string;
+  providerName?: string;
+  section: DataSettingsFocusSection;
+};
+
 export function DataSettings({
   answers,
   assets,
+  focusRequestKey,
+  focusRequest,
   goals,
   integrations,
   importJobs,
@@ -114,10 +174,16 @@ export function DataSettings({
 }: {
   answers: RiskAnswers;
   assets: PortfolioAsset[];
+  focusRequestKey?: number;
+  focusRequest?: DataSettingsFocusRequest | null;
   goals: WealthGoal[];
   integrations: IntegrationConnection[];
   importJobs: ImportJob[];
-  onImportBrokerAssets: (assets: PortfolioAsset[], job: ImportJob) => void;
+  onImportBrokerAssets: (
+    assets: PortfolioAsset[],
+    job: ImportJob,
+    transactions?: PortfolioTransaction[],
+  ) => void;
   onImportWorkspace: (workspace: WealthCompassImport) => void;
   onAddIntegration: (connection: IntegrationConnection) => void;
   onDeleteIntegration: (connectionId: string) => void;
@@ -162,14 +228,33 @@ export function DataSettings({
   const [syncInputText, setSyncInputText] = useState("");
   const [syncPreview, setSyncPreview] = useState<ProviderSyncPreview | null>(null);
   const [syncExecution, setSyncExecution] = useState<ProviderSyncExecutionResult | null>(null);
+  const [syncPreviewConnection, setSyncPreviewConnection] = useState<IntegrationConnection | null>(null);
   const [syncPreviewProviderId, setSyncPreviewProviderId] = useState<string | null>(null);
   const [jobFilter, setJobFilter] = useState<"all" | "completed" | "open" | "failed">("all");
   const [jobSearch, setJobSearch] = useState("");
+  const [integrationFilter, setIntegrationFilter] = useState<IntegrationActivityFilter>("all");
+  const [integrationSearch, setIntegrationSearch] = useState("");
+  const [highlightedBrokerProviderId, setHighlightedBrokerProviderId] = useState<string | null>(null);
+  const [highlightedBrokerNotice, setHighlightedBrokerNotice] = useState<string | null>(null);
+  const [highlightedInboxProviderId, setHighlightedInboxProviderId] = useState<string | null>(null);
+  const [highlightedInboxNotice, setHighlightedInboxNotice] = useState<string | null>(null);
+  const [highlightedIntegrationId, setHighlightedIntegrationId] = useState<string | null>(null);
+  const [highlightedIntegrationNotice, setHighlightedIntegrationNotice] = useState<string | null>(null);
+  const [highlightedActivityProviderId, setHighlightedActivityProviderId] = useState<string | null>(null);
+  const [highlightedActivityProviderName, setHighlightedActivityProviderName] = useState<string | null>(null);
+  const [highlightedImportJobId, setHighlightedImportJobId] = useState<string | null>(null);
+  const [highlightedImportJobNotice, setHighlightedImportJobNotice] = useState<string | null>(null);
   const brokerSectionRef = useRef<HTMLDivElement | null>(null);
   const inboxSectionRef = useRef<HTMLDivElement | null>(null);
   const emailIntakeSectionRef = useRef<HTMLDivElement | null>(null);
   const connectedSourcesSectionRef = useRef<HTMLDivElement | null>(null);
+  const importHistorySectionRef = useRef<HTMLDivElement | null>(null);
   const syncPlanSectionRef = useRef<HTMLDivElement | null>(null);
+  const syncInboxActionRef = useRef<(provider: InboxProvider) => Promise<void>>(async () => {});
+  const syncBrokerActionRef = useRef<() => Promise<void>>(async () => {});
+  const integrationActionRef = useRef<
+    (integration: IntegrationConnection, action: IntegrationActionItem) => Promise<void>
+  >(async () => {});
   const integrationHealthSummary = useMemo(() => {
     const metrics = integrations.map(getIntegrationHealthMetrics);
     const activeCount = integrations.filter((integration) => integration.status === "active").length;
@@ -201,6 +286,26 @@ export function DataSettings({
   const operationsSummary = useMemo(
     () => buildIntegrationOperationsSummary(integrations),
     [integrations],
+  );
+  const connectorActivityFeed = useMemo(
+    () =>
+      buildConnectorActivityFeed({
+        brokerConnections,
+        inboxConnections,
+        integrations,
+      }),
+    [brokerConnections, inboxConnections, integrations],
+  );
+  const filteredConnectorActivityFeed = useMemo(() => {
+    if (!highlightedActivityProviderId) return connectorActivityFeed;
+
+    return connectorActivityFeed.filter(
+      (event) => event.providerId === highlightedActivityProviderId,
+    );
+  }, [connectorActivityFeed, highlightedActivityProviderId]);
+  const connectorActivitySummary = useMemo(
+    () => buildConnectorActivitySummary(filteredConnectorActivityFeed),
+    [filteredConnectorActivityFeed],
   );
   const attentionItems = useMemo(
     () => getIntegrationAttentionItems(integrations).slice(0, 4),
@@ -246,11 +351,79 @@ export function DataSettings({
         .includes(query);
     });
   }, [importJobs, jobFilter, jobSearch]);
+  const filteredIntegrations = useMemo(
+    () =>
+      filterAndSortIntegrations(integrations, {
+        filter: integrationFilter,
+        query: integrationSearch,
+      }),
+    [integrationFilter, integrationSearch, integrations],
+  );
+  const latestImportJobByProviderId = useMemo(
+    () => {
+      const nextMap = new Map<string, ImportJob>();
+
+      for (const job of importJobs) {
+        if (!job.providerId) continue;
+        const current = nextMap.get(job.providerId);
+        if (!current || job.createdAt > current.createdAt) {
+          nextMap.set(job.providerId, job);
+        }
+      }
+
+      return nextMap;
+    },
+    [importJobs],
+  );
+  const syncPlanLatestImportJob = useMemo(() => {
+    if (!syncPreviewConnection) return null;
+
+    return latestImportJobByProviderId.get(syncPreviewConnection.providerId) ?? null;
+  }, [latestImportJobByProviderId, syncPreviewConnection]);
+  const syncPlanLatestImportMeta = useMemo(
+    () => (syncPlanLatestImportJob ? getImportJobFlowMeta(syncPlanLatestImportJob) : null),
+    [syncPlanLatestImportJob],
+  );
+  const syncPlanLatestImportStats = useMemo(
+    () => (syncPlanLatestImportJob ? getImportJobOutcomeStats(syncPlanLatestImportJob) : null),
+    [syncPlanLatestImportJob],
+  );
+  const syncPlanCombinedOverview = useMemo(() => {
+    if (!syncPreviewConnection || !syncInputText.trim()) return null;
+
+    const normalized = normalizeImportTextForProvider({
+      providerId: syncPreviewConnection.providerId,
+      text: syncInputText,
+    });
+    const holdingsPreview = previewPortfolioImport(normalized.text, assets);
+    const parsedTransactions = parseImportedTransactions(normalized.text);
+    const newTransactions = filterNewImportedTransactions(
+      parsedTransactions.transactions,
+      transactions,
+    );
+
+    return buildCombinedImportOverview({
+      preview: holdingsPreview,
+      selectedAssets: holdingsPreview.assets,
+      transactionDuplicateCount:
+        parsedTransactions.transactions.length - newTransactions.length,
+      transactionParsedCount: parsedTransactions.transactions.length,
+      transactionReadyCount: newTransactions.length,
+    });
+  }, [assets, syncInputText, syncPreviewConnection, transactions]);
+  const syncExecutionOverview = useMemo<ProviderSyncExecutionOverview | null>(
+    () => (syncExecution ? buildSyncExecutionOverview(syncExecution) : null),
+    [syncExecution],
+  );
   const inboxConnectionMap = useMemo(
     () =>
       new Map(
         inboxConnections.map((connection) => [connection.provider, connection]),
       ),
+    [inboxConnections],
+  );
+  const inboxOperationsSummary = useMemo(
+    () => buildInboxOperationsSummary(inboxProviderDescriptors, inboxConnections),
     [inboxConnections],
   );
   const brokerConnectionMap = useMemo(
@@ -323,6 +496,41 @@ export function DataSettings({
     ],
     [userEmail],
   );
+  const settingsTrack =
+    profile.actionBaskets.find((track) => track.id === "track") ?? profile.actionBaskets[0];
+  const settingsHeadline =
+    operationsSummary.attentionCount > 0
+      ? "Tighten the feeds that still need a review before they touch your portfolio."
+      : operationsSummary.activeCount > 0
+        ? "Your data lanes are active. Keep them clean, review exceptions, and protect the workspace."
+        : "Set up one reliable feed first, then let the rest of the workflow build around it.";
+  const settingsDetail =
+    settingsTrack?.items[0] ??
+    "Use this page to connect sources, review imports, and keep a clean backup of the workspace.";
+  const settingsSteps = [
+    {
+      detail:
+        operationsSummary.activeCount > 0
+          ? `${operationsSummary.activeCount} source${operationsSummary.activeCount === 1 ? "" : "s"} already active.`
+          : "Start with one broker, email, or statement lane.",
+      icon: Cloud,
+      title: "1. Connect a feed",
+    },
+    {
+      detail:
+        importJobSummary.openCount > 0
+          ? `${importJobSummary.openCount} import review${importJobSummary.openCount === 1 ? "" : "s"} waiting.`
+          : "Keep staged imports clean before they merge into holdings.",
+      icon: ScanSearch,
+      title: "2. Review before apply",
+    },
+    {
+      detail:
+        "Keep a fresh workspace export around before major connector or import changes.",
+      icon: Download,
+      title: "3. Protect the workspace",
+    },
+  ];
 
   async function handleCopySnapshot() {
     if (!navigator.clipboard) {
@@ -397,6 +605,363 @@ export function DataSettings({
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function getAutoOpenActionNotice(
+    integration: IntegrationConnection,
+    action: IntegrationActionItem,
+  ) {
+    switch (action.actionId) {
+      case "run-connector-now":
+        return integration.importStrategy === "sync-ready"
+          ? "Started the suggested connector sync for this source."
+          : "Opened the sync plan for the suggested next manual review step.";
+      case "run-first-check":
+        return "Opened the first-run sync plan for this source.";
+      case "upload-latest-statement":
+      case "import-latest-statement":
+      case "upload-fresh-export":
+      case "reconcile-holdings":
+        return "Opened the sync plan with the suggested source workflow.";
+      case "review-import-history":
+        return "Opened import history for the latest saved review on this source.";
+      case "feed-email-intake":
+        return "Prepared the email intake workflow for this source.";
+      case "fix-source":
+        return "Opened this source in edit mode for review.";
+      default:
+        return "Opened the next suggested workflow for this source.";
+    }
+  }
+
+  function buildHighlightedImportNotice(
+    job: ImportJob,
+    preferredAction?: DataSettingsFocusRequest["importAction"],
+  ) {
+    const primaryAction = getImportJobPrimaryAction(job);
+    const action =
+      preferredAction && preferredAction !== "none"
+        ? preferredAction
+        : primaryAction.actionId;
+
+    if (action === "apply-portfolio") {
+      return `Focused the ${job.providerName} review and lined it up for a final apply into the workspace.`;
+    }
+
+    if (action === "open-sync-plan") {
+      return `Focused the ${job.providerName} review and queued it for a closer pass in the sync plan.`;
+    }
+
+    return `Focused the ${job.providerName} review so the next import step is ready from here.`;
+  }
+
+  useEffect(() => {
+    if (!focusRequest) return;
+
+    const focusMap: Record<DataSettingsFocusSection, { current: HTMLDivElement | null }> = {
+      broker: brokerSectionRef,
+      "connected-sources": connectedSourcesSectionRef,
+      "email-intake": emailIntakeSectionRef,
+      "import-history": importHistorySectionRef,
+      inbox: inboxSectionRef,
+      "sync-plan": syncPlanSectionRef,
+    };
+
+    const targetRef = focusMap[focusRequest.section];
+
+    if (!targetRef.current) return;
+
+    if (focusRequest.section === "import-history" && focusRequest.providerName) {
+      setJobFilter("all");
+      setJobSearch(focusRequest.providerName);
+      setHighlightedActivityProviderId(focusRequest.providerId ?? null);
+      setHighlightedActivityProviderName(focusRequest.providerName);
+      setActionMessage(`${focusRequest.providerName} import history is now in focus.`);
+
+      if (!focusRequest.jobId) {
+        const matchedLatestJob = importJobs
+          .filter((job) =>
+            focusRequest.providerId
+              ? job.providerId === focusRequest.providerId
+              : job.providerName === focusRequest.providerName,
+          )
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+        if (matchedLatestJob) {
+          setHighlightedImportJobId(matchedLatestJob.id);
+          setHighlightedImportJobNotice(
+            buildHighlightedImportNotice(matchedLatestJob, focusRequest.importAction),
+          );
+          window.setTimeout(() => {
+            document.getElementById(`import-job-${matchedLatestJob.id}`)?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }, 120);
+        }
+      }
+    }
+
+    if (focusRequest.section === "broker" && focusRequest.providerId) {
+      setHighlightedBrokerProviderId(focusRequest.providerId);
+      setHighlightedActivityProviderId(focusRequest.providerId);
+      setHighlightedActivityProviderName(focusRequest.providerName ?? "Broker");
+      if (focusRequest.providerId === "zerodha") {
+        const connection = brokerConnectionMap.get("zerodha");
+
+        if (connection?.status === "connected") {
+          setHighlightedBrokerNotice("Running holdings sync for this broker now.");
+          void syncBrokerActionRef.current();
+        } else {
+          setHighlightedBrokerNotice("This broker is ready to reconnect from here.");
+          setActionMessage("Zerodha broker connector is in focus and ready to reconnect.");
+        }
+      }
+      window.setTimeout(() => {
+        document.getElementById(`broker-connector-${focusRequest.providerId}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 120);
+    }
+
+    if (focusRequest.section === "inbox" && focusRequest.providerId) {
+      setHighlightedInboxProviderId(focusRequest.providerId);
+      setHighlightedActivityProviderId(focusRequest.providerId);
+      setHighlightedActivityProviderName(
+        focusRequest.providerName ?? (focusRequest.providerId === "gmail" ? "Gmail" : "Outlook"),
+      );
+      const provider = focusRequest.providerId as InboxProvider;
+      const connection = inboxConnectionMap.get(provider);
+
+      if (connection?.status === "connected") {
+        setHighlightedInboxNotice("Running an inbox check for this connector now.");
+        void syncInboxActionRef.current(provider);
+      } else {
+        setHighlightedInboxNotice("This inbox connector is ready for setup from here.");
+        setActionMessage(`${focusRequest.providerName ?? (provider === "gmail" ? "Gmail" : "Outlook")} inbox connector is in focus and ready for setup.`);
+      }
+      window.setTimeout(() => {
+        document.getElementById(`inbox-connector-${focusRequest.providerId}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 120);
+    }
+
+    if (focusRequest.section === "connected-sources") {
+      const matchedIntegration = integrations.find((integration) =>
+        focusRequest.providerId
+          ? integration.providerId === focusRequest.providerId
+          : focusRequest.providerName
+            ? integration.providerName === focusRequest.providerName
+            : false,
+      );
+
+      if (matchedIntegration) {
+        setIntegrationFilter("all");
+        setIntegrationSearch(matchedIntegration.providerName);
+        setHighlightedIntegrationId(matchedIntegration.id);
+        setHighlightedActivityProviderId(matchedIntegration.providerId);
+        setHighlightedActivityProviderName(matchedIntegration.providerName);
+        const autoOpenActionId = getAutoOpenIntegrationAction(matchedIntegration);
+        const autoOpenAction = autoOpenActionId
+          ? getIntegrationActionItems(matchedIntegration).find(
+              (action) => action.actionId === autoOpenActionId,
+            ) ?? null
+          : null;
+
+        if (autoOpenAction) {
+          setHighlightedIntegrationNotice(
+            getAutoOpenActionNotice(matchedIntegration, autoOpenAction),
+          );
+          void integrationActionRef.current(matchedIntegration, autoOpenAction);
+        } else {
+          setHighlightedIntegrationNotice("This source is in focus and ready for review.");
+        }
+        window.setTimeout(() => {
+          document.getElementById(`integration-source-${matchedIntegration.id}`)?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 120);
+      }
+    }
+
+    if (focusRequest.section === "import-history" && focusRequest.jobId) {
+      const matchedJob = importJobs.find((job) => job.id === focusRequest.jobId);
+      setHighlightedImportJobId(focusRequest.jobId);
+      if (matchedJob?.providerId) {
+        setHighlightedActivityProviderId(matchedJob.providerId);
+        setHighlightedActivityProviderName(matchedJob.providerName);
+      }
+      setHighlightedImportJobNotice(
+        matchedJob
+          ? buildHighlightedImportNotice(matchedJob, focusRequest.importAction)
+          : "Focused this import review from the dashboard.",
+      );
+      if (matchedJob) {
+        setActionMessage(`${matchedJob.providerName} import review is now in focus.`);
+      }
+      window.setTimeout(() => {
+        document.getElementById(`import-job-${focusRequest.jobId}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 120);
+    }
+
+    scrollToSection(targetRef);
+  }, [
+    brokerConnectionMap,
+    focusRequestKey,
+    focusRequest,
+    inboxConnectionMap,
+    integrations,
+    importJobs,
+  ]);
+
+  useEffect(() => {
+    if (!highlightedBrokerProviderId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedBrokerProviderId((current) =>
+        current === highlightedBrokerProviderId ? null : current,
+      );
+      setHighlightedBrokerNotice(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedBrokerProviderId]);
+
+  useEffect(() => {
+    if (!highlightedInboxProviderId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedInboxProviderId((current) =>
+        current === highlightedInboxProviderId ? null : current,
+      );
+      setHighlightedInboxNotice(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedInboxProviderId]);
+
+  useEffect(() => {
+    if (!highlightedIntegrationId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedIntegrationId((current) =>
+        current === highlightedIntegrationId ? null : current,
+      );
+      setHighlightedIntegrationNotice(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedIntegrationId]);
+
+  useEffect(() => {
+    if (!highlightedActivityProviderId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedActivityProviderId((current) =>
+        current === highlightedActivityProviderId ? null : current,
+      );
+      setHighlightedActivityProviderName(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedActivityProviderId]);
+
+  useEffect(() => {
+    if (!highlightedImportJobId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedImportJobId((current) =>
+        current === highlightedImportJobId ? null : current,
+      );
+      setHighlightedImportJobNotice(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedImportJobId]);
+
+  function handleOpenImportHistoryForProvider(integration: IntegrationConnection) {
+    setJobFilter("all");
+    setJobSearch(integration.providerName);
+    scrollToSection(importHistorySectionRef);
+    setActionMessage(`${integration.providerName} import history is now in focus.`);
+  }
+
+  function getConnectorActivityActionLabel(sourceType: "broker" | "inbox" | "manual") {
+    switch (sourceType) {
+      case "broker":
+        return "Sync again";
+      case "inbox":
+        return "Run again";
+      case "manual":
+      default:
+        return "Open source";
+    }
+  }
+
+  function getConnectorActivitySourceLabel(sourceType: "broker" | "inbox" | "manual") {
+    switch (sourceType) {
+      case "broker":
+        return "Broker";
+      case "inbox":
+        return "Inbox";
+      default:
+        return "Manual";
+    }
+  }
+
+  async function handleConnectorActivityClick(event: {
+    providerId: string;
+    providerName: string;
+    sourceType: "broker" | "inbox" | "manual";
+  }) {
+    if (event.sourceType === "manual") {
+      const integration = integrations.find((item) => item.providerId === event.providerId);
+
+      if (integration) {
+        setIntegrationFilter("all");
+        setIntegrationSearch(integration.providerName);
+        scrollToSection(connectedSourcesSectionRef);
+        setActionMessage(`${integration.providerName} source is now in focus.`);
+        return;
+      }
+
+      scrollToSection(connectedSourcesSectionRef);
+      setActionMessage("Connector source list is now in focus.");
+      return;
+    }
+
+    if (event.sourceType === "inbox") {
+      const provider = event.providerId as InboxProvider;
+      const connection = inboxConnectionMap.get(provider);
+
+      if (connection?.status === "connected") {
+        await handleSyncInbox(provider);
+        return;
+      }
+
+      scrollToSection(inboxSectionRef);
+      setActionMessage(`${event.providerName} inbox connector is ready for review.`);
+      return;
+    }
+
+    if (event.providerId === "zerodha") {
+      const connection = brokerConnectionMap.get("zerodha");
+
+      if (connection?.status === "connected") {
+        await handleSyncZerodha();
+        return;
+      }
+    }
+
+    scrollToSection(brokerSectionRef);
+    setActionMessage(`${event.providerName} broker connector is ready for review.`);
+  }
+
   async function handleIntegrationActionClick(
     integration: IntegrationConnection,
     action: IntegrationActionItem,
@@ -412,7 +977,7 @@ export function DataSettings({
         if (integration.providerId === "zerodha") {
           await handleConnectBroker();
         } else {
-          await handlePreviewSyncPlan(integration);
+          await handlePreviewSyncPlan(integration, { prefillSample: true });
         }
         return;
       case "keep-fallback-import":
@@ -433,21 +998,24 @@ export function DataSettings({
       case "upload-latest-statement":
       case "import-latest-statement":
       case "reconcile-holdings":
-        await handlePreviewSyncPlan(integration);
+        await handlePreviewSyncPlan(integration, { prefillSample: true });
         scrollToSection(syncPlanSectionRef);
+        return;
+      case "review-import-history":
+        handleOpenImportHistoryForProvider(integration);
         return;
       case "run-connector-now":
         if (integration.importStrategy === "sync-ready") {
           onRunIntegrationSync(integration.id);
           setActionMessage(`${integration.providerName} sync started.`);
         } else {
-          await handlePreviewSyncPlan(integration);
+          await handlePreviewSyncPlan(integration, { prefillSample: true });
           setActionMessage(`${integration.providerName} sync plan opened for the next manual import step.`);
         }
         scrollToSection(syncPlanSectionRef);
         return;
       case "run-first-check":
-        await handlePreviewSyncPlan(integration);
+        await handlePreviewSyncPlan(integration, { prefillSample: true });
         scrollToSection(syncPlanSectionRef);
         setActionMessage(`${integration.providerName} first-run plan opened.`);
         return;
@@ -456,15 +1024,35 @@ export function DataSettings({
     }
   }
 
-  async function handlePreviewSyncPlan(connection: IntegrationConnection) {
+  async function handlePreviewSyncPlan(
+    connection: IntegrationConnection,
+    options?: {
+      fileName?: string;
+      prefillSample?: boolean;
+      sourceText?: string;
+    },
+  ) {
+    const shouldPrefillSample = options?.prefillSample ?? false;
+    let requestInput = {
+      fileName: options?.fileName ?? (syncInputFileName.trim() || undefined),
+      sourceText: options?.sourceText ?? (syncInputText.trim() || undefined),
+    };
+
+    if (shouldPrefillSample && !requestInput.sourceText) {
+      const sample = getConnectorSampleInput(connection);
+      setSyncInputFileName(sample.fileName);
+      setSyncInputText(sample.sourceText);
+      requestInput = {
+        fileName: sample.fileName,
+        sourceText: sample.sourceText,
+      };
+    }
+
     try {
       const response = await fetch("/api/integration-sync", {
         body: JSON.stringify({
           connection,
-          input: {
-            fileName: syncInputFileName.trim() || undefined,
-            sourceText: syncInputText.trim() || undefined,
-          },
+          input: requestInput,
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -480,14 +1068,156 @@ export function DataSettings({
       };
       setSyncExecution(data.execution);
       setSyncPreview(data.preview);
+      setSyncPreviewConnection(connection);
       setSyncPreviewProviderId(connection.id);
-      setActionMessage(`${connection.providerName} sync plan loaded.`);
+      setActionMessage(
+        shouldPrefillSample
+          ? `${connection.providerName} sync plan loaded with provider sample input.`
+          : `${connection.providerName} sync plan loaded.`,
+      );
     } catch {
       setSyncExecution(null);
       setSyncPreview(null);
+      setSyncPreviewConnection(null);
       setSyncPreviewProviderId(null);
       setActionMessage("Could not load the sync plan right now.");
     }
+  }
+
+  function handleStageSyncPlanImport() {
+    if (!syncPreviewConnection || !syncExecution) {
+      setActionMessage("Open a sync plan first so we have something to stage.");
+      return;
+    }
+
+    const syncInput = {
+      fileName: syncInputFileName.trim() || undefined,
+      sourceText: syncInputText.trim() || undefined,
+    };
+    const job = createImportJobFromSyncExecution(
+      syncPreviewConnection,
+      syncInput,
+    );
+    const stagedJob = {
+      ...job,
+      notes: `Sync plan staged for review. ${job.notes}`.trim(),
+      summary: `Sync plan staged for ${syncPreviewConnection.providerName}.`,
+    };
+    const nextConnection = recordManualIntegrationReview(
+      syncPreviewConnection,
+      syncExecution,
+      { outcome: "staged" },
+    );
+
+    onLogImportJob(stagedJob);
+    onUpdateIntegration(syncPreviewConnection.id, nextConnection);
+    setSyncPreviewConnection(nextConnection);
+    setActionMessage(
+      `${syncPreviewConnection.providerName} review staged in import history for the next pass.`,
+    );
+  }
+
+  function handleApplySyncPlanToPortfolio() {
+    if (!syncPreviewConnection || !syncExecution) {
+      setActionMessage("Open a sync plan first so we have reviewed import data to apply.");
+      return;
+    }
+
+    const result = applySyncExecutionToPortfolio(
+      syncPreviewConnection,
+      assets,
+      transactions,
+      {
+        fileName: syncInputFileName.trim() || undefined,
+        sourceText: syncInputText.trim() || undefined,
+      },
+      "merge",
+    );
+
+    if (!result) {
+      setActionMessage("This sync plan does not have parsed holdings or transactions ready to apply yet.");
+      return;
+    }
+
+    onImportBrokerAssets(result.nextAssets, result.importJob, result.nextTransactions);
+    const nextConnection = recordManualIntegrationReview(
+      syncPreviewConnection,
+      syncExecution,
+      { outcome: "applied" },
+    );
+    onUpdateIntegration(syncPreviewConnection.id, nextConnection);
+    setSyncPreviewConnection(nextConnection);
+    setActionMessage(buildSyncPlanApplyMessage(syncPreviewConnection.providerName, result));
+  }
+
+  async function handleUseEmailResultInSyncPlan(result: EmailIngestionResult) {
+    const seed = buildSyncPlanSeedFromEmailResult({
+      integrations,
+      result,
+    });
+
+    setSelectedTemplateId(seed.templateId);
+    setDraftIntegration(createConnectionFromTemplate(seed.templateId));
+    setSyncInputFileName(seed.fileName);
+    setSyncInputText(seed.sourceText);
+
+    await handlePreviewSyncPlan(seed.connection, {
+      fileName: seed.fileName,
+      sourceText: seed.sourceText,
+    });
+
+    scrollToSection(syncPlanSectionRef);
+  }
+
+  async function handleUseImportJobInSyncPlan(job: ImportJob) {
+    const seed = buildSyncPlanSeedFromImportJob({
+      integrations,
+      job,
+    });
+
+    if (!seed) {
+      setActionMessage("This import job does not have saved source text to reopen in the sync plan.");
+      return;
+    }
+
+    setSelectedTemplateId(seed.templateId);
+    setDraftIntegration(createConnectionFromTemplate(seed.templateId));
+    setSyncInputFileName(seed.fileName);
+    setSyncInputText(seed.sourceText);
+
+    await handlePreviewSyncPlan(seed.connection, {
+      fileName: seed.fileName,
+      sourceText: seed.sourceText,
+    });
+
+    scrollToSection(syncPlanSectionRef);
+    setActionMessage(`${job.providerName} import reopened in the sync plan.`);
+  }
+
+  function handleApplyImportJobToPortfolio(job: ImportJob) {
+    const result = applyImportJobToPortfolio({
+      existingAssets: assets,
+      existingTransactions: transactions,
+      job,
+    });
+
+    if (!result) {
+      setActionMessage("This import job does not have saved holdings or transactions ready to apply.");
+      return;
+    }
+
+    onImportBrokerAssets(result.nextAssets, result.importJob, result.nextTransactions);
+    setHighlightedImportJobId(job.id);
+    setHighlightedActivityProviderId(job.providerId ?? null);
+    setHighlightedActivityProviderName(job.providerName);
+    setHighlightedImportJobNotice(
+      result.appliedAssetCount > 0 && result.appliedTransactionCount > 0
+        ? `Applied this ${job.providerName} review into holdings and transactions.`
+        : result.appliedAssetCount > 0
+          ? `Applied this ${job.providerName} review into tracked holdings.`
+          : `Applied this ${job.providerName} review into the transaction journal.`,
+    );
+    setActionMessage(describeImportHistoryApplyResult(result));
   }
 
   async function handleIngestEmail() {
@@ -640,6 +1370,59 @@ export function DataSettings({
     }
   }
 
+  async function handleSyncInbox(provider: InboxProvider) {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase) {
+      setActionMessage("Add Supabase configuration before running inbox sync.");
+      return;
+    }
+
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (!accessToken) {
+      setActionMessage("Sign in first to run inbox connector checks.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/inbox/sync/${provider}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Inbox sync route unavailable.");
+      }
+
+      const data = (await response.json()) as {
+        fetchedMessageCount: number;
+        job: ImportJob | null;
+        result: EmailIngestionResult | null;
+        summary: string;
+      };
+
+      if (data.result) {
+        setEmailIntakeResult(data.result);
+        onLogImportJob(data.result.job);
+        setActionMessage(
+          `${provider === "gmail" ? "Gmail" : "Outlook"} checked ${data.fetchedMessageCount} recent message${data.fetchedMessageCount === 1 ? "" : "s"} and staged ${data.result.job.providerName} for review.`,
+        );
+      } else {
+        setActionMessage(
+          `${provider === "gmail" ? "Gmail" : "Outlook"} checked ${data.fetchedMessageCount} recent message${data.fetchedMessageCount === 1 ? "" : "s"}. ${data.summary}`,
+        );
+      }
+
+      await loadInboxConnections();
+    } catch {
+      setActionMessage("Could not run the inbox connector check right now.");
+    }
+  }
+
   useEffect(() => {
     void loadBrokerConnections();
   }, [userEmail]);
@@ -779,19 +1562,78 @@ export function DataSettings({
     }
   }
 
+  useEffect(() => {
+    syncInboxActionRef.current = handleSyncInbox;
+    syncBrokerActionRef.current = handleSyncZerodha;
+    integrationActionRef.current = handleIntegrationActionClick;
+  });
+
   return (
     <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
       <Card>
         <CardHeader>
-          <CardTitle>Settings and data</CardTitle>
-          <CardDescription>Manage the free MVP workspace, live market behavior, and connection records.</CardDescription>
+          <CardTitle>Data control center</CardTitle>
+          <CardDescription>
+            Connect feeds, review imports, and keep the workspace ready for everyday tracking.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-4 rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">{syncStatus}</Badge>
+              <Badge variant="outline">{userEmail || "Browser workspace"}</Badge>
+              {settingsTrack ? <Badge variant="outline">{settingsTrack.title}</Badge> : null}
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+              <div className="grid gap-4">
+                <div>
+                  <p className="text-lg font-semibold tracking-tight text-foreground">
+                    {settingsHeadline}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{settingsDetail}</p>
+                </div>
+                <div className="grid gap-3">
+                  {settingsSteps.map((item) => {
+                    const Icon = item.icon;
+
+                    return (
+                      <div key={item.title} className="rounded-md border bg-background p-3">
+                        <div className="flex items-center gap-2">
+                          <Icon className="h-4 w-4 text-primary" />
+                          <p className="text-sm font-medium">{item.title}</p>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                <div className="rounded-md border bg-background p-4">
+                  <p className="text-sm font-medium">Best next move</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {settingsTrack?.items[0] ??
+                      "Add one dependable source, then use import review to keep the portfolio clean."}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-4">
+                  <p className="text-sm font-medium">Pipeline read</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {operationsSummary.attentionCount > 0
+                      ? `${operationsSummary.attentionCount} source${operationsSummary.attentionCount === 1 ? "" : "s"} need attention, ${importJobSummary.openCount} import review${importJobSummary.openCount === 1 ? "" : "s"} are open, and the next scheduled check is ${formatSyncTimeLabel(schedulerPlan.nextRunAt)}.`
+                      : `Nothing urgent is blocking the pipeline. ${operationsSummary.activeCount} active source${operationsSummary.activeCount === 1 ? "" : "s"} are on cadence, and the next scheduled check is ${formatSyncTimeLabel(schedulerPlan.nextRunAt)}.`}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
             <div>
-              <p className="text-sm font-medium">Demo setup checklist</p>
+              <p className="text-sm font-medium">MVP setup checklist</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                This is the shortest path from local MVP to a credible live demo.
+                This is the shortest path from a fresh workspace to a dependable demo.
               </p>
             </div>
             <div className="grid gap-3">
@@ -886,8 +1728,10 @@ export function DataSettings({
       <div className="grid gap-5">
         <Card>
           <CardHeader>
-            <CardTitle>Data snapshot</CardTitle>
-            <CardDescription>Current local state prepared for future import and account portability.</CardDescription>
+            <CardTitle>Workspace snapshot</CardTitle>
+            <CardDescription>
+              A quick read on what is already saved, tracked, and ready to move with the account.
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
             <MetricMini label="Portfolio holdings" value={`${assets.length}`} />
@@ -906,9 +1750,9 @@ export function DataSettings({
 
         <Card>
           <CardHeader>
-            <CardTitle>Operations pulse</CardTitle>
+            <CardTitle>Pipeline pulse</CardTitle>
             <CardDescription>
-              See which sources are healthy, which ones are due, and which imports still need a human pass.
+              See which feeds are healthy, which ones are due, and which imports still need your sign-off.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -924,7 +1768,7 @@ export function DataSettings({
               <div className="rounded-md border bg-muted/30 p-4">
                 <p className="text-sm font-medium">Connector queue</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Next scheduled activity {formatSyncTimeLabel(schedulerPlan.nextRunAt)} with {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} ready for a first run and {schedulerPlan.pausedCount} paused.
+                  Next scheduled activity {formatSyncTimeLabel(schedulerPlan.nextRunAt)} with {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} waiting on a first check and {schedulerPlan.pausedCount} paused.
                 </p>
               </div>
               <div className="rounded-md border bg-muted/30 p-4">
@@ -964,9 +1808,9 @@ export function DataSettings({
 
         <Card>
           <CardHeader>
-            <CardTitle>Import connectors</CardTitle>
+            <CardTitle>Connect your data feeds</CardTitle>
             <CardDescription>
-              Email and broker intake is guided today, with sync-ready connection records and cadence tracking.
+              Bring broker, inbox, and statement sources into one review pipeline with clear cadence and ownership.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -1008,9 +1852,14 @@ export function DataSettings({
               </div>
               {brokerProviderDescriptors.map((provider) => {
                 const connection = brokerConnectionMap.get(provider.id);
+                const syncHistory = getBrokerSyncHistory(connection);
 
                 return (
-                  <div key={provider.id} className="grid gap-3 rounded-md border bg-background p-3">
+                  <div
+                    id={`broker-connector-${provider.id}`}
+                    key={provider.id}
+                    className={`grid gap-3 rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedBrokerProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium">{provider.name}</p>
@@ -1022,12 +1871,42 @@ export function DataSettings({
                         {connection?.status ?? "needs_auth"}
                       </Badge>
                     </div>
+                    {highlightedBrokerProviderId === provider.id ? (
+                      <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                        <p className="text-xs font-medium text-primary">
+                          Brought into focus from the dashboard.
+                        </p>
+                        {highlightedBrokerNotice ? (
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {highlightedBrokerNotice}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="grid gap-1 text-xs text-muted-foreground">
                       <span>Scopes {provider.scopes.length}</span>
                       <span>Account {connection?.accountLabel ?? "not connected"}</span>
                       <span>Last sync {connection?.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "not yet"}</span>
                       {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
                     </div>
+                    {syncHistory.length ? (
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                          Recent checks
+                        </p>
+                        <div className="mt-2 grid gap-2">
+                          {syncHistory.slice(0, 2).map((event) => (
+                            <div key={event.id} className="grid gap-1 text-[11px] text-muted-foreground">
+                              <p>
+                                {new Date(event.syncedAt).toLocaleString()} · {event.status} · imports{" "}
+                                {event.importedFileCount}
+                              </p>
+                              <p>{event.message}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" size="sm" onClick={() => void handleConnectBroker()}>
                         <Database className="h-4 w-4" />
@@ -1062,12 +1941,39 @@ export function DataSettings({
                   {isInboxLoading ? "Loading..." : "Refresh"}
                 </Button>
               </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Coverage</p>
+                  <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.providerCoverageLabel}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{inboxOperationsSummary.nextActionLabel}.</p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Readiness</p>
+                  <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.connectedCount} connected</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {inboxOperationsSummary.needsAuthCount} waiting on OAuth setup.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Attention</p>
+                  <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.attentionCount} need follow-up</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {inboxOperationsSummary.pausedCount} paused connection{inboxOperationsSummary.pausedCount === 1 ? "" : "s"} right now.
+                  </p>
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {inboxProviderDescriptors.map((provider) => {
                   const connection = inboxConnectionMap.get(provider.id);
+                  const health = getInboxConnectionHealth(provider, connection);
+                  const syncHistory = getInboxSyncHistory(connection);
 
                   return (
-                    <div key={provider.id} className="grid gap-3 rounded-md border bg-background p-3">
+                    <div
+                      id={`inbox-connector-${provider.id}`}
+                      key={provider.id}
+                      className={`grid gap-3 rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedInboxProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-medium">{provider.name}</p>
@@ -1075,9 +1981,33 @@ export function DataSettings({
                             {provider.description}
                           </p>
                         </div>
-                        <Badge variant={connection?.status === "connected" ? "secondary" : "outline"}>
+                        <Badge
+                          variant={
+                            health.readiness === "ready"
+                              ? "secondary"
+                              : health.readiness === "attention"
+                                ? "outline"
+                                : "secondary"
+                          }
+                        >
                           {connection?.status ?? "needs_auth"}
                         </Badge>
+                      </div>
+                      {highlightedInboxProviderId === provider.id ? (
+                        <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                          <p className="text-xs font-medium text-primary">
+                            Brought into focus from the dashboard.
+                          </p>
+                          {highlightedInboxNotice ? (
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {highlightedInboxNotice}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="rounded-md border bg-muted/40 p-3">
+                        <p className="text-xs font-medium">{health.title}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{health.detail}</p>
                       </div>
                       <div className="grid gap-1 text-xs text-muted-foreground">
                         <span>Scopes {provider.scopes.length}</span>
@@ -1087,12 +2017,57 @@ export function DataSettings({
                         <span>
                           Last sync {connection?.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "not yet"}
                         </span>
+                        <span>
+                          Last inbox message {connection?.lastMessageAt ? new Date(connection.lastMessageAt).toLocaleString() : "not seen yet"}
+                        </span>
+                        <span>
+                          Token expiry {connection?.accessTokenExpiresAt ? new Date(connection.accessTokenExpiresAt).toLocaleString() : "not reported"}
+                        </span>
                         {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
                       </div>
-                      <Button type="button" size="sm" onClick={() => void handleConnectInbox(provider.id)}>
-                        <Mail className="h-4 w-4" />
-                        {connection?.status === "connected" ? `Reconnect ${provider.name}` : provider.connectLabel}
-                      </Button>
+                      {syncHistory.length ? (
+                        <div className="rounded-md border bg-muted/30 p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                            Recent checks
+                          </p>
+                          <div className="mt-2 grid gap-2">
+                            {syncHistory.slice(0, 2).map((event) => (
+                              <div key={event.id} className="grid gap-1 text-[11px] text-muted-foreground">
+                                <p>
+                                  {new Date(event.syncedAt).toLocaleString()} · {event.status} · fetched{" "}
+                                  {event.fetchedMessageCount} · imports {event.importedFileCount}
+                                </p>
+                                <p>{event.message}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" onClick={() => void handleConnectInbox(provider.id)}>
+                          <Mail className="h-4 w-4" />
+                          {connection?.status === "connected" ? `Reconnect ${provider.name}` : provider.connectLabel}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={connection?.status !== "connected"}
+                          onClick={() => void handleSyncInbox(provider.id)}
+                        >
+                          <Cloud className="h-4 w-4" />
+                          Run inbox check
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => scrollToSection(emailIntakeSectionRef)}
+                        >
+                          <FileText className="h-4 w-4" />
+                          Use simulator
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1193,6 +2168,17 @@ export function DataSettings({
                       ))}
                     </div>
                   ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleUseEmailResultInSyncPlan(emailIntakeResult)}
+                    >
+                      <ScanSearch className="h-4 w-4" />
+                      Open in sync plan
+                    </Button>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1217,9 +2203,9 @@ export function DataSettings({
             <div ref={connectedSourcesSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium">Connected sources</p>
+                  <p className="text-sm font-medium">Active data feeds</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Track which providers should keep feeding the portfolio pipeline and how often they should be checked.
+                    Track which providers should keep feeding the portfolio pipeline and how often each one should be checked.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1308,7 +2294,7 @@ export function DataSettings({
                 </div>
                 <div className="grid gap-2 text-xs md:grid-cols-4">
                   <div className="rounded-md border bg-muted/30 p-3">
-                    <p className="text-muted-foreground">Ready first run</p>
+                    <p className="text-muted-foreground">First checks pending</p>
                     <p className="mt-2 font-semibold text-foreground">{schedulerPlan.readyCount}</p>
                   </div>
                   <div className="rounded-md border bg-muted/30 p-3">
@@ -1338,16 +2324,255 @@ export function DataSettings({
                   </div>
                 )}
               </div>
+              <div className="grid gap-3 rounded-md border bg-background p-3">
+                <div className="grid gap-3 md:grid-cols-[0.9fr_1.1fr]">
+                  <SegmentedControl
+                    label="Source focus"
+                    options={[
+                      ["all", "All"],
+                      ["attention", "Attention"],
+                      ["due", "Due"],
+                      ["active", "Auto"],
+                      ["manual", "Manual"],
+                    ]}
+                    value={integrationFilter}
+                    onChange={(value) => setIntegrationFilter(value as IntegrationActivityFilter)}
+                  />
+                  <TextField
+                    label="Search sources"
+                    value={integrationSearch}
+                    onChange={setIntegrationSearch}
+                  />
+                </div>
+                {(integrationSearch.trim() || integrationFilter !== "all") && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Showing{" "}
+                      <span className="font-medium text-foreground">{filteredIntegrations.length}</span>{" "}
+                      source{filteredIntegrations.length === 1 ? "" : "s"} for{" "}
+                      <span className="font-medium text-foreground">{integrationFilter}</span>
+                      {integrationSearch.trim()
+                        ? (
+                            <>
+                              {" "}matching{" "}
+                              <span className="font-medium text-foreground">
+                                {integrationSearch.trim()}
+                              </span>
+                            </>
+                          )
+                        : null}
+                      .
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setIntegrationFilter("all");
+                        setIntegrationSearch("");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-3 rounded-md border bg-background p-3">
+                <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+                  <div>
+                    <p className="text-sm font-medium">Recent connector activity</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Shared visibility across manual source reviews, inbox checks, and broker sync attempts.
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {filteredConnectorActivityFeed.length} recent event{filteredConnectorActivityFeed.length === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                {highlightedActivityProviderId && highlightedActivityProviderName ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Showing connector activity for{" "}
+                      <span className="font-medium text-foreground">{highlightedActivityProviderName}</span>.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setHighlightedActivityProviderId(null);
+                        setHighlightedActivityProviderName(null);
+                      }}
+                    >
+                      Show all activity
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini
+                    label="Imported files"
+                    value={String(connectorActivitySummary.totalImportedFiles)}
+                    caption={
+                      connectorActivitySummary.lastSyncedAt
+                        ? `Last event ${new Date(connectorActivitySummary.lastSyncedAt).toLocaleString()}`
+                        : "No connector events yet"
+                    }
+                  />
+                  <MetricMini
+                    label="Successful events"
+                    value={String(connectorActivitySummary.successCount)}
+                    caption={`${connectorActivitySummary.warningCount} warning · ${connectorActivitySummary.errorCount} error`}
+                  />
+                  <MetricMini
+                    label="Manual reviews"
+                    value={String(connectorActivitySummary.manualEventCount)}
+                    caption={`${connectorActivitySummary.inboxEventCount} inbox · ${connectorActivitySummary.brokerEventCount} broker`}
+                  />
+                  <MetricMini
+                    label="Focused sources"
+                    value={String(filteredConnectorActivityFeed.length)}
+                    caption={
+                      highlightedActivityProviderId
+                        ? "Filtered to one provider"
+                        : "Across all active lanes"
+                    }
+                  />
+                </div>
+                {filteredConnectorActivityFeed.length ? (
+                  <div className="grid gap-2">
+                    {filteredConnectorActivityFeed.map((event) => (
+                      <div
+                        key={`${event.sourceType}-${event.id}`}
+                        className={`rounded-md border bg-muted/30 p-3 transition-[box-shadow,transform] duration-700 ${highlightedActivityProviderId === event.providerId ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-medium text-foreground">{event.providerName}</p>
+                            <Badge variant="outline">
+                              {getConnectorActivitySourceLabel(event.sourceType)}
+                            </Badge>
+                            <Badge
+                              variant={
+                                event.status === "success"
+                                  ? "secondary"
+                                  : event.status === "warning" || event.status === "error"
+                                    ? "outline"
+                                    : "outline"
+                              }
+                            >
+                              {event.status}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {new Date(event.syncedAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{event.message}</p>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                            <span>Imports {event.importedFileCount}</span>
+                            {event.fetchedMessageCount !== null ? (
+                              <span>Fetched {event.fetchedMessageCount}</span>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleConnectorActivityClick(event)}
+                          >
+                            {getConnectorActivityActionLabel(event.sourceType)}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {highlightedActivityProviderId
+                      ? "No connector activity matches this focused provider yet. Run a check or review a sync plan to add timeline history here."
+                      : "No connector activity has been recorded yet. Run a check, review a sync plan, or connect an inbox source to start the timeline."}
+                  </p>
+                )}
+              </div>
               <div className="grid gap-3">
-                {integrations.map((integration) => {
+                <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.1fr_0.9fr]">
+                  <div className="grid gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-foreground">
+                        Keep each feed legible: status first, action second, diagnostics third.
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        Every source below now acts like an operations lane. Read the current posture, take the next best action, then open the deeper sync history only if something looks off.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">1. Read the lane</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">Status and cadence</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Start with sync posture, source type, and next scheduled check.
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">2. Take the next move</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">One action at a time</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Use sync plan, history, or sync now depending on what the lane needs next.
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">3. Escalate only if needed</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">Open diagnostics later</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Deeper provider cues, event history, and scheduler detail are still here when you need them.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <p className="text-sm font-medium">Feed summary</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {filteredIntegrations.length} source{filteredIntegrations.length === 1 ? "" : "s"} in view, {operationsSummary.attentionCount} needing attention, and the next scheduled run is {formatSyncTimeLabel(schedulerPlan.nextRunAt)}.
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <p className="text-sm font-medium">Best next move</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {operationsSummary.attentionCount > 0
+                          ? "Clear the highest-attention lane first, then rerun or rehearse the source before touching the portfolio."
+                          : "Use sync plan for new feeds, then rely on cadence and history to keep the pipeline calm."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                {filteredIntegrations.length ? filteredIntegrations.map((integration) => {
                   const isEditing = editingIntegrationId === integration.id;
                   const syncState = getIntegrationSyncState(integration);
                   const healthMetrics = getIntegrationHealthMetrics(integration);
                   const nextSyncAt = getNextIntegrationSyncAt(integration);
                   const actionItems = getIntegrationActionItems(integration);
+                  const diagnosticsSummary = buildIntegrationDiagnosticsSummary(integration);
+                  const primaryAction = actionItems[0];
+                  const laneRead =
+                    integration.status !== "active"
+                      ? "Paused or disconnected until you reactivate the source."
+                      : syncState.detail;
+                  const latestImportJob = latestImportJobByProviderId.get(integration.providerId);
+                  const latestImportMeta = latestImportJob
+                    ? getImportJobFlowMeta(latestImportJob)
+                    : null;
+                  const latestImportStats = latestImportJob
+                    ? getImportJobOutcomeStats(latestImportJob)
+                    : null;
 
                   return (
-                    <div key={integration.id} className="rounded-md border bg-background p-3">
+                    <div
+                      id={`integration-source-${integration.id}`}
+                      key={integration.id}
+                      className={`rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedIntegrationId === integration.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                    >
                       {isEditing ? (
                         <ConnectionFields
                           connection={integration}
@@ -1357,11 +2582,23 @@ export function DataSettings({
                         />
                       ) : (
                         <div className="grid gap-2">
+                          {highlightedIntegrationId === integration.id ? (
+                            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                              <p className="text-xs font-medium text-primary">
+                                Brought into focus from the dashboard.
+                              </p>
+                              {highlightedIntegrationNotice ? (
+                                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                  {highlightedIntegrationNotice}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-medium">{integration.providerName}</p>
                               <p className="mt-1 text-xs text-muted-foreground">
-                                {integration.channel} · {integration.importStrategy}
+                                {integration.channel} · {getIntegrationStrategyLabel(integration.importStrategy)}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -1390,51 +2627,199 @@ export function DataSettings({
                               {integration.notes}
                             </p>
                           )}
-                          <p className="text-[11px] text-muted-foreground">
-                            Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}
-                            {integration.lastSyncOrigin ? ` · ${integration.lastSyncOrigin}` : ""}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Result {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Scheduler {integration.lastSchedulerStatus} · {integration.lastSchedulerCheckAt ? new Date(integration.lastSchedulerCheckAt).toLocaleString() : "not checked yet"}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Success {healthMetrics.successRate}% · avg files {healthMetrics.averageImportedFiles.toFixed(1)}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Next check {formatSyncTimeLabel(nextSyncAt)}{nextSyncAt ? ` · ${new Date(nextSyncAt).toLocaleString()}` : ""}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {syncState.detail}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Last healthy sync {healthMetrics.lastHealthySyncAt ? new Date(healthMetrics.lastHealthySyncAt).toLocaleString() : "not yet"}
-                            {healthMetrics.warningStreak ? ` · warning streak ${healthMetrics.warningStreak}` : ""}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {integration.lastSyncMessage}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {integration.lastSchedulerMessage}
-                          </p>
-                          {integration.lastDetectedProviderSummary && (
-                            <p className="text-[11px] text-muted-foreground">
-                              {integration.lastDetectedProviderSummary}
+                          <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Current lane read</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{syncState.label}</p>
+                              <p className="mt-2 text-xs leading-5 text-muted-foreground">{laneRead}</p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Best next move</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">
+                                {primaryAction ? primaryAction.label : "Stay on cadence"}
+                              </p>
+                              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                                {primaryAction
+                                  ? primaryAction.detail
+                                  : "Nothing urgent is blocking this feed right now. Use history or sync plan only when you want to inspect the lane."}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-4">
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Last sync</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">
+                                {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleDateString() : "Not yet"}
+                              </p>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
+                              </p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Success rate</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{healthMetrics.successRate}%</p>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                Avg files {healthMetrics.averageImportedFiles.toFixed(1)}
+                              </p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Next check</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{formatSyncTimeLabel(nextSyncAt)}</p>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                every {integration.syncCadenceMinutes} min
+                              </p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Latest import</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">
+                                {latestImportMeta ? latestImportMeta.label : "No review yet"}
+                              </p>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {latestImportJob ? latestImportJob.summary : "This lane has not produced a saved review yet."}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                                Sync health
+                              </p>
+                              <div className="mt-3 grid gap-1 text-[11px] text-muted-foreground">
+                                <span>
+                                  Last sync{" "}
+                                  {integration.lastSyncAt
+                                    ? new Date(integration.lastSyncAt).toLocaleString()
+                                    : "not yet"}
+                                  {integration.lastSyncOrigin
+                                    ? ` · ${integration.lastSyncOrigin}`
+                                    : ""}
+                                </span>
+                                <span>
+                                  Result {integration.lastSyncStatus} · files{" "}
+                                  {integration.lastImportedFileCount}
+                                </span>
+                                <span>
+                                  Success {healthMetrics.successRate}% · avg files{" "}
+                                  {healthMetrics.averageImportedFiles.toFixed(1)}
+                                </span>
+                                <span>
+                                  Last healthy{" "}
+                                  {healthMetrics.lastHealthySyncAt
+                                    ? new Date(
+                                        healthMetrics.lastHealthySyncAt,
+                                      ).toLocaleString()
+                                    : "not yet"}
+                                  {healthMetrics.warningStreak
+                                    ? ` · streak ${healthMetrics.warningStreak}`
+                                    : ""}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                                Scheduler
+                              </p>
+                              <div className="mt-3 grid gap-1 text-[11px] text-muted-foreground">
+                                <span>
+                                  Status {integration.lastSchedulerStatus}
+                                </span>
+                                <span>
+                                  Checked{" "}
+                                  {integration.lastSchedulerCheckAt
+                                    ? new Date(
+                                        integration.lastSchedulerCheckAt,
+                                      ).toLocaleString()
+                                    : "not checked yet"}
+                                </span>
+                                <span>
+                                  Next check {formatSyncTimeLabel(nextSyncAt)}
+                                </span>
+                                {nextSyncAt ? (
+                                  <span>
+                                    Scheduled {new Date(nextSyncAt).toLocaleString()}
+                                  </span>
+                                ) : (
+                                  <span>Runs when a fresh manual input arrives</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                                Current read
+                              </p>
+                              <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground">
+                                <p>{syncState.detail}</p>
+                                <p>{integration.lastSyncMessage}</p>
+                                <p>{integration.lastSchedulerMessage}</p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="rounded-md border bg-muted/30 p-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                              Provider detection
                             </p>
+                            <p className="mt-2 text-[11px] text-muted-foreground">
+                              {diagnosticsSummary.providerCue}
+                            </p>
+                          </div>
+                          {latestImportJob && latestImportMeta && (
+                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                                  Latest import outcome
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge variant={latestImportMeta.badgeVariant}>
+                                    {latestImportMeta.label}
+                                  </Badge>
+                                  <Badge variant="outline">{latestImportJob.status}</Badge>
+                                </div>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                {latestImportJob.summary}
+                              </p>
+                              {latestImportStats && (
+                                <div className="grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">
+                                  <span>{latestImportStats.fileLabel}</span>
+                                  <span>{latestImportStats.holdingsLabel}</span>
+                                  <span>{latestImportStats.duplicatesLabel}</span>
+                                  <span>{latestImportStats.ocrLabel}</span>
+                                </div>
+                              )}
+                              <p className="text-[11px] text-muted-foreground">
+                                {latestImportMeta.detail} · {new Date(latestImportJob.createdAt).toLocaleString()}
+                              </p>
+                              <div className="flex justify-end">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleOpenImportHistoryForProvider(integration)}
+                                >
+                                  <FileText className="h-4 w-4" />
+                                  Open history
+                                </Button>
+                              </div>
+                            </div>
                           )}
-                          {integration.syncHistory.length > 0 && (
+                          {diagnosticsSummary.timeline.length > 0 && (
                             <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Recent sync events
                               </p>
-                              {integration.syncHistory.slice(0, 3).map((event) => (
+                              {diagnosticsSummary.timeline.map((event) => (
                                 <div key={event.id} className="grid gap-1 text-[11px] text-muted-foreground">
-                                  <p>
-                                    {new Date(event.syncedAt).toLocaleString()} · {event.status} · files {event.importedFileCount}
-                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant={event.status === "success" ? "secondary" : "outline"}>
+                                      {event.statusLabel}
+                                    </Badge>
+                                    <span>{event.importedFileLabel}</span>
+                                    <span>{new Date(event.syncedAt).toLocaleString()}</span>
+                                  </div>
                                   <p>{event.message}</p>
+                                  {event.detectedProviderSummary ? (
+                                    <p>{event.detectedProviderSummary}</p>
+                                  ) : null}
                                 </div>
                               ))}
                             </div>
@@ -1480,6 +2865,15 @@ export function DataSettings({
                           type="button"
                           size="sm"
                           variant="outline"
+                          onClick={() => handleOpenImportHistoryForProvider(integration)}
+                        >
+                          <FileText className="h-4 w-4" />
+                          History
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
                           onClick={() => onRunIntegrationSync(integration.id)}
                         >
                           <Cloud className="h-4 w-4" />
@@ -1508,20 +2902,82 @@ export function DataSettings({
                       </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
+                    No connected sources match this filter yet.
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
+        <div ref={importHistorySectionRef}>
         <Card>
           <CardHeader>
-            <CardTitle>Import job history</CardTitle>
+            <CardTitle>Review queue</CardTitle>
             <CardDescription>
-              Track statement reviews, completed imports, and failures so provider-specific workflows can improve over time.
+              Track statement reviews, completed imports, and failures so the intake workflow stays clean over time.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="grid gap-3">
+                <div>
+                  <p className="text-base font-semibold text-foreground">
+                    {importJobSummary.openCount > 0
+                      ? "Work the open reviews first, then replay only the clean ones."
+                      : "The queue is clear. Use history as a reference lane when a source drifts."}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {importJobSummary.openCount > 0
+                      ? `${importJobSummary.openCount} review item${importJobSummary.openCount === 1 ? "" : "s"} still need your sign-off. Open items with saved payloads are the fastest way to recover a tricky import.`
+                      : "Completed and failed imports stay here so you can reopen the exact source text, note corrections, and replay the provider flow when needed."}
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">1. Triage</p>
+                    <p className="mt-1 text-sm font-semibold">Filter the queue</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Start with `Open` or search one provider before diving into raw payloads.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">2. Rehearse</p>
+                    <p className="mt-1 text-sm font-semibold">Open in source rehearsal</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Reuse the saved text, inspect warnings, and decide whether the parser needs a cleaner source.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">3. Apply</p>
+                    <p className="mt-1 text-sm font-semibold">Merge only clean output</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Apply reviewed holdings or transactions only after the preview looks right.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-3">
+                <div className="rounded-md border bg-background p-4">
+                  <p className="text-sm font-medium">Queue read</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {importJobSummary.failedCount > 0
+                      ? `${importJobSummary.failedCount} failed import${importJobSummary.failedCount === 1 ? "" : "s"} may need a cleaner export or OCR review.`
+                      : "No failed imports are blocking the queue right now."}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-4">
+                  <p className="text-sm font-medium">Best next move</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {importJobSummary.openCount > 0
+                      ? "Open the newest reviewed import with saved payload, confirm the parser output, and either apply it or reopen the source rehearsal."
+                      : "Keep this lane for auditability: save corrections, reopen provider-specific runs, and replay only when the portfolio needs it."}
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
               <div className="grid gap-3 md:grid-cols-4">
                 <MetricMini label="Open review" value={`${importJobSummary.openCount}`} />
@@ -1547,11 +3003,30 @@ export function DataSettings({
                   onChange={setJobSearch}
                 />
               </div>
+              {jobSearch.trim() && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Showing imports matching <span className="font-medium text-foreground">{jobSearch.trim()}</span>.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setJobSearch("")}
+                  >
+                    Clear filter
+                  </Button>
+                </div>
+              )}
             </div>
             {filteredImportJobs.length ? filteredImportJobs.map((job) => (
               <ImportJobCard
                 key={job.id}
                 correctionDraft={jobCorrectionDrafts[job.id] ?? ""}
+                highlighted={highlightedImportJobId === job.id}
+                highlightedNotice={
+                  highlightedImportJobId === job.id ? highlightedImportJobNotice : null
+                }
                 job={job}
                 onCorrectionDraftChange={(value) =>
                   setJobCorrectionDrafts((current) => ({
@@ -1588,53 +3063,208 @@ export function DataSettings({
                 onReprocess={() =>
                   onReprocessImportJob(job.id)
                 }
+                onApplyToPortfolio={() =>
+                  handleApplyImportJobToPortfolio(job)
+                }
+                onUseInSyncPlan={() =>
+                  void handleUseImportJobInSyncPlan(job)
+                }
               />
             )) : (
               <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
-                No import jobs match this filter yet.
+                {importJobs.length === 0
+                  ? "No import jobs yet. Stage a sync plan, ingest an email, or import a statement to start building review history."
+                  : jobSearch.trim()
+                    ? `No import jobs match "${jobSearch.trim()}" with the current filter.`
+                    : jobFilter === "all"
+                      ? "No import jobs are available right now."
+                      : `No ${jobFilter} import jobs match this view right now.`}
               </div>
             )}
           </CardContent>
         </Card>
+        </div>
 
         <div ref={syncPlanSectionRef}>
         <Card>
           <CardHeader>
-            <CardTitle>Provider sync plan</CardTitle>
+            <CardTitle>Source rehearsal</CardTitle>
             <CardDescription>
-              Preview how each source will execute through the WealthCompass sync pipeline before direct connectors are added.
+              Preview how one source will move through the WealthCompass pipeline before you run or apply it.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             {syncPreview ? (
               <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">{syncPreview.providerName}</Badge>
-                  <Badge variant="outline">{syncPreview.readinessLabel}</Badge>
-                  <Badge variant="outline">{syncPreview.connectorStatus}</Badge>
-                  {syncPreviewProviderId && (
-                    <Badge variant="outline">{syncPreviewProviderId}</Badge>
-                  )}
+                <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+                  <div className="grid gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">{syncPreview.providerName}</Badge>
+                      <Badge variant="outline">{syncPreview.readinessLabel}</Badge>
+                      <Badge variant="outline">{syncPreview.connectorStatus}</Badge>
+                      {syncPreviewProviderId ? (
+                        <Badge variant="outline">{syncPreviewProviderId}</Badge>
+                      ) : null}
+                    </div>
+                    <div>
+                      <p className="text-base font-semibold text-foreground">
+                        Rehearse the parser before the source touches holdings.
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        {syncPreview.summary}
+                      </p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">1. Feed the runner</p>
+                        <p className="mt-1 text-sm font-semibold">Paste the source text</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Use an email body, extracted PDF text, or statement table from this provider.
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">2. Inspect the output</p>
+                        <p className="mt-1 text-sm font-semibold">Review warnings and duplicates</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Check parsed holdings, transactions, cleanup counts, and watchouts before staging.
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">3. Choose the lane</p>
+                        <p className="mt-1 text-sm font-semibold">Stage, apply, or run live</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          Keep uncertain runs in history; merge only when the output feels trustworthy.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="rounded-md border bg-background p-4">
+                      <p className="text-sm font-medium">Best next move</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {syncExecutionOverview
+                          ? syncExecutionOverview.actionHint
+                          : "Feed this provider one real source sample, then review the execution preview before deciding whether it belongs in history or the portfolio."}
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-background p-4">
+                      <p className="text-sm font-medium">Rehearsal status</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {syncExecution
+                          ? `${syncExecution.parsedAssetCount} holdings, ${syncExecution.parsedTransactionCount} transactions, ${syncExecution.reviewedWarnings.length} warning${syncExecution.reviewedWarnings.length === 1 ? "" : "s"}, and ${syncExecution.duplicateCount} duplicate${syncExecution.duplicateCount === 1 ? "" : "s"} found in the latest pass.`
+                          : "No live execution yet. Load a provider sample or paste a source text block to see the exact pipeline path."}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  {syncPreview.summary}
-                </p>
                 {syncExecution && (
-                  <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
-                    <div>
-                      <p className="text-sm font-medium">Execution status</p>
-                      <p className="mt-2 text-xs text-muted-foreground">{syncExecution.connectorStatus}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Import inputs</p>
-                      <p className="mt-2 text-xs text-muted-foreground">{syncExecution.importedFileCount}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Job handoff</p>
-                      <p className="mt-2 text-xs text-muted-foreground">{syncExecution.jobStatus}</p>
+                  <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+                    {syncExecutionOverview ? (
+                      <div className="rounded-md border bg-background p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium">{syncExecutionOverview.headline}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {syncExecutionOverview.actionHint}
+                            </p>
+                          </div>
+                          <Badge variant={syncExecutionOverview.canApply ? "secondary" : "outline"}>
+                            {syncExecutionOverview.importReadyLabel}
+                          </Badge>
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Execution status</p>
+                        <p className="mt-1 text-sm font-semibold">{syncExecution.connectorStatus}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">{syncExecution.jobStatus}</p>
+                      </div>
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Parsed output</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {syncExecution.parsedAssetCount} holdings
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {syncExecution.parsedTransactionCount} transactions
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Cleanup</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {syncExecution.normalizationCount} normalization
+                          {syncExecution.normalizationCount === 1 ? "" : "s"}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {syncExecution.duplicateCount} duplicate
+                          {syncExecution.duplicateCount === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Review</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {syncExecution.reviewedWarnings.length} warning
+                          {syncExecution.reviewedWarnings.length === 1 ? "" : "s"}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {syncExecution.importedFileCount} input candidate
+                          {syncExecution.importedFileCount === 1 ? "" : "s"}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
+                {syncPlanCombinedOverview ? (
+                  <SyncPlanCombinedOverviewCard overview={syncPlanCombinedOverview} />
+                ) : null}
+                {syncPlanLatestImportJob && syncPlanLatestImportMeta && syncPlanLatestImportStats ? (
+                  <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">Latest saved review for this provider</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {syncPlanLatestImportMeta.detail}
+                        </p>
+                      </div>
+                      <Badge variant={syncPlanLatestImportMeta.badgeVariant}>
+                        {syncPlanLatestImportMeta.label}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline">{syncPlanLatestImportStats.fileLabel}</Badge>
+                      <Badge variant="outline">{syncPlanLatestImportStats.holdingsLabel}</Badge>
+                      <Badge variant="outline">
+                        {syncPlanLatestImportJob.transactionCount === 1
+                          ? "1 transaction"
+                          : `${syncPlanLatestImportJob.transactionCount} transactions`}
+                      </Badge>
+                      <Badge variant="outline">{syncPlanLatestImportStats.duplicatesLabel}</Badge>
+                      <Badge variant="outline">{syncPlanLatestImportStats.ocrLabel}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Saved {new Date(syncPlanLatestImportJob.createdAt).toLocaleString()}
+                    </p>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleUseImportJobInSyncPlan(syncPlanLatestImportJob)}
+                      >
+                        Open saved review
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleApplyImportJobToPortfolio(syncPlanLatestImportJob)}
+                        disabled={syncPlanLatestImportJob.status === "failed"}
+                      >
+                        Apply saved review
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
                   <div>
                     <p className="text-sm font-medium">Live runner input</p>
@@ -1675,6 +3305,35 @@ export function DataSettings({
                     </div>
                   </div>
                 </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleApplySyncPlanToPortfolio}
+                    disabled={!syncExecutionOverview || !syncExecutionOverview.canApply}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {syncExecutionOverview?.applyLabel ?? "Apply to portfolio"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleStageSyncPlanImport}
+                    disabled={!syncExecutionOverview || !syncExecutionOverview.canStage}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Stage in import history
+                  </Button>
+                  {syncPreviewConnection?.importStrategy === "sync-ready" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => onRunIntegrationSync(syncPreviewConnection.id)}
+                    >
+                      <Cloud className="h-4 w-4" />
+                      Run connector sync
+                    </Button>
+                  ) : null}
+                </div>
                 {syncExecution?.artifacts.length ? (
                   <div className="grid gap-3 md:grid-cols-2">
                     {syncExecution.artifacts.map((artifact) => (
@@ -1712,7 +3371,12 @@ export function DataSettings({
                 </div>
                 {syncExecution?.reviewedWarnings.length ? (
                   <div className="grid gap-2 rounded-md border bg-muted/30 p-4 text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">Execution warnings</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium text-foreground">Execution warnings</p>
+                      {syncExecutionOverview ? (
+                        <Badge variant="outline">{syncExecutionOverview.warningLabel}</Badge>
+                      ) : null}
+                    </div>
                     {syncExecution.reviewedWarnings.map((warning) => (
                       <p key={warning}>{warning}</p>
                     ))}
@@ -1841,24 +3505,66 @@ function buildEmailAttachmentWarnings({
 
 function ImportJobCard({
   correctionDraft,
+  highlighted = false,
+  highlightedNotice = null,
   job,
+  onApplyToPortfolio,
   onCorrectionDraftChange,
   onReprocess,
   onSaveCorrection,
   onRetry,
+  onUseInSyncPlan,
 }: {
   correctionDraft: string;
+  highlighted?: boolean;
+  highlightedNotice?: string | null;
   job: ImportJob;
+  onApplyToPortfolio: () => void;
   onCorrectionDraftChange: (value: string) => void;
   onReprocess: () => void;
   onSaveCorrection: () => void;
   onRetry: () => void;
+  onUseInSyncPlan: () => void;
 }) {
   const parserProfile = getProviderParserProfile(job.parserProfileId);
   const documentMetrics = getImportJobDocumentMetrics(job);
+  const flowMeta = getImportJobFlowMeta(job);
+  const historyActions = getImportJobHistoryActions(job);
+  const outcomeStats = getImportJobOutcomeStats(job);
+  const suggestedAction = getFocusedImportSuggestedAction(job, documentMetrics.hasPayload);
+  const showFocusedCta = highlighted && suggestedAction.action !== "none";
+  const focusedCtaDisabled =
+    suggestedAction.action === "open-sync-plan" || suggestedAction.action === "apply-portfolio"
+      ? !documentMetrics.hasPayload
+      : false;
+  const readyToApply = job.status === "reviewed" && (job.assetCount > 0 || job.transactionCount > 0);
+  const importReadLabel =
+    readyToApply
+      ? "Ready to apply"
+      : job.status === "failed"
+        ? "Needs a cleaner source"
+        : job.status === "completed"
+          ? "Already merged"
+          : documentMetrics.hasPayload
+            ? "Needs review"
+            : "Source missing";
+
+  const handleFocusedCta = () => {
+    if (suggestedAction.action === "open-sync-plan") {
+      onUseInSyncPlan();
+      return;
+    }
+
+    if (suggestedAction.action === "apply-portfolio") {
+      onApplyToPortfolio();
+    }
+  };
 
   return (
-    <div className="rounded-md border bg-background p-3">
+    <div
+      id={`import-job-${job.id}`}
+      className={`rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlighted ? "ring-2 ring-primary ring-offset-2" : ""}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium">{job.providerName}</p>
@@ -1868,6 +3574,7 @@ function ImportJobCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="secondary">{job.status}</Badge>
+          <Badge variant={flowMeta.badgeVariant}>{flowMeta.label}</Badge>
           <Badge variant="outline">{job.providerConfidence} confidence</Badge>
           {job.usedOcr && <Badge variant="outline">OCR</Badge>}
           <Badge variant={documentMetrics.hasPayload ? "secondary" : "outline"}>
@@ -1875,11 +3582,65 @@ function ImportJobCard({
           </Badge>
         </div>
       </div>
+      {highlighted ? (
+        <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+          <p className="text-xs font-medium text-primary">
+            Brought into focus from the dashboard.
+          </p>
+          {highlightedNotice ? (
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {highlightedNotice}
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Best next step: <span className="font-medium text-foreground">{suggestedAction.title}</span>
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {suggestedAction.detail}
+          </p>
+          {showFocusedCta ? (
+            <div className="mt-3">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleFocusedCta}
+                disabled={focusedCtaDisabled}
+              >
+                {suggestedAction.title}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <p className="mt-3 text-sm text-muted-foreground">{job.summary}</p>
-      <div className="mt-3 grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
-        <span>Assets {job.assetCount}</span>
-        <span>Duplicates {job.duplicateCount}</span>
+      <p className="mt-2 text-xs text-muted-foreground">{flowMeta.detail}</p>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <Badge variant="outline">{outcomeStats.fileLabel}</Badge>
+        <Badge variant="outline">{outcomeStats.holdingsLabel}</Badge>
+        <Badge variant="outline">{outcomeStats.transactionsLabel}</Badge>
+        <Badge variant="outline">{outcomeStats.duplicatesLabel}</Badge>
+        <Badge variant="outline">{outcomeStats.ocrLabel}</Badge>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-[1fr_0.9fr]">
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">What this run means</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{importReadLabel}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{suggestedAction.detail}</p>
+        </div>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">Best next move</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{suggestedAction.title}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {documentMetrics.hasPayload
+              ? "Reopen the saved payload when you want to inspect the parser again instead of starting from scratch."
+              : "This job will need a new import source before it can move forward."}
+          </p>
+        </div>
+      </div>
+      <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
         <span>Attempts {job.attemptCount}</span>
+        <span>Warnings {job.rowWarnings.length}</span>
+        <span>Corrections {job.reviewedCorrections.length}</span>
       </div>
       <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
         <span>Created {new Date(job.createdAt).toLocaleString()}</span>
@@ -1898,8 +3659,8 @@ function ImportJobCard({
             <span>Storage {job.documentStoragePath ?? "not reserved yet"}</span>
             <span>Raw text {documentMetrics.rawLength} chars</span>
             <span>Normalized {documentMetrics.normalizedLength} chars</span>
-            <span>Warnings {job.rowWarnings.length}</span>
-            <span>Corrections {job.reviewedCorrections.length}</span>
+            <span>Status lane {flowMeta.label}</span>
+            <span>Input mode {outcomeStats.ocrLabel}</span>
           </div>
         </div>
         <div className="grid gap-2">
@@ -1950,22 +3711,39 @@ function ImportJobCard({
         />
         <div className="flex justify-end">
           <Button type="button" size="sm" variant="outline" onClick={onSaveCorrection}>
-            Save correction
+            {historyActions.correctionAction.label}
           </Button>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-          Retry review
+          {historyActions.retryAction.label}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onUseInSyncPlan}
+          disabled={historyActions.syncPlanAction.disabled}
+        >
+          {historyActions.syncPlanAction.label}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={onApplyToPortfolio}
+          disabled={historyActions.applyAction.disabled}
+        >
+          {historyActions.applyAction.label}
         </Button>
         <Button
           type="button"
           size="sm"
           variant="ghost"
           onClick={onReprocess}
-          disabled={!documentMetrics.hasPayload}
+          disabled={historyActions.reprocessAction.disabled}
         >
-          Reprocess
+          {historyActions.reprocessAction.label}
         </Button>
       </div>
     </div>
@@ -1985,6 +3763,80 @@ function getImportJobDocumentMetrics(job: ImportJob) {
   };
 }
 
+function getFocusedImportSuggestedAction(job: ImportJob, hasPayload: boolean) {
+  if (!hasPayload) {
+    return {
+      action: "none" as const,
+      detail: "This job does not have reusable source text, so save a cleaner statement export or re-import the source before trying to apply it.",
+      title: "Re-import a cleaner source",
+    };
+  }
+
+  if (job.status === "completed") {
+    return {
+      action: "open-sync-plan" as const,
+      detail: "This import is already part of the workspace, so the useful move now is reopening the sync plan if you want to inspect or replay the parsed source.",
+      title: "Open in sync plan",
+    };
+  }
+
+  if (job.status === "failed") {
+    return {
+      action: "open-sync-plan" as const,
+      detail: "The parser still needs help here. Reopen the saved payload in the sync plan, clean the source, and run another review pass.",
+      title: "Open in sync plan",
+    };
+  }
+
+  if (job.status === "reviewed") {
+    const hasImportableOutput = job.assetCount > 0 || job.transactionCount > 0;
+    const action: "apply-portfolio" | "open-sync-plan" = hasImportableOutput
+      ? "apply-portfolio"
+      : "open-sync-plan";
+
+    return {
+      action,
+      detail:
+        hasImportableOutput
+          ? "The review has importable holdings or transactions ready. Apply it to the workspace if the preview looks right, or reopen the sync plan to adjust first."
+          : "The review is saved, but there are no usable holdings or transactions yet. Reopen the sync plan and improve the source text before applying anything.",
+      title:
+        hasImportableOutput
+          ? "Apply to portfolio"
+          : "Open in sync plan",
+    };
+  }
+
+  return {
+    action: "open-sync-plan" as const,
+    detail: "This import is still early in the queue. Open the sync plan to inspect the source and move it into a proper reviewed state.",
+    title: "Open in sync plan",
+  };
+}
+
+function buildSyncPlanApplyMessage(
+  providerName: string,
+  result: NonNullable<ReturnType<typeof applySyncExecutionToPortfolio>>,
+) {
+  const parts: string[] = [];
+
+  if (result.appliedAssetCount > 0) {
+    parts.push(
+      result.duplicateCount
+        ? `Applied ${result.appliedAssetCount} holding${result.appliedAssetCount === 1 ? "" : "s"} from ${providerName} and merged ${result.duplicateCount} duplicate${result.duplicateCount === 1 ? "" : "s"}.`
+        : `Applied ${result.appliedAssetCount} holding${result.appliedAssetCount === 1 ? "" : "s"} from ${providerName}.`,
+    );
+  }
+
+  if (result.appliedTransactionCount > 0) {
+    parts.push(
+      `Added ${result.appliedTransactionCount} transaction${result.appliedTransactionCount === 1 ? "" : "s"} from ${providerName}.`,
+    );
+  }
+
+  return parts.join(" ") || `${providerName} sync plan applied.`;
+}
+
 function createImportTextSnippet(text: string) {
   return text
     .split(/\r?\n/)
@@ -1992,6 +3844,39 @@ function createImportTextSnippet(text: string) {
     .filter(Boolean)
     .slice(0, 5)
     .join("\n");
+}
+
+function SyncPlanCombinedOverviewCard({
+  overview,
+}: {
+  overview: CombinedImportOverview;
+}) {
+  const items = [
+    ["Holdings parsed", overview.holdingsParsed.toString()],
+    ["Holding duplicates", overview.holdingsDuplicates.toString()],
+    ["Transactions parsed", overview.transactionsParsed.toString()],
+    ["Transactions new", overview.transactionsNew.toString()],
+    ["Transactions skipped", overview.transactionDuplicates.toString()],
+    ["Current value", formatMoney(overview.selectedCurrentValue)],
+    ["Invested value", formatMoney(overview.selectedInvestedValue)],
+  ];
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-4">
+      <div>
+        <p className="text-sm font-medium">Combined import overview</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{overview.headline}</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map(([label, value]) => (
+          <div key={label} className="rounded-md border bg-muted/30 p-3">
+            <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
+            <p className="mt-1 text-sm font-semibold">{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ConnectionFields({

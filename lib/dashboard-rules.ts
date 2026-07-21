@@ -13,6 +13,8 @@ export type DashboardAction = {
   cta: string;
   detail: string;
   reason: string;
+  trackStep: string;
+  trackTitle: string;
   title: string;
   view: DashboardView;
 };
@@ -26,6 +28,10 @@ export type PortfolioTrajectoryPoint = {
   month: string;
   value: number;
 };
+
+function getBasket(profile: RiskProfile, id: "understand" | "rehearse" | "activate") {
+  return profile.actionBaskets.find((basket) => basket.id === id) ?? profile.actionBaskets[0];
+}
 
 export function getDashboardAction({
   assets,
@@ -44,12 +50,21 @@ export function getDashboardAction({
   monthlyGoal: number;
   profile: RiskProfile;
 }): DashboardAction {
+  const foundationBasket = getBasket(profile, "activate");
+  const planningBasket = getBasket(profile, "understand");
+  const trackingBasket = getBasket(profile, "rehearse");
+  const learningBasket = getBasket(profile, "understand");
+
   if (profile.confidence === "Needs foundation") {
     return {
       badge: "Foundation",
       cta: "Review Profile",
       detail: "Emergency savings or debt risk is still limiting how much market risk makes sense.",
       reason: "Risk capacity comes before product selection.",
+      trackStep:
+        foundationBasket?.items[0] ??
+        "Strengthen your cash buffer before taking more market risk.",
+      trackTitle: foundationBasket?.title ?? "Put Money to Work",
       title: "Strengthen your foundation first",
       view: "onboarding",
     };
@@ -61,6 +76,9 @@ export function getDashboardAction({
       cta: "Plan Goals",
       detail: `Your current goal plan needs more funding clarity. The combined monthly target is ${formatMoney(monthlyGoal)}.`,
       reason: "Goals make portfolio decisions easier to evaluate.",
+      trackStep:
+        planningBasket?.items[0] ?? "Map one real goal to a target amount and target date.",
+      trackTitle: planningBasket?.title ?? "Understand the Plan",
       title: "Define the next funding milestone",
       view: "goals",
     };
@@ -72,6 +90,10 @@ export function getDashboardAction({
       cta: "Review Portfolio",
       detail: "Add or refine holdings so allocation and concentration checks become more useful.",
       reason: "Better tracking creates better recommendations.",
+      trackStep:
+        trackingBasket?.items[0] ??
+        "Practice monthly tracking with one goal, one SIP, and one review checkpoint.",
+      trackTitle: trackingBasket?.title ?? "Build Investing Reps",
       title: "Improve portfolio visibility",
       view: "portfolio",
     };
@@ -82,6 +104,10 @@ export function getDashboardAction({
     cta: "Open Academy",
     detail: "Your foundation is in good shape. Keep building product knowledge before adding complexity.",
     reason: "The next edge is consistency and understanding.",
+    trackStep:
+      learningBasket?.items[0] ??
+      "Learn why your current allocation fits your present cash-flow and goal profile.",
+    trackTitle: learningBasket?.title ?? "Understand the Plan",
     title: "Continue the learning roadmap",
     view: "academy",
   };

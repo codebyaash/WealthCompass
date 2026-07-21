@@ -5,6 +5,7 @@ import {
   calculateLargestHoldingConcentration,
   calculatePortfolioGainPercent,
   derivePortfolioAssetsFromTransactions,
+  resolveSnapshotPortfolioAssets,
   getAllocationInsights,
   getPortfolioDiversificationScore,
   getPortfolioHealthChecks,
@@ -16,11 +17,16 @@ const answers: RiskAnswers = {
   age: 35,
   annualIncome: 100000,
   country: "US",
+  decisionStyle: "guided",
   debtLevel: "manageable",
+  dependents: 0,
   emergencyMonths: 6,
   experience: "some",
   horizonYears: 8,
+  incomeStability: "steady",
+  liquidityNeeds: "medium",
   marketDropResponse: "wait",
+  postLearningDropResponse: "buy",
   monthlyInvestment: 1000,
   monthlySavings: 2500,
   primaryGoal: "wealth",
@@ -211,6 +217,123 @@ describe("derivePortfolioAssetsFromTransactions", () => {
     assert.equal(derived[0]?.quantity, 75);
     assert.equal(derived[0]?.investedValue, 7500);
     assert.equal(derived[0]?.value, 8250);
+  });
+
+  it("normalizes generic mutual fund transaction types into cap buckets for allocation charts", () => {
+    const derived = derivePortfolioAssetsFromTransactions([
+      {
+        action: "buy",
+        amount: 1000,
+        assetName: "HDFC Large Cap Fund Direct Plan-Growth",
+        date: "2026-07-03",
+        id: "t-large",
+        notes: "",
+        price: 1234.159,
+        quantity: 0.81,
+        source: "Paytm Money statement",
+        type: "Mutual Fund",
+      },
+      {
+        action: "buy",
+        amount: 500,
+        assetName: "Edelweiss Mid Cap Direct Plan-Growth",
+        date: "2026-07-03",
+        id: "t-mid",
+        notes: "",
+        price: 127.064,
+        quantity: 3.935,
+        source: "Paytm Money statement",
+        type: "Mutual Fund",
+      },
+      {
+        action: "buy",
+        amount: 500,
+        assetName: "Bandhan Small Cap Fund Direct-Growth",
+        date: "2026-07-03",
+        id: "t-small-1",
+        notes: "",
+        price: 55.473,
+        quantity: 9.013,
+        source: "Paytm Money statement",
+        type: "Mutual Fund",
+      },
+      {
+        action: "buy",
+        amount: 1000,
+        assetName: "Quant Small Cap Fund Direct Plan-Growth",
+        date: "2026-07-03",
+        id: "t-small-2",
+        notes: "",
+        price: 313.5792,
+        quantity: 3.189,
+        source: "Paytm Money statement",
+        type: "Mutual Fund",
+      },
+    ]);
+
+    const grouped = new Map<string, number>();
+    for (const asset of derived) {
+      grouped.set(asset.type, (grouped.get(asset.type) ?? 0) + asset.value);
+    }
+
+    assert.equal(grouped.get("Equity - Large Cap"), 1000);
+    assert.equal(grouped.get("Equity - Mid Cap"), 500);
+    assert.equal(grouped.get("Equity - Small Cap"), 1500);
+  });
+});
+
+describe("resolveSnapshotPortfolioAssets", () => {
+  it("keeps explicit saved holdings when transactions are also present", () => {
+    const resolved = resolveSnapshotPortfolioAssets(
+      [
+        {
+          action: "buy",
+          amount: 1000,
+          assetName: "Transaction Only",
+          date: "2026-01-01",
+          id: "t1",
+          notes: "",
+          price: 100,
+          quantity: 10,
+          source: "Manual",
+          type: "Index Fund",
+        },
+      ],
+      [
+        asset({
+          investedValue: 15000,
+          name: "Saved Holding",
+          price: 150,
+          quantity: 100,
+          value: 15000,
+        }),
+      ],
+    );
+
+    assert.equal(resolved.length, 1);
+    assert.equal(resolved[0]?.name, "Saved Holding");
+    assert.equal(resolved[0]?.value, 15000);
+  });
+
+  it("derives holdings from transactions when no saved holdings exist", () => {
+    const resolved = resolveSnapshotPortfolioAssets([
+      {
+        action: "buy",
+        amount: 10000,
+        assetName: "Nifty 50 Index Fund",
+        date: "2026-01-01",
+        id: "t1",
+        notes: "",
+        price: 100,
+        quantity: 100,
+        source: "Paytm Money",
+        type: "Index Fund",
+      },
+    ]);
+
+    assert.equal(resolved.length, 1);
+    assert.equal(resolved[0]?.name, "Nifty 50 Index Fund");
+    assert.equal(resolved[0]?.quantity, 100);
   });
 });
 

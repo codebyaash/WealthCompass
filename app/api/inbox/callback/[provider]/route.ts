@@ -60,6 +60,7 @@ export async function GET(
     const supabase = getSupabaseServiceRoleClient();
 
     await upsertInboxConnection(supabase, verifiedState.userId, {
+      accessToken: tokens.access_token,
       accessTokenExpiresAt: tokens.expires_in
         ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
         : null,
@@ -70,6 +71,7 @@ export async function GET(
       },
       provider,
       providerAccountEmail: profile.email,
+      refreshToken: tokens.refresh_token ?? null,
       scopes: tokens.scope?.split(" ").filter(Boolean) ?? [],
       status: "connected",
     });

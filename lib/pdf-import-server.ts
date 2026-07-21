@@ -22,16 +22,41 @@ type PdfDocument = {
 };
 
 type PdfJsModule = {
-  getDocument: (source: { data: Uint8Array; useSystemFonts?: boolean }) => {
+  getDocument: (source: {
+    data: Uint8Array;
+    disableWorker?: boolean;
+    useSystemFonts?: boolean;
+  }) => {
     promise: Promise<PdfDocument>;
   };
+};
+
+type PdfWorkerModule = {
+  WorkerMessageHandler: unknown;
 };
 
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
 
 async function loadServerPdfJs() {
   if (!pdfJsModulePromise) {
-    pdfJsModulePromise = import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as Promise<PdfJsModule>;
+    pdfJsModulePromise = (async () => {
+      const [pdfjs, worker] = await Promise.all([
+        import("pdfjs-dist/legacy/build/pdf.mjs"),
+        import("pdfjs-dist/legacy/build/pdf.worker.mjs"),
+      ]);
+
+      (
+        globalThis as typeof globalThis & {
+          pdfjsWorker?: {
+            WorkerMessageHandler: unknown;
+          };
+        }
+      ).pdfjsWorker = {
+        WorkerMessageHandler: (worker as PdfWorkerModule).WorkerMessageHandler,
+      };
+
+      return pdfjs as unknown as PdfJsModule;
+    })();
   }
 
   return pdfJsModulePromise;
@@ -44,7 +69,11 @@ export async function extractTextFromPdfBuffer(
   const pdfjs = await loader();
 
   try {
-    const pdf = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
+    const pdf = await pdfjs.getDocument({
+      data,
+      disableWorker: true,
+      useSystemFonts: true,
+    }).promise;
     const pageCount = pdf.numPages;
     const pages: string[] = [];
 

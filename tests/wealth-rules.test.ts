@@ -10,11 +10,16 @@ const baseAnswers: RiskAnswers = {
   age: 35,
   annualIncome: 100000,
   country: "US",
+  decisionStyle: "guided",
   debtLevel: "manageable",
+  dependents: 0,
   emergencyMonths: 6,
   experience: "some",
   horizonYears: 8,
+  incomeStability: "steady",
+  liquidityNeeds: "medium",
   marketDropResponse: "wait",
+  postLearningDropResponse: "buy",
   monthlyInvestment: 1000,
   monthlySavings: 2500,
   primaryGoal: "wealth",
@@ -28,8 +33,11 @@ describe("calculateRiskProfile", () => {
 
     assert.equal(profile.band, "Balanced");
     assert.equal(profile.personality, "Steady Explorer");
+    assert.equal(profile.potentialBand, "Growth");
+    assert.equal(profile.intentGap, "knowledge-gap");
     assert.equal(profile.allocation.reduce((sum, item) => sum + item.value, 0), 100);
     assert.equal(profile.roadmap.length, 6);
+    assert.equal(profile.actionBaskets.length, 3);
   });
 
   it("flags foundation risk when emergency savings are low and debt is heavy", () => {
@@ -38,11 +46,14 @@ describe("calculateRiskProfile", () => {
       debtLevel: "heavy",
       emergencyMonths: 1,
       marketDropResponse: "sell",
+      postLearningDropResponse: "sell",
       primaryGoal: "emergency",
     });
 
     assert.equal(profile.band, "Conservative");
     assert.equal(profile.confidence, "Needs foundation");
+    assert.equal(profile.potentialScore, null);
+    assert.equal(profile.intentGap, "steady-caution");
     assert.match(profile.recommendations[0], /debt|emergency/i);
   });
 
@@ -54,6 +65,7 @@ describe("calculateRiskProfile", () => {
       experience: "confident",
       horizonYears: 30,
       marketDropResponse: "buy",
+      postLearningDropResponse: "buy",
       monthlyInvestment: 5000,
       monthlySavings: 6000,
       primaryGoal: "retirement",
@@ -64,6 +76,22 @@ describe("calculateRiskProfile", () => {
     assert.equal(profile.score, 95);
     assert.equal(profile.band, "Growth");
     assert.ok(profile.nextActions.includes("Estimate retirement corpus with conservative assumptions"));
+  });
+
+  it("shows a higher potential score when risk hesitation is mostly a knowledge gap", () => {
+    const profile = calculateRiskProfile({
+      ...baseAnswers,
+      age: 29,
+      experience: "new",
+      marketDropResponse: "sell",
+      postLearningDropResponse: "buy",
+    });
+
+    assert.equal(profile.intentGap, "knowledge-gap");
+    assert.ok(profile.potentialScore !== null);
+    assert.ok((profile.potentialScore ?? 0) > profile.score);
+    assert.equal(profile.actionBaskets[0].title, "Understand the Plan");
+    assert.match(profile.actionBaskets[2].items[0], /starter-sized SIP|cash buffer|scale/i);
   });
 });
 

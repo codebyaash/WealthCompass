@@ -235,6 +235,41 @@ Nippon India Gold ETF 21250 20000 250 85`);
       }),
     ]);
   });
+
+  it("does not treat Paytm transaction-summary pdf text as holdings", () => {
+    const result = parsePortfolioCsv(`Need Help?
+Visit -	paytmmoney.com/care
+NAGESH AASHRITHA	NAGESH AASHRITHA
+C/O NAGESH B N GF006 MARS MOUNT SAPTHAGIRI LAYOUT,	PAN : CRNPA7072G
+HOSAKEREHALLI ITTAMADU ROAD BANGALORE SOUTH,	Mobile : +91 8217692198
+BENGALURU - 560085	Email : aash9925@gmail.com
+KARNATAKA, India
+Transaction Summary	Transaction Summary	(from 09-Jun-2026 to 08-Jul-2026)
+Investment Activity
+Fresh Purchase	+	₹	3,000.00
+Withdrawal	-	₹	0.00
+Net Inflow/Outflow	₹	3,000.00
+Investment Transaction Summary
+Date*	Date*	Mutual Fund Scheme Name	Mutual Fund Scheme Name	Folio No	Folio No	Type	Type	Units	Units	NAV	NAV	Amount	Amount	Status	Status
+HDFC Large Cap Fund Direct Plan-
+03 Jul	Purchase -
+Growth	43268646	0.810	₹	1,234.1590	₹	1,000.00	Confirmed
+2026	SIP
+(Equity - Large Cap)
+03 Jul	Edelweiss Mid Cap Direct Plan-Growth	Purchase -
+91050161892	3.935	₹	127.0640	₹	500.00	Confirmed
+2026	(Equity - Mid Cap)	SIP
+Active SIPs
+HDFC Large Cap Fund Direct Plan-Growth
+43268646/44	₹	1,000.00	1st	01 Aug 2026	Monthly
+Total	₹	3,000.00`);
+
+    assert.equal(result.assets.length, 0);
+    assert.match(
+      result.errors[0] ?? "",
+      /only includes transaction activity|holdings section with current value/i,
+    );
+  });
 });
 
 describe("portfolioAssetsToCsv", () => {

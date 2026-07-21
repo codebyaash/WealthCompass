@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { loadBrokerConnectionWithSecrets, upsertBrokerConnection } from "@/lib/broker-connections";
+import {
+  appendBrokerSyncEvent,
+  loadBrokerConnectionWithSecrets,
+  upsertBrokerConnection,
+} from "@/lib/broker-connections";
 import { persistCloudImportJob } from "@/lib/supabase-sync";
 import { getSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 import { syncZerodhaHoldings } from "@/lib/zerodha-sync";
@@ -36,6 +40,14 @@ export async function POST(request: Request) {
       accessToken: connection.accessToken,
       accountLabel: connection.accountLabel ?? "Zerodha account",
     });
+    const syncedAt = new Date().toISOString();
+    const syncEvent = {
+      id: crypto.randomUUID(),
+      importedFileCount: sync.assets.length,
+      message: sync.job.summary,
+      status: sync.assets.length ? ("success" as const) : ("warning" as const),
+      syncedAt,
+    };
 
     await persistCloudImportJob({
       job: sync.job,
@@ -47,8 +59,8 @@ export async function POST(request: Request) {
       accountLabel: connection.accountLabel,
       errorMessage: "",
       externalAccountId: connection.externalAccountId,
-      lastSyncedAt: new Date().toISOString(),
-      metadata: connection.metadata,
+      lastSyncedAt: syncedAt,
+      metadata: appendBrokerSyncEvent(connection.metadata, syncEvent),
       provider: "zerodha",
       scopes: connection.scopes,
       status: "connected",

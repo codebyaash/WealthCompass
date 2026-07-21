@@ -4,10 +4,38 @@ import {
   type IntegrationConnection,
   type IntegrationSyncEvent,
 } from "./local-storage";
+import type { BrokerConnection } from "./broker-connections";
+import { getBrokerSyncHistory } from "./broker-connections";
 import { detectImportSource } from "./import-sources";
-import { executeProviderSync } from "./provider-sync-adapters";
+import type { InboxConnection } from "./inbox-connections";
+import { getInboxSyncHistory } from "./inbox-connections";
+import {
+  executeProviderSync,
+  type ProviderSyncExecutionResult,
+} from "./provider-sync-adapters";
 
 export type IntegrationSyncTone = "attention" | "healthy" | "idle";
+
+export type IntegrationWorkflowState = {
+  detail: string;
+  id:
+    | "applied-recently"
+    | "auth-pending"
+    | "awaiting-email"
+    | "awaiting-export"
+    | "awaiting-first-sync"
+    | "awaiting-statement"
+    | "live-sync-due"
+    | "live-sync-healthy"
+    | "manual-active"
+    | "needs-fix"
+    | "paused"
+    | "retry-needed"
+    | "review-ready"
+    | "review-staged";
+  label: string;
+  tone: IntegrationSyncTone;
+};
 
 export type IntegrationHealthMetrics = {
   averageImportedFiles: number;
@@ -43,6 +71,7 @@ export type IntegrationActionItem = {
     | "import-latest-statement"
     | "keep-fallback-import"
     | "reconcile-holdings"
+    | "review-import-history"
     | "run-connector-now"
     | "run-first-check"
     | "upload-fresh-export"
@@ -52,6 +81,13 @@ export type IntegrationActionItem = {
   label: string;
 };
 
+export type IntegrationActivityFilter =
+  | "all"
+  | "attention"
+  | "due"
+  | "active"
+  | "manual";
+
 export type IntegrationOperationsSummary = {
   activeCount: number;
   attentionCount: number;
@@ -59,6 +95,40 @@ export type IntegrationOperationsSummary = {
   dueNowCount: number;
   manualCount: number;
   pausedCount: number;
+};
+
+export type DashboardConnectorAction = {
+  channel: IntegrationConnection["channel"];
+  detail: string;
+  importStrategy: IntegrationConnection["importStrategy"];
+  label: string;
+  providerId: string;
+  providerName: string;
+  view: "settings";
+};
+
+export type DashboardConnectorKpi = {
+  channel: IntegrationConnection["channel"];
+  currentIssue: string;
+  healthySignal: string;
+  importStrategy: IntegrationConnection["importStrategy"];
+  lastSyncAt: string | null;
+  nextRunAt: string | null;
+  providerId: string;
+  providerName: string;
+  status: IntegrationConnection["status"];
+  successRate: number;
+  syncDetail: string;
+  syncLabel: string;
+  tone: IntegrationSyncTone;
+  totalRuns: number;
+  warningStreak: number;
+};
+
+export type DashboardConnectorRecovery = {
+  actionId: IntegrationActionItem["actionId"] | "open-workflow";
+  detail: string;
+  label: string;
 };
 
 export type IntegrationSchedulerEntry = {
@@ -82,8 +152,48 @@ export type IntegrationSchedulerPlan = {
   readyCount: number;
 };
 
+export type ConnectorActivityItem = {
+  fetchedMessageCount: number | null;
+  id: string;
+  importedFileCount: number;
+  message: string;
+  providerId: string;
+  providerName: string;
+  sourceType: "broker" | "inbox" | "manual";
+  status: "error" | "idle" | "success" | "warning";
+  syncedAt: string;
+};
+
+export type ConnectorActivitySummary = {
+  brokerEventCount: number;
+  errorCount: number;
+  inboxEventCount: number;
+  lastSyncedAt: string | null;
+  manualEventCount: number;
+  successCount: number;
+  totalImportedFiles: number;
+  warningCount: number;
+};
+
+export type IntegrationTimelineEntry = {
+  detectedProviderSummary: string | null;
+  id: string;
+  importedFileLabel: string;
+  message: string;
+  status: "error" | "idle" | "success" | "warning";
+  statusLabel: string;
+  syncedAt: string;
+};
+
+export type IntegrationDiagnosticsSummary = {
+  providerCue: string;
+  schedulerCue: string;
+  timeline: IntegrationTimelineEntry[];
+};
+
 export type IntegrationSyncBatchMode = "all-active" | "due" | "single";
 export type IntegrationSyncBatchOrigin = "manual" | "scheduled";
+export type AutoOpenIntegrationActionId = IntegrationActionItem["actionId"] | null;
 
 export type IntegrationSyncBatchResult = {
   executedAt: string;
@@ -93,6 +203,25 @@ export type IntegrationSyncBatchResult = {
   skippedConnectionIds: string[];
   syncedConnectionIds: string[];
 };
+
+export type ManualIntegrationReviewOutcome = "applied" | "staged";
+
+export function getIntegrationStrategyLabel(
+  strategy: IntegrationConnection["importStrategy"],
+) {
+  switch (strategy) {
+    case "sync-ready":
+      return "Live sync lane";
+    case "email-forward":
+      return "Email intake lane";
+    case "csv-upload":
+      return "CSV review lane";
+    case "statement-upload":
+      return "Statement review lane";
+    default:
+      return "Guided import lane";
+  }
+}
 
 export function resolveScheduledSyncUserIds(
   requestedUserIds: string[] = [],
@@ -154,6 +283,44 @@ export function appendIntegrationSyncEvent(
   event: IntegrationSyncEvent,
 ) {
   return [event, ...(connection.syncHistory ?? [])].slice(0, 8);
+}
+
+export function recordManualIntegrationReview(
+  connection: IntegrationConnection,
+  execution: ProviderSyncExecutionResult,
+  {
+    now = new Date(),
+    outcome,
+  }: {
+    now?: Date;
+    outcome: ManualIntegrationReviewOutcome;
+  },
+) {
+  const baseTelemetry = buildIntegrationSyncTelemetry(connection, now, execution);
+  const reviewedCount = execution.importedFileCount;
+  const reviewedLabel =
+    reviewedCount === 1 ? "1 parsed input" : `${reviewedCount} parsed inputs`;
+  const lastSyncMessage =
+    outcome === "applied"
+      ? `${connection.providerName} sync plan reviewed and applied to the portfolio using ${reviewedLabel}.`
+      : `${connection.providerName} sync plan reviewed and staged in import history using ${reviewedLabel}.`;
+  const event: IntegrationSyncEvent = {
+    detectedProviderSummary: baseTelemetry.lastDetectedProviderSummary,
+    id: crypto.randomUUID(),
+    importedFileCount: baseTelemetry.lastImportedFileCount,
+    message: lastSyncMessage,
+    status: "success",
+    syncedAt: baseTelemetry.lastSyncAt,
+  };
+
+  return {
+    ...connection,
+    ...baseTelemetry,
+    lastSyncMessage,
+    lastSyncOrigin: "manual" as const,
+    lastSyncStatus: "success" as const,
+    syncHistory: appendIntegrationSyncEvent(connection, event),
+  } satisfies IntegrationConnection;
 }
 
 export function getIntegrationHealthMetrics(
@@ -283,11 +450,11 @@ export function buildIntegrationSchedulerPlan(
 ): IntegrationSchedulerPlan {
   const entries = integrations
     .map((integration) => {
-      const syncState = getIntegrationSyncState(integration, now);
+      const syncState = getIntegrationWorkflowState(integration, now);
       const nextRunAt = getScheduledIntegrationRunAt(integration, now);
       const shouldRunNow =
         integration.status === "active" &&
-        (syncState.label === "Ready" || syncState.label === "Due now");
+        (syncState.id === "auth-pending" || syncState.id === "live-sync-due");
 
       return {
         cadenceMinutes: integration.syncCadenceMinutes,
@@ -319,7 +486,7 @@ export function buildIntegrationSchedulerPlan(
     errorCount: entries.filter((entry) => entry.status === "error").length,
     nextRunAt: activeEntries.find((entry) => entry.nextRunAt)?.nextRunAt ?? null,
     pausedCount: entries.filter((entry) => entry.status === "paused").length,
-    readyCount: activeEntries.filter((entry) => entry.stateLabel === "Ready").length,
+    readyCount: entries.filter((entry) => entry.stateLabel === "Auth pending").length,
   };
 }
 
@@ -421,11 +588,149 @@ export function getIntegrationAttentionItems(
   return items;
 }
 
+export function buildConnectorActivityFeed({
+  brokerConnections = [],
+  inboxConnections = [],
+  integrations = [],
+  limit = 8,
+}: {
+  brokerConnections?: BrokerConnection[];
+  inboxConnections?: InboxConnection[];
+  integrations?: IntegrationConnection[];
+  limit?: number;
+}) {
+  const integrationItems: ConnectorActivityItem[] = integrations.flatMap((integration) =>
+    (integration.syncHistory ?? []).map((event) => ({
+      fetchedMessageCount: null,
+      id: event.id,
+      importedFileCount: event.importedFileCount,
+      message: event.message,
+      providerId: integration.providerId,
+      providerName: integration.providerName,
+      sourceType: "manual" as const,
+      status: event.status,
+      syncedAt: event.syncedAt,
+    })),
+  );
+
+  const inboxItems: ConnectorActivityItem[] = inboxConnections.flatMap((connection) =>
+    getInboxSyncHistory(connection).map((event) => ({
+      fetchedMessageCount: event.fetchedMessageCount,
+      id: event.id,
+      importedFileCount: event.importedFileCount,
+      message: event.message,
+      providerId: connection.provider,
+      providerName:
+        connection.provider === "gmail"
+          ? "Gmail"
+          : connection.provider === "outlook"
+            ? "Outlook"
+            : connection.provider,
+      sourceType: "inbox" as const,
+      status: event.status,
+      syncedAt: event.syncedAt,
+    })),
+  );
+
+  const brokerItems: ConnectorActivityItem[] = brokerConnections.flatMap((connection) =>
+    getBrokerSyncHistory(connection).map((event) => ({
+      fetchedMessageCount: null,
+      id: event.id,
+      importedFileCount: event.importedFileCount,
+      message: event.message,
+      providerId: connection.provider,
+      providerName: connection.accountLabel || "Zerodha Kite",
+      sourceType: "broker" as const,
+      status: event.status,
+      syncedAt: event.syncedAt,
+    })),
+  );
+
+  return [...integrationItems, ...inboxItems, ...brokerItems]
+    .sort((left, right) => right.syncedAt.localeCompare(left.syncedAt))
+    .slice(0, limit);
+}
+
+export function buildConnectorActivitySummary(
+  items: ConnectorActivityItem[],
+): ConnectorActivitySummary {
+  return items.reduce<ConnectorActivitySummary>(
+    (summary, item) => {
+      if (item.sourceType === "broker") {
+        summary.brokerEventCount += 1;
+      } else if (item.sourceType === "inbox") {
+        summary.inboxEventCount += 1;
+      } else {
+        summary.manualEventCount += 1;
+      }
+
+      if (item.status === "success") {
+        summary.successCount += 1;
+      } else if (item.status === "warning") {
+        summary.warningCount += 1;
+      } else if (item.status === "error") {
+        summary.errorCount += 1;
+      }
+
+      summary.totalImportedFiles += item.importedFileCount;
+
+      if (!summary.lastSyncedAt || item.syncedAt > summary.lastSyncedAt) {
+        summary.lastSyncedAt = item.syncedAt;
+      }
+
+      return summary;
+    },
+    {
+      brokerEventCount: 0,
+      errorCount: 0,
+      inboxEventCount: 0,
+      lastSyncedAt: null,
+      manualEventCount: 0,
+      successCount: 0,
+      totalImportedFiles: 0,
+      warningCount: 0,
+    },
+  );
+}
+
+export function buildIntegrationDiagnosticsSummary(
+  connection: IntegrationConnection,
+  { limit = 3 }: { limit?: number } = {},
+): IntegrationDiagnosticsSummary {
+  const providerCue = connection.lastDetectedProviderSummary.trim()
+    ? connection.lastDetectedProviderSummary.trim()
+    : "No provider cue recorded yet. Run the next review so parser and provider-detection notes have fresh material.";
+  const schedulerCue = connection.lastSchedulerMessage.trim()
+    ? connection.lastSchedulerMessage.trim()
+    : "Scheduler has not recorded a note for this source yet.";
+  const timeline = [...(connection.syncHistory ?? [])]
+    .sort((left, right) => right.syncedAt.localeCompare(left.syncedAt))
+    .slice(0, limit)
+    .map((event) => ({
+      detectedProviderSummary: event.detectedProviderSummary.trim() || null,
+      id: event.id,
+      importedFileLabel:
+        event.importedFileCount === 0
+          ? "No imports"
+          : `${event.importedFileCount} ${event.importedFileCount === 1 ? "file" : "files"}`,
+      message: event.message,
+      status: event.status,
+      statusLabel: getConnectorEventStatusLabel(event.status),
+      syncedAt: event.syncedAt,
+    }));
+
+  return {
+    providerCue,
+    schedulerCue,
+    timeline,
+  };
+}
+
 export function getIntegrationActionItems(
   connection: IntegrationConnection,
   now = new Date(),
 ): IntegrationActionItem[] {
-  const syncState = getIntegrationSyncState(connection, now);
+  const syncState = getIntegrationWorkflowState(connection, now);
   const actions: IntegrationActionItem[] = [];
 
   if (connection.status === "error") {
@@ -437,13 +742,98 @@ export function getIntegrationActionItems(
     });
   }
 
+  if (syncState.id === "retry-needed") {
+    if (connection.importStrategy === "sync-ready") {
+      actions.push({
+        actionId: "run-connector-now",
+        detail: "Retry the live holdings check now so this connector can get back onto a healthy cadence.",
+        emphasis: "high",
+        label: "Retry live check",
+      });
+    } else if (connection.importStrategy === "email-forward") {
+      actions.push({
+        actionId: "feed-email-intake",
+        detail: "Feed a cleaner forwarded statement into the email intake lane before retrying this provider.",
+        emphasis: "high",
+        label: "Retry email intake",
+      });
+    } else if (connection.importStrategy === "csv-upload") {
+      actions.push({
+        actionId: "upload-fresh-export",
+        detail: "Pull a fresh broker export before retrying this review lane.",
+        emphasis: "high",
+        label: "Retry with fresh export",
+      });
+    } else {
+      actions.push({
+        actionId:
+          connection.providerId === "paytm-money"
+            ? "upload-latest-statement"
+            : "import-latest-statement",
+        detail:
+          connection.providerId === "paytm-money"
+            ? "Upload a fresh Paytm Money statement or transaction summary before retrying this review lane."
+            : "Upload a fresh statement or copied table before retrying this review lane.",
+        emphasis: "high",
+        label:
+          connection.providerId === "paytm-money"
+            ? "Retry with fresh statement"
+            : "Retry guided import",
+      });
+    }
+  }
+
+  if (syncState.id === "review-staged") {
+    actions.push({
+      actionId: "review-import-history",
+      detail: "Open the staged review in import history and decide whether to apply the parsed holdings or transactions.",
+      emphasis: "high",
+      label: "Open staged review",
+    });
+  } else if (syncState.id === "review-ready") {
+    actions.push({
+      actionId: "review-import-history",
+      detail: "Open import history to review the latest parsed source before anything drifts or gets replaced.",
+      emphasis: "high",
+      label: "Review parsed import",
+    });
+  } else if (syncState.id === "applied-recently") {
+    actions.push({
+      actionId: "review-import-history",
+      detail: "Reopen the latest applied review if you want to verify what was merged into the tracked portfolio.",
+      emphasis: "medium",
+      label: "Open applied review",
+    });
+  }
+
+  const shouldAppendFirstCheckAfterLaneAction =
+    syncState.id === "auth-pending" && connection.importStrategy === "sync-ready";
+
+  if (syncState.id === "live-sync-due") {
+    actions.push({
+      actionId: "run-connector-now",
+      detail: syncState.detail,
+      emphasis: "high",
+      label: "Run connector now",
+    });
+  } else if (syncState.id === "auth-pending" && !shouldAppendFirstCheckAfterLaneAction) {
+    actions.push({
+      actionId: "run-first-check",
+      detail: "This source has not had its first successful run yet.",
+      emphasis: "medium",
+      label: "Run first check",
+    });
+  }
+
   if (connection.importStrategy === "sync-ready") {
     actions.push({
       actionId:
         connection.providerId === "zerodha" ? "connect-live-sync" : "keep-fallback-import",
       detail:
         connection.providerId === "zerodha"
-          ? "Connect Kite and run a first live holdings sync, then compare the result against a manual export."
+          ? syncState.id === "auth-pending"
+            ? "Connect Kite and run the first live holdings check, then compare it against a manual export."
+            : "Keep Kite connected and compare the next live holdings check against a fallback export when something looks off."
           : "Keep the manual fallback lane available until direct account auth is fully implemented for this provider.",
       emphasis: "high",
       label:
@@ -452,14 +842,20 @@ export function getIntegrationActionItems(
   } else if (connection.importStrategy === "email-forward") {
     actions.push({
       actionId: "feed-email-intake",
-      detail: "Use forwarded statement emails with attachment text so provider review has both the body and the holdings payload.",
+      detail:
+        syncState.id === "awaiting-email"
+          ? "Forward the next statement email with attachment text so the inbox lane has fresh material to parse."
+          : "Use forwarded statement emails with attachment text so provider review has both the body and the holdings payload.",
       emphasis: "high",
       label: "Feed email intake",
     });
   } else if (connection.importStrategy === "csv-upload") {
     actions.push({
       actionId: "upload-fresh-export",
-      detail: "Pull a fresh export before each import review so value columns and holdings names stay current.",
+      detail:
+        syncState.id === "awaiting-export"
+          ? "Pull the latest export file before the next review so value columns and holding names stay current."
+          : "Pull a fresh export before each import review so value columns and holdings names stay current.",
       emphasis: "high",
       label: "Upload fresh export",
     });
@@ -471,29 +867,17 @@ export function getIntegrationActionItems(
           : "import-latest-statement",
       detail:
         connection.providerId === "paytm-money"
-          ? "Use the latest Paytm Money statement or transaction summary so both holdings and SIP activity can be reviewed together."
-          : "Use a recent statement PDF or copied table to keep this guided-import lane current.",
+          ? syncState.id === "awaiting-statement"
+            ? "Upload the latest Paytm Money statement or transaction summary so holdings and SIP activity can be reviewed together."
+            : "Use the latest Paytm Money statement or transaction summary so both holdings and SIP activity can be reviewed together."
+          : syncState.id === "awaiting-statement"
+            ? "Upload a fresh statement PDF or copied table so this guided-import lane has a current source."
+            : "Use a recent statement PDF or copied table to keep this guided-import lane current.",
       emphasis: "high",
       label:
         connection.providerId === "paytm-money"
           ? "Upload latest statement"
           : "Import latest statement",
-    });
-  }
-
-  if (syncState.label === "Due now") {
-    actions.push({
-      actionId: "run-connector-now",
-      detail: syncState.detail,
-      emphasis: "medium",
-      label: "Run connector now",
-    });
-  } else if (syncState.label === "Ready") {
-    actions.push({
-      actionId: "run-first-check",
-      detail: "This source has not had its first successful run yet.",
-      emphasis: "medium",
-      label: "Run first check",
     });
   }
 
@@ -515,7 +899,393 @@ export function getIntegrationActionItems(
     });
   }
 
+  if (shouldAppendFirstCheckAfterLaneAction) {
+    actions.push({
+      actionId: "run-first-check",
+      detail: "This source has not had its first successful run yet.",
+      emphasis: "medium",
+      label: "Run first check",
+    });
+  }
+
   return actions.slice(0, 3);
+}
+
+export function getAutoOpenIntegrationAction(
+  connection: IntegrationConnection,
+  now = new Date(),
+): AutoOpenIntegrationActionId {
+  if (
+    connection.importStrategy === "sync-ready" &&
+    !connection.lastSyncAt
+  ) {
+    return "connect-live-sync";
+  }
+
+  const actions = getIntegrationActionItems(connection, now);
+  const preferredActionIds: IntegrationActionItem["actionId"][] = [
+    "connect-live-sync",
+    "run-connector-now",
+    "run-first-check",
+    "review-import-history",
+    "upload-latest-statement",
+    "import-latest-statement",
+    "upload-fresh-export",
+    "feed-email-intake",
+    "fix-source",
+    "reconcile-holdings",
+  ];
+
+  for (const actionId of preferredActionIds) {
+    if (actions.some((action) => action.actionId === actionId)) {
+      return actionId;
+    }
+  }
+
+  return null;
+}
+
+export function filterAndSortIntegrations(
+  integrations: IntegrationConnection[],
+  {
+    filter = "all",
+    query = "",
+    now = new Date(),
+  }: {
+    filter?: IntegrationActivityFilter;
+    query?: string;
+    now?: Date;
+  } = {},
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  return integrations
+    .filter((integration) => {
+      const syncState = getIntegrationWorkflowState(integration, now);
+      const health = getIntegrationHealthMetrics(integration);
+      const isAutomatic = isAutomaticallySyncedIntegration(integration);
+
+      const matchesFilter =
+        filter === "all"
+          ? true
+          : filter === "attention"
+            ? integration.status === "error" ||
+              syncState.id === "live-sync-due" ||
+              health.warningStreak >= 2 ||
+              integration.lastSyncStatus === "error"
+            : filter === "due"
+              ? integration.status === "active" &&
+                (syncState.id === "live-sync-due" || syncState.id === "auth-pending")
+              : filter === "active"
+                ? integration.status === "active" && isAutomatic
+                : integration.status === "active" && !isAutomatic;
+
+      if (!matchesFilter) return false;
+      if (!normalizedQuery) return true;
+
+      return [
+        integration.providerName,
+        integration.providerId,
+        integration.channel,
+        integration.importStrategy,
+        integration.sourceHint,
+        integration.notes,
+        integration.lastSyncMessage,
+        integration.lastDetectedProviderSummary,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery);
+    })
+    .sort((left, right) => compareIntegrations(left, right, now));
+}
+
+export function getDashboardConnectorActions(
+  integrations: IntegrationConnection[],
+  now = new Date(),
+) {
+  return filterAndSortIntegrations(integrations, { now })
+    .flatMap((integration) =>
+      getIntegrationActionItems(integration, now)
+        .slice(0, 1)
+        .map((action) => ({
+          channel: integration.channel,
+          detail: action.detail,
+          importStrategy: integration.importStrategy,
+          label: action.label,
+          providerId: integration.providerId,
+          providerName: integration.providerName,
+          view: "settings" as const,
+        })),
+    )
+    .slice(0, 3);
+}
+
+export function buildDashboardConnectorKpis(
+  integrations: IntegrationConnection[],
+  {
+    filter = "all",
+    limit = 4,
+    now = new Date(),
+  }: {
+    filter?: IntegrationActivityFilter;
+    limit?: number;
+    now?: Date;
+  } = {},
+) {
+  return filterAndSortIntegrations(integrations, { filter, now })
+    .map((integration) => {
+      const health = getIntegrationHealthMetrics(integration);
+      const workflowState = getIntegrationWorkflowState(integration, now);
+      const syncState = {
+        detail: workflowState.detail,
+        label: workflowState.label,
+        tone: workflowState.tone,
+      };
+
+      return {
+        channel: integration.channel,
+        currentIssue: getDashboardConnectorIssueSummary(integration, workflowState, health),
+        healthySignal: getDashboardConnectorHealthySummary(integration, workflowState, health),
+        importStrategy: integration.importStrategy,
+        lastSyncAt: integration.lastSyncAt,
+        nextRunAt: getNextIntegrationSyncAt(integration, now),
+        providerId: integration.providerId,
+        providerName: integration.providerName,
+        status: integration.status,
+        successRate: health.successRate,
+        syncDetail: syncState.detail,
+        syncLabel: syncState.label,
+        tone: syncState.tone,
+        totalRuns: health.totalRuns,
+        warningStreak: health.warningStreak,
+      } satisfies DashboardConnectorKpi;
+    })
+    .slice(0, limit);
+}
+
+function getDashboardConnectorHealthySummary(
+  integration: IntegrationConnection,
+  workflowState: IntegrationWorkflowState,
+  health: IntegrationHealthMetrics,
+) {
+  if (workflowState.id === "applied-recently") {
+    return integration.lastSyncMessage || "The latest reviewed import was applied to the portfolio.";
+  }
+
+  if (workflowState.id === "review-staged") {
+    return "A reviewed import is staged and ready for a final apply decision.";
+  }
+
+  if (workflowState.id === "review-ready") {
+    return "A parsed source is ready for review before anything is merged.";
+  }
+
+  if (health.lastHealthySyncAt) {
+    return `Last healthy run ${new Date(health.lastHealthySyncAt).toLocaleString()}.`;
+  }
+
+  if (
+    workflowState.id === "awaiting-statement" ||
+    workflowState.id === "awaiting-export" ||
+    workflowState.id === "awaiting-email"
+  ) {
+    return "No recent reviewed import has been saved for this lane yet.";
+  }
+
+  if (integration.lastSyncStatus === "success" && integration.lastSyncMessage) {
+    return integration.lastSyncMessage;
+  }
+
+  if (health.totalRuns > 0 && health.successRate > 0) {
+    return `${health.successRate}% success across ${health.totalRuns} run${health.totalRuns === 1 ? "" : "s"}.`;
+  }
+
+  return "No completed healthy run yet.";
+}
+
+function getDashboardConnectorIssueSummary(
+  integration: IntegrationConnection,
+  workflowState: IntegrationWorkflowState,
+  health: IntegrationHealthMetrics,
+) {
+  if (integration.status === "error" && integration.lastSyncMessage) {
+    return integration.lastSyncMessage;
+  }
+
+  if (integration.lastSyncStatus === "error" && integration.lastSyncMessage) {
+    return integration.lastSyncMessage;
+  }
+
+  if (health.warningStreak >= 2) {
+    return `${health.warningStreak} recent run${health.warningStreak === 1 ? "" : "s"} need review before this source drifts further.`;
+  }
+
+  switch (workflowState.id) {
+    case "auth-pending":
+      return "Direct auth is still pending, so the first live holdings check has not happened yet.";
+    case "awaiting-email":
+    case "awaiting-export":
+    case "awaiting-statement":
+      return workflowState.detail;
+    case "review-staged":
+      return "A reviewed import is waiting in history for the final apply step.";
+    case "review-ready":
+      return "A parsed source is waiting for review before it can be applied.";
+    case "applied-recently":
+      return "The latest reviewed import was applied successfully. Reopen history if you want to verify the merge.";
+    default:
+      break;
+  }
+
+  if (workflowState.tone === "attention") {
+    return workflowState.detail;
+  }
+
+  return "No immediate issue flagged.";
+}
+
+export function getDashboardConnectorRecovery(
+  integration: IntegrationConnection,
+  now = new Date(),
+): DashboardConnectorRecovery {
+  const syncState = getIntegrationWorkflowState(integration, now);
+  const health = getIntegrationHealthMetrics(integration);
+  const nextAction = getIntegrationActionItems(integration, now)[0];
+
+  if (integration.status === "error") {
+    return {
+      actionId: nextAction?.actionId ?? "fix-source",
+      detail: nextAction?.detail ?? "Review the connector setup before attempting another import run.",
+      label: nextAction?.label ?? "Fix source",
+    };
+  }
+
+  if (integration.lastSyncStatus === "error") {
+    return {
+      actionId: nextAction?.actionId ?? "open-workflow",
+      detail:
+        nextAction?.detail ??
+        "Use the recommended connector workflow to re-run this provider with a fresh input.",
+      label: nextAction?.label ?? "Retry source",
+    };
+  }
+
+  if (health.warningStreak >= 2) {
+    return {
+      actionId: nextAction?.actionId ?? "open-workflow",
+      detail:
+        nextAction?.detail ??
+        "Review the latest warning streak now so the source does not drift into stale data.",
+      label: nextAction?.label ?? "Review warnings",
+    };
+  }
+
+  if (syncState.id === "live-sync-due" || syncState.id === "auth-pending") {
+    return {
+      actionId: nextAction?.actionId ?? "run-connector-now",
+      detail:
+        nextAction?.detail ??
+        "Run the next connector check now to keep this source current.",
+      label: nextAction?.label ?? "Run connector now",
+    };
+  }
+
+  if (
+    syncState.id === "review-staged" ||
+    syncState.id === "review-ready" ||
+    syncState.id === "applied-recently"
+  ) {
+    const reviewAction = getIntegrationActionItems(integration, now).find(
+      (action) => action.actionId === "review-import-history",
+    );
+
+    return {
+      actionId: reviewAction?.actionId ?? "open-workflow",
+      detail:
+        reviewAction?.detail ??
+        "Open import history to review the latest saved connector outcome for this provider.",
+      label: reviewAction?.label ?? "Review import history",
+    };
+  }
+
+  if (integration.importStrategy === "email-forward") {
+    return {
+      actionId: "feed-email-intake",
+      detail: "Keep forwarded statement emails flowing so inbox intake has fresh material to parse.",
+      label: "Feed email intake",
+    };
+  }
+
+  if (integration.importStrategy === "sync-ready") {
+    return {
+      actionId: "run-connector-now",
+      detail: "Keep the live-sync lane healthy, then compare the next payload against import history.",
+      label: "Run connector now",
+    };
+  }
+
+  return {
+    actionId: nextAction?.actionId ?? "open-workflow",
+    detail: "Use the next guided import step for this provider whenever a fresh statement or export arrives.",
+    label: nextAction?.label ?? "Open workflow",
+  };
+}
+
+function compareIntegrations(
+  left: IntegrationConnection,
+  right: IntegrationConnection,
+  now: Date,
+) {
+  const leftPriority = getIntegrationPriority(left, now);
+  const rightPriority = getIntegrationPriority(right, now);
+
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+
+  const leftNextRun = getScheduledIntegrationRunAt(left, now);
+  const rightNextRun = getScheduledIntegrationRunAt(right, now);
+
+  if (leftNextRun && rightNextRun && leftNextRun !== rightNextRun) {
+    return leftNextRun.localeCompare(rightNextRun);
+  }
+
+  if (leftNextRun && !rightNextRun) return -1;
+  if (!leftNextRun && rightNextRun) return 1;
+
+  return left.providerName.localeCompare(right.providerName);
+}
+
+function getIntegrationPriority(
+  connection: IntegrationConnection,
+  now: Date,
+) {
+  const syncState = getIntegrationWorkflowState(connection, now);
+  const health = getIntegrationHealthMetrics(connection);
+
+  if (connection.status === "error") return 0;
+  if (syncState.id === "live-sync-due") return 1;
+  if (syncState.id === "auth-pending") return 2;
+  if (health.warningStreak >= 2 || connection.lastSyncStatus === "error") return 3;
+  if (connection.status === "active" && isAutomaticallySyncedIntegration(connection)) return 4;
+  if (connection.status === "active") return 5;
+  if (connection.status === "paused") return 6;
+  return 7;
+}
+
+function getConnectorEventStatusLabel(status: ConnectorActivityItem["status"]) {
+  switch (status) {
+    case "success":
+      return "Healthy";
+    case "warning":
+      return "Warning";
+    case "error":
+      return "Failed";
+    default:
+      return "Idle";
+  }
 }
 
 export function executeIntegrationSyncBatch(
@@ -638,14 +1408,24 @@ export function executeIntegrationSyncBatch(
 export function getIntegrationSyncState(
   connection: IntegrationConnection,
   now = new Date(),
-): {
-  detail: string;
-  label: string;
-  tone: IntegrationSyncTone;
-} {
+): Pick<IntegrationWorkflowState, "detail" | "label" | "tone"> {
+  const workflowState = getIntegrationWorkflowState(connection, now);
+
+  return {
+    detail: workflowState.detail,
+    label: workflowState.label,
+    tone: workflowState.tone,
+  };
+}
+
+export function getIntegrationWorkflowState(
+  connection: IntegrationConnection,
+  now = new Date(),
+): IntegrationWorkflowState {
   if (connection.status === "error") {
     return {
-      detail: "Connection needs review before the next import attempt.",
+      detail: getErroredIntegrationDetail(connection),
+      id: "needs-fix",
       label: "Needs fix",
       tone: "attention",
     };
@@ -653,35 +1433,76 @@ export function getIntegrationSyncState(
 
   if (connection.status === "paused") {
     return {
-      detail: "Sync is paused until you resume this source.",
+      detail: getPausedIntegrationDetail(connection),
+      id: "paused",
       label: "Paused",
       tone: "idle",
     };
   }
 
   if (!connection.lastSyncAt) {
-    if (!isAutomaticallySyncedIntegration(connection)) {
+    if (isAutomaticallySyncedIntegration(connection)) {
       return {
-        detail: getManualSyncDetail(connection),
-        label: "On demand",
-        tone: "idle",
+        detail: "Direct auth and the first account fetch still need to run.",
+        id: "auth-pending",
+        label: "Auth pending",
+        tone: "attention",
       };
     }
 
-    return {
-      detail: "Ready for the first sync run.",
-      label: "Ready",
-      tone: "attention",
-    };
+    return getManualAwaitingState(connection);
   }
 
   const lastSync = new Date(connection.lastSyncAt);
   const elapsedMinutes = Math.floor((now.getTime() - lastSync.getTime()) / 60_000);
 
-  if (!isAutomaticallySyncedIntegration(connection)) {
+  if (connection.lastSyncStatus === "error") {
     return {
-      detail: `Last import activity ${elapsedMinutes} min ago.`,
-      label: "On demand",
+      detail: getRetryNeededDetail(connection, elapsedMinutes),
+      id: "retry-needed",
+      label: "Retry needed",
+      tone: "attention",
+    };
+  }
+
+  if (!isAutomaticallySyncedIntegration(connection)) {
+    if (
+      connection.lastSyncOrigin === "manual" &&
+      /applied to the portfolio/i.test(connection.lastSyncMessage)
+    ) {
+      return {
+        detail: `Last manual review was applied ${elapsedMinutes} min ago.`,
+        id: "applied-recently",
+        label: "Applied",
+        tone: "healthy",
+      };
+    }
+
+    if (
+      connection.lastSyncOrigin === "manual" &&
+      /staged in import history/i.test(connection.lastSyncMessage)
+    ) {
+      return {
+        detail: `A reviewed import is staged from ${elapsedMinutes} min ago.`,
+        id: "review-staged",
+        label: "Review staged",
+        tone: "healthy",
+      };
+    }
+
+    if (connection.lastImportedFileCount > 0) {
+      return {
+        detail: `A fresh parsed source is ready from ${elapsedMinutes} min ago.`,
+        id: "review-ready",
+        label: "Review ready",
+        tone: "healthy",
+      };
+    }
+
+    return {
+      detail: `Last manual source activity ${elapsedMinutes} min ago.`,
+      id: "manual-active",
+      label: "Manual lane",
       tone: "healthy",
     };
   }
@@ -689,13 +1510,15 @@ export function getIntegrationSyncState(
   if (elapsedMinutes >= connection.syncCadenceMinutes) {
     return {
       detail: `Overdue by ${elapsedMinutes - connection.syncCadenceMinutes} min.`,
+      id: "live-sync-due",
       label: "Due now",
       tone: "attention",
     };
   }
 
   return {
-    detail: `Last check ${elapsedMinutes} min ago.`,
+    detail: `Last live check ${elapsedMinutes} min ago.`,
+    id: "live-sync-healthy",
     label: "On cadence",
     tone: "healthy",
   };
@@ -763,15 +1586,82 @@ function isAutomaticallySyncedIntegration(connection: IntegrationConnection) {
   return connection.importStrategy === "sync-ready";
 }
 
-function getManualSyncDetail(connection: IntegrationConnection) {
+function getErroredIntegrationDetail(connection: IntegrationConnection) {
+  switch (connection.importStrategy) {
+    case "sync-ready":
+      return "Live connector auth or holdings sync needs review before the next account fetch.";
+    case "email-forward":
+      return "Email intake needs review before the next forwarded statement can be trusted.";
+    case "csv-upload":
+      return "Export review needs attention before the next broker file is processed.";
+    case "statement-upload":
+    default:
+      return "Statement review needs attention before the next import attempt.";
+  }
+}
+
+function getPausedIntegrationDetail(connection: IntegrationConnection) {
+  switch (connection.importStrategy) {
+    case "sync-ready":
+      return "Live sync lane is paused until you resume this source.";
+    case "email-forward":
+      return "Email intake lane is paused until you resume this source.";
+    case "csv-upload":
+      return "CSV review lane is paused until you resume this source.";
+    case "statement-upload":
+    default:
+      return "Statement review lane is paused until you resume this source.";
+  }
+}
+
+function getRetryNeededDetail(
+  connection: IntegrationConnection,
+  elapsedMinutes: number,
+) {
+  switch (connection.importStrategy) {
+    case "sync-ready":
+      return `Latest live check failed ${elapsedMinutes} min ago. Reconnect and rerun this source before the next cadence window.`;
+    case "email-forward":
+      return `Latest email intake run failed ${elapsedMinutes} min ago. Feed a cleaner forwarded statement or reconnect inbox access before retrying.`;
+    case "csv-upload":
+      return `Latest export review failed ${elapsedMinutes} min ago. Pull a fresh broker export before retrying this lane.`;
+    case "statement-upload":
+    default:
+      return `Latest statement review failed ${elapsedMinutes} min ago. Upload a fresh statement or transaction summary before retrying.`;
+  }
+}
+
+function getManualAwaitingState(
+  connection: IntegrationConnection,
+): IntegrationWorkflowState {
   switch (connection.importStrategy) {
     case "email-forward":
-      return "Runs when you forward an email or upload an attachment.";
+      return {
+        detail: "Waiting for a forwarded statement email or attachment.",
+        id: "awaiting-email",
+        label: "Awaiting email",
+        tone: "idle",
+      };
     case "csv-upload":
-      return "Runs when you upload a fresh export file.";
+      return {
+        detail: "Waiting for a fresh broker export file.",
+        id: "awaiting-export",
+        label: "Awaiting export",
+        tone: "idle",
+      };
     case "statement-upload":
-      return "Runs when you upload a fresh statement.";
+      return {
+        detail: "Waiting for a fresh statement or transaction summary.",
+        id: "awaiting-statement",
+        label: "Awaiting statement",
+        tone: "idle",
+      };
     default:
-      return "Runs when new import data is provided.";
+      return {
+        detail: "Waiting for the next manual source input.",
+        id: "awaiting-statement",
+        label: "Awaiting source",
+        tone: "idle",
+      };
   }
 }

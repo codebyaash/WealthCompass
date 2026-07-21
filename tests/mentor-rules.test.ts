@@ -13,11 +13,16 @@ const answers: RiskAnswers = {
   age: 32,
   annualIncome: 90000,
   country: "US",
+  decisionStyle: "guided",
   debtLevel: "manageable",
+  dependents: 1,
   emergencyMonths: 4,
   experience: "new",
   horizonYears: 7,
+  incomeStability: "steady",
+  liquidityNeeds: "medium",
   marketDropResponse: "wait",
+  postLearningDropResponse: "buy",
   monthlyInvestment: 750,
   monthlySavings: 1800,
   primaryGoal: "home",
@@ -72,6 +77,7 @@ describe("getMentorAnswer", () => {
     assert.match(answer.personalNote, /home down payment/);
     assert.equal(answer.focusLabel, "Foundation gap");
     assert.equal(answer.checkpoints[0]?.label, "Current buffer");
+    assert.equal(answer.actionTrack.title, "Put Money to Work");
   });
 
   it("uses the provided money formatter for SIP guidance", () => {
@@ -86,6 +92,7 @@ describe("getMentorAnswer", () => {
     assert.match(answer.personalNote, /\$750/);
     assert.match(answer.personalNote, /\$57500/);
     assert.equal(answer.followUps[0], "first-investment");
+    assert.equal(answer.actionTrack.title, "Put Money to Work");
   });
 
   it("returns allocation guidance when concentration is high", () => {
@@ -111,6 +118,7 @@ describe("getMentorAnswer", () => {
 
     assert.equal(answer.focusLabel, "Concentration risk");
     assert.equal(answer.followUps[0], "etf");
+    assert.equal(answer.actionTrack.title, "Build Investing Reps");
   });
 });
 

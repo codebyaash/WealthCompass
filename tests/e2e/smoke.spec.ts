@@ -17,10 +17,13 @@ test("local onboarding changes survive a refresh", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Update profile" }).click();
 
-  await expect(page.getByText("Tell WealthCompass about yourself")).toBeVisible();
+  await expect(page.getByText("Build your investing starting point")).toBeVisible();
 
   const countryField = page.getByLabel("Country");
   await countryField.fill(countryValue);
+  await page.getByRole("button", { name: "Next step" }).click();
+  await page.getByRole("button", { name: "Next step" }).click();
+  await page.getByRole("button", { name: "Submit assessment" }).click();
 
   await expect(countryField).toHaveValue(countryValue);
   await expect(page.getByText("Local saved")).toBeVisible();

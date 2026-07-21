@@ -75,24 +75,7 @@ export function parseImportedTransactions(text: string): TransactionImportResult
     const typeHint = chunk.match(/\bSIP\b/i) ? "SIP" : action;
 
     const namePrefix = folioMatch ? chunk.slice(0, folioMatch.index) : chunk;
-    const nameParts = namePrefix
-      .replace(/\b\d{2}\s+[A-Za-z]{3}\b/g, " ")
-      .replace(/\b20\d{2}\b/g, " ")
-      .replace(/\bPurchase\b\s*-?/gi, " ")
-      .replace(/\bWithdrawal\b\s*-?/gi, " ")
-      .replace(/\bRedemption\b\s*-?/gi, " ")
-      .replace(/\bSIP\b/gi, " ")
-      .replace(/\bConfirmed\b/gi, " ")
-      .replace(/[\t\n]/g, " ")
-      .replace(/₹/g, " ")
-      .replace(/\s+/g, " ")
-      .replace(/\s+-\s+/g, "-")
-      .replace(/-\s+(Growth|IDCW|Regular|Direct)\b/gi, "-$1")
-      .trim()
-      .replace(/-$/, "")
-      .trim();
-
-    const name = nameParts;
+    const name = extractLegacySchemeName(namePrefix);
     const date = buildDate(dateLine ?? "", yearLine ?? "");
     const type = categoryLine
       ? categoryLine.replace(/[()]/g, "").trim()
@@ -244,6 +227,36 @@ function extractSchemeCategory(schemeName: string) {
   return categoryMatch?.[1]?.trim() || "Mutual Fund";
 }
 
+function extractLegacySchemeName(prefix: string) {
+  const tokens = prefix
+    .split(/[\t\n]/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => token.replace(/\s+/g, " "));
+
+  const meaningfulTokens = tokens.filter((token) => {
+    if (/^\d{2}\s+[A-Za-z]{3}$/.test(token)) return false;
+    if (/^20\d{2}$/.test(token)) return false;
+    if (/^\(.+\)$/.test(token)) return false;
+    if (/^confirmed$/i.test(token)) return false;
+    if (/^(purchase|withdrawal|redeem|redemption|sell|dividend|transfer)\s*-?$/i.test(token)) {
+      return false;
+    }
+    if (/^sip$/i.test(token)) return false;
+    if (/^[₹$€£]?[\d,]+(?:\.\d+)?$/.test(token)) return false;
+
+    return true;
+  });
+
+  return meaningfulTokens
+    .join(" ")
+    .replace(/\s+-\s+/g, "-")
+    .replace(/-\s+(Growth|IDCW|Regular|Direct)\b/gi, "-$1")
+    .replace(/\s+/g, " ")
+    .replace(/-$/, "")
+    .trim();
+}
+
 function splitTransactionBlocks(section: string) {
   const lines = section
     .split("\n")
@@ -255,6 +268,13 @@ function splitTransactionBlocks(section: string) {
 
   for (const line of lines) {
     const startsNewRecord = /^\d{2}\s+[A-Za-z]{3}\b/.test(line);
+
+    if (seenConfirmed && looksLikeStandaloneSchemeLine(line)) {
+      blocks.push(current.join("\n"));
+      current = [line];
+      seenConfirmed = false;
+      continue;
+    }
 
     if (startsNewRecord && seenConfirmed) {
       blocks.push(current.join("\n"));
@@ -274,4 +294,19 @@ function splitTransactionBlocks(section: string) {
   }
 
   return blocks;
+}
+
+function looksLikeStandaloneSchemeLine(line: string) {
+  if (!line) return false;
+  if (/^\d{2}\s+[A-Za-z]{3}\b/.test(line)) return false;
+  if (/^20\d{2}\b/.test(line)) return false;
+  if (/^\(.+\)$/.test(line)) return false;
+  if (/^confirmed$/i.test(line)) return false;
+  if (/^(purchase|withdrawal|redeem|redemption|sell|dividend|transfer)\b/i.test(line)) {
+    return false;
+  }
+  if (/^sip$/i.test(line)) return false;
+  if (/^[₹$€£]?[\d,]+(?:\.\d+)?$/.test(line)) return false;
+
+  return /\b(fund|etf|plan|growth|idcw|cap|bond|equity|debt|gold)\b/i.test(line);
 }

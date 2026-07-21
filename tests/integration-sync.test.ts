@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildConnectorActivityFeed,
+  buildConnectorActivitySummary,
+  buildIntegrationDiagnosticsSummary,
   buildIntegrationOperationsSummary,
   appendIntegrationSyncEvent,
   buildIntegrationSyncTelemetry,
@@ -9,14 +12,17 @@ import {
   createSyncImportJob,
   executeIntegrationSyncBatch,
   formatSyncTimeLabel,
+  getAutoOpenIntegrationAction,
   getConnectorAttentionSummary,
   getIntegrationActionItems,
   getIntegrationAttentionItems,
   getIntegrationHealthMetrics,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
+  recordManualIntegrationReview,
   resolveScheduledSyncUserIds,
 } from "../lib/integration-sync";
+import { executeProviderSync } from "../lib/provider-sync-adapters";
 import type { IntegrationConnection } from "../lib/local-storage";
 
 const activeConnection: IntegrationConnection = {
@@ -75,14 +81,50 @@ describe("integration sync helpers", () => {
         status: "paused",
       }),
       {
-        detail: "Sync is paused until you resume this source.",
+        detail: "Live sync lane is paused until you resume this source.",
         label: "Paused",
         tone: "idle",
       },
     );
   });
 
-  it("treats manual import connectors as on-demand instead of overdue", () => {
+  it("marks recent connector failures as retry-needed states", () => {
+    assert.deepEqual(
+      getIntegrationSyncState(
+        {
+          ...autoConnection,
+          lastSyncAt: "2026-07-11T10:45:00.000Z",
+          lastSyncMessage: "Latest live holdings check failed.",
+          lastSyncStatus: "error",
+        },
+        new Date("2026-07-11T11:30:00.000Z"),
+      ),
+      {
+        detail: "Latest live check failed 45 min ago. Reconnect and rerun this source before the next cadence window.",
+        label: "Retry needed",
+        tone: "attention",
+      },
+    );
+
+    assert.deepEqual(
+      getIntegrationSyncState(
+        {
+          ...activeConnection,
+          lastSyncAt: "2026-07-11T10:45:00.000Z",
+          lastSyncMessage: "Latest statement review failed.",
+          lastSyncStatus: "error",
+        },
+        new Date("2026-07-11T11:30:00.000Z"),
+      ),
+      {
+        detail: "Latest statement review failed 45 min ago. Upload a fresh statement or transaction summary before retrying.",
+        label: "Retry needed",
+        tone: "attention",
+      },
+    );
+  });
+
+  it("treats manual import connectors as review lanes instead of overdue syncs", () => {
     assert.equal(
       getNextIntegrationSyncAt(
         activeConnection,
@@ -97,8 +139,8 @@ describe("integration sync helpers", () => {
         new Date("2026-07-11T11:30:00.000Z"),
       ),
       {
-        detail: "Last import activity 210 min ago.",
-        label: "On demand",
+        detail: "Last manual source activity 210 min ago.",
+        label: "Manual lane",
         tone: "healthy",
       },
     );
@@ -109,8 +151,8 @@ describe("integration sync helpers", () => {
         lastSyncAt: null,
       }),
       {
-        detail: "Runs when you upload a fresh statement.",
-        label: "On demand",
+        detail: "Waiting for a fresh statement or transaction summary.",
+        label: "Awaiting statement",
         tone: "idle",
       },
     );
@@ -149,6 +191,41 @@ describe("integration sync helpers", () => {
     assert.equal(history[0].importedFileCount, 0);
   });
 
+  it("records staged manual sync-plan reviews on the connector", () => {
+    const execution = executeProviderSync(activeConnection, {
+      fileName: "statement.txt",
+      sourceText:
+        "Scheme Name\tCurrent Value\tInvested Value\tUnits\nIndex Core Fund\t180000\t158000\t734.69",
+    });
+    const nextConnection = recordManualIntegrationReview(activeConnection, execution, {
+      now: new Date("2026-07-17T10:15:00.000Z"),
+      outcome: "staged",
+    });
+
+    assert.equal(nextConnection.lastSyncOrigin, "manual");
+    assert.equal(nextConnection.lastSyncStatus, "success");
+    assert.equal(nextConnection.lastImportedFileCount, 1);
+    assert.match(nextConnection.lastSyncMessage, /staged in import history/i);
+    assert.equal(nextConnection.syncHistory[0]?.status, "success");
+  });
+
+  it("records applied manual sync-plan reviews on the connector", () => {
+    const execution = executeProviderSync(activeConnection, {
+      fileName: "statement.txt",
+      sourceText:
+        "Scheme Name\tCurrent Value\tInvested Value\tUnits\nIndex Core Fund\t180000\t158000\t734.69",
+    });
+    const nextConnection = recordManualIntegrationReview(activeConnection, execution, {
+      now: new Date("2026-07-17T10:20:00.000Z"),
+      outcome: "applied",
+    });
+
+    assert.equal(nextConnection.lastSyncOrigin, "manual");
+    assert.equal(nextConnection.lastSyncStatus, "success");
+    assert.match(nextConnection.lastSyncMessage, /applied to the portfolio/i);
+    assert.equal(nextConnection.syncHistory[0]?.importedFileCount, 1);
+  });
+
   it("aggregates connector health metrics from sync history", () => {
     const metrics = getIntegrationHealthMetrics({
       ...activeConnection,
@@ -185,6 +262,212 @@ describe("integration sync helpers", () => {
     assert.equal(metrics.averageImportedFiles, 1);
     assert.equal(metrics.warningStreak, 1);
     assert.equal(metrics.lastHealthySyncAt, "2026-07-11T10:00:00.000Z");
+  });
+
+  it("builds a shared connector activity feed ordered by newest event", () => {
+    const result = buildConnectorActivityFeed({
+      brokerConnections: [
+        {
+          accessTokenExpiresAt: null,
+          accountLabel: "Ash Zerodha",
+          createdAt: "2026-07-17T08:00:00.000Z",
+          errorMessage: "",
+          externalAccountId: "zerodha-1",
+          lastSyncedAt: "2026-07-17T09:15:00.000Z",
+          metadata: {
+            syncHistory: [
+              {
+                id: "broker-1",
+                importedFileCount: 4,
+                message: "Zerodha holdings sync completed with 4 live holdings.",
+                status: "success",
+                syncedAt: "2026-07-17T09:15:00.000Z",
+              },
+            ],
+          },
+          provider: "zerodha",
+          scopes: [],
+          status: "connected",
+          updatedAt: "2026-07-17T09:15:00.000Z",
+        },
+      ],
+      inboxConnections: [
+        {
+          accessTokenExpiresAt: null,
+          createdAt: "2026-07-17T06:00:00.000Z",
+          errorMessage: "",
+          externalAccountId: "gmail-1",
+          lastMessageAt: "2026-07-17T09:40:00.000Z",
+          lastSyncedAt: "2026-07-17T09:45:00.000Z",
+          metadata: {
+            syncHistory: [
+              {
+                fetchedMessageCount: 2,
+                id: "inbox-1",
+                importedFileCount: 1,
+                message: "Imported the latest statement email into the review queue.",
+                status: "success",
+                syncedAt: "2026-07-17T09:45:00.000Z",
+              },
+            ],
+          },
+          provider: "gmail",
+          providerAccountEmail: "user@gmail.com",
+          scopes: [],
+          status: "connected",
+          syncCursor: null,
+          updatedAt: "2026-07-17T09:45:00.000Z",
+        },
+      ],
+      integrations: [
+        {
+          ...activeConnection,
+          syncHistory: [
+            {
+              detectedProviderSummary: "Paytm Money guided import path is available.",
+              id: "manual-1",
+              importedFileCount: 1,
+              message: "Sync plan reviewed and applied to the portfolio.",
+              status: "success",
+              syncedAt: "2026-07-17T09:30:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(result.length, 3);
+    assert.deepEqual(
+      result.map((item) => [item.id, item.sourceType]),
+      [
+        ["inbox-1", "inbox"],
+        ["manual-1", "manual"],
+        ["broker-1", "broker"],
+      ],
+    );
+    assert.equal(result[0]?.fetchedMessageCount, 2);
+    assert.equal(result[1]?.fetchedMessageCount, null);
+    assert.equal(result[2]?.providerName, "Ash Zerodha");
+  });
+
+  it("limits the shared connector activity feed", () => {
+    const result = buildConnectorActivityFeed({
+      integrations: [
+        {
+          ...activeConnection,
+          syncHistory: [
+            {
+              detectedProviderSummary: "first",
+              id: "manual-1",
+              importedFileCount: 1,
+              message: "First",
+              status: "success",
+              syncedAt: "2026-07-17T09:30:00.000Z",
+            },
+            {
+              detectedProviderSummary: "second",
+              id: "manual-2",
+              importedFileCount: 1,
+              message: "Second",
+              status: "warning",
+              syncedAt: "2026-07-17T09:00:00.000Z",
+            },
+          ],
+        },
+      ],
+      limit: 1,
+    });
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.id, "manual-1");
+  });
+
+  it("builds a compact summary from mixed connector activity", () => {
+    const summary = buildConnectorActivitySummary([
+      {
+        fetchedMessageCount: 2,
+        id: "inbox-1",
+        importedFileCount: 1,
+        message: "Imported the latest statement email into the review queue.",
+        providerId: "gmail",
+        providerName: "Gmail",
+        sourceType: "inbox",
+        status: "success",
+        syncedAt: "2026-07-17T09:45:00.000Z",
+      },
+      {
+        fetchedMessageCount: null,
+        id: "manual-1",
+        importedFileCount: 2,
+        message: "Sync plan reviewed and staged in import history.",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+        sourceType: "manual",
+        status: "warning",
+        syncedAt: "2026-07-17T09:30:00.000Z",
+      },
+      {
+        fetchedMessageCount: null,
+        id: "broker-1",
+        importedFileCount: 4,
+        message: "Zerodha holdings sync completed with 4 live holdings.",
+        providerId: "zerodha",
+        providerName: "Ash Zerodha",
+        sourceType: "broker",
+        status: "error",
+        syncedAt: "2026-07-17T09:15:00.000Z",
+      },
+    ]);
+
+    assert.deepEqual(summary, {
+      brokerEventCount: 1,
+      errorCount: 1,
+      inboxEventCount: 1,
+      lastSyncedAt: "2026-07-17T09:45:00.000Z",
+      manualEventCount: 1,
+      successCount: 1,
+      totalImportedFiles: 7,
+      warningCount: 1,
+    });
+  });
+
+  it("builds connector diagnostics summaries with fallback cues and ordered timeline events", () => {
+    const summary = buildIntegrationDiagnosticsSummary({
+      ...activeConnection,
+      lastDetectedProviderSummary: "",
+      lastSchedulerMessage: "",
+      syncHistory: [
+        {
+          detectedProviderSummary: "",
+          id: "older-warning",
+          importedFileCount: 0,
+          message: "Warning run",
+          status: "warning",
+          syncedAt: "2026-07-11T09:00:00.000Z",
+        },
+        {
+          detectedProviderSummary: "Paytm Money guided import path is available.",
+          id: "latest-success",
+          importedFileCount: 2,
+          message: "Latest review succeeded.",
+          status: "success",
+          syncedAt: "2026-07-11T10:00:00.000Z",
+        },
+      ],
+    });
+
+    assert.match(summary.providerCue, /No provider cue recorded yet/i);
+    assert.match(summary.schedulerCue, /Scheduler has not recorded a note/i);
+    assert.equal(summary.timeline.length, 2);
+    assert.equal(summary.timeline[0]?.id, "latest-success");
+    assert.equal(summary.timeline[0]?.statusLabel, "Healthy");
+    assert.equal(summary.timeline[0]?.importedFileLabel, "2 files");
+    assert.equal(
+      summary.timeline[0]?.detectedProviderSummary,
+      "Paytm Money guided import path is available.",
+    );
+    assert.equal(summary.timeline[1]?.statusLabel, "Warning");
+    assert.equal(summary.timeline[1]?.importedFileLabel, "No imports");
   });
 
   it("prioritizes connector attention summaries", () => {
@@ -335,6 +618,34 @@ describe("integration sync helpers", () => {
     assert.equal(items[1]?.label, "Run first check");
   });
 
+  it("prioritizes retry actions after recent connector failures", () => {
+    const liveItems = getIntegrationActionItems(
+      {
+        ...autoConnection,
+        lastSyncAt: "2026-07-11T10:45:00.000Z",
+        lastSyncStatus: "error",
+        providerId: "zerodha",
+        providerName: "Zerodha",
+      },
+      new Date("2026-07-11T11:30:00.000Z"),
+    );
+
+    assert.equal(liveItems[0]?.label, "Retry live check");
+
+    const manualItems = getIntegrationActionItems(
+      {
+        ...activeConnection,
+        lastSyncAt: "2026-07-11T10:45:00.000Z",
+        lastSyncStatus: "error",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+      },
+      new Date("2026-07-11T11:30:00.000Z"),
+    );
+
+    assert.equal(manualItems[0]?.label, "Retry with fresh statement");
+  });
+
   it("adds inbox guidance for email-forward connectors", () => {
     const items = getIntegrationActionItems(
       {
@@ -349,6 +660,82 @@ describe("integration sync helpers", () => {
 
     assert.equal(items[0]?.label, "Feed email intake");
     assert.equal(items.some((item) => item.label === "Connect inbox access"), true);
+  });
+
+  it("prioritizes import-history review actions for staged manual reviews", () => {
+    const items = getIntegrationActionItems(
+      {
+        ...activeConnection,
+        lastImportedFileCount: 1,
+        lastSyncAt: "2026-07-17T09:00:00.000Z",
+        lastSyncMessage: "Paytm Money sync plan reviewed and staged in import history using 1 parsed input.",
+        lastSyncOrigin: "manual",
+        lastSyncStatus: "success",
+        providerId: "paytm-money",
+        providerName: "Paytm Money",
+      },
+      new Date("2026-07-17T12:00:00.000Z"),
+    );
+
+    assert.equal(items[0]?.actionId, "review-import-history");
+    assert.equal(items[0]?.label, "Open staged review");
+    assert.match(items[0]?.detail ?? "", /staged review|import history/i);
+  });
+
+  it("chooses auto-open actions for manual and due connectors", () => {
+    assert.equal(
+      getAutoOpenIntegrationAction(
+        {
+          ...activeConnection,
+          providerId: "paytm-money",
+          providerName: "Paytm Money",
+        },
+        new Date("2026-07-11T10:00:00.000Z"),
+      ),
+      "upload-latest-statement",
+    );
+
+    assert.equal(
+      getAutoOpenIntegrationAction(
+        {
+          ...activeConnection,
+          lastImportedFileCount: 1,
+          lastSyncAt: "2026-07-17T09:00:00.000Z",
+          lastSyncMessage: "Paytm Money sync plan reviewed and staged in import history using 1 parsed input.",
+          lastSyncOrigin: "manual",
+          lastSyncStatus: "success",
+          providerId: "paytm-money",
+          providerName: "Paytm Money",
+        },
+        new Date("2026-07-17T12:00:00.000Z"),
+      ),
+      "review-import-history",
+    );
+
+    assert.equal(
+      getAutoOpenIntegrationAction(
+        {
+          ...autoConnection,
+          providerId: "groww-direct",
+          providerName: "Groww Direct",
+        },
+        new Date("2026-07-11T12:30:00.000Z"),
+      ),
+      "run-connector-now",
+    );
+  });
+
+  it("chooses live-sync setup actions when a connector has not run yet", () => {
+    assert.equal(
+      getAutoOpenIntegrationAction(
+        {
+          ...autoConnection,
+          lastSyncAt: null,
+        },
+        new Date("2026-07-11T10:00:00.000Z"),
+      ),
+      "connect-live-sync",
+    );
   });
 
   it("builds a scheduler plan for cron-style connector checks", () => {
@@ -390,6 +777,10 @@ describe("integration sync helpers", () => {
     assert.deepEqual(
       plan.entries.filter((entry) => entry.shouldRunNow).map((entry) => entry.id),
       ["overdue-source", "ready-source"],
+    );
+    assert.equal(
+      plan.entries.find((entry) => entry.id === "ready-source")?.stateLabel,
+      "Auth pending",
     );
     assert.equal(plan.nextRunAt, "2026-07-11T09:00:00.000Z");
   });

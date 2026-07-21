@@ -62,6 +62,11 @@ export const mentorQuestions = [
 export type MentorQuestionId = (typeof mentorQuestions)[number]["id"];
 
 export type MentorAnswer = {
+  actionTrack: {
+    description: string;
+    nextMove: string;
+    title: string;
+  };
   checkpoints: Array<{ label: string; value: string }>;
   explanation: string;
   focusLabel: string;
@@ -70,6 +75,20 @@ export type MentorAnswer = {
   steps: string[];
   summary: string;
 };
+
+function getMentorTrack(
+  profile: RiskProfile,
+  id: "understand" | "rehearse" | "activate",
+) {
+  const basket = profile.actionBaskets.find((item) => item.id === id) ?? profile.actionBaskets[0];
+
+  return {
+    description:
+      basket?.description ?? "Use the next coaching track to keep your decisions calmer and clearer.",
+    nextMove: basket?.items[0] ?? "Keep the next move simple and repeatable.",
+    title: basket?.title ?? "Understand the Plan",
+  };
+}
 
 export function getMentorAnswer({
   answers,
@@ -98,9 +117,13 @@ export function getMentorAnswer({
     answers.monthlySavings > 0
       ? Math.round((answers.monthlyInvestment / answers.monthlySavings) * 100)
       : 0;
+  const understandTrack = getMentorTrack(profile, "understand");
+  const rehearseTrack = getMentorTrack(profile, "rehearse");
+  const activateTrack = getMentorTrack(profile, "activate");
 
   const answersById: Record<MentorQuestionId, MentorAnswer> = {
     allocation: {
+      actionTrack: rehearseTrack,
       checkpoints: [
         { label: "Tracked value", value: formatMoney(portfolioTotal) },
         { label: "Largest holding", value: `${concentration}%` },
@@ -124,10 +147,18 @@ export function getMentorAnswer({
       summary: "Allocation should reduce regret, not just chase return.",
     },
     crash: {
+      actionTrack:
+        profile.intentGap === "knowledge-gap" ? rehearseTrack : understandTrack,
       checkpoints: [
         { label: "Largest holding", value: `${concentration}%` },
         { label: "Emergency fund", value: `${answers.emergencyMonths} months` },
-        { label: "Crash response", value: answers.marketDropResponse },
+        {
+          label: "Crash response",
+          value:
+            answers.marketDropResponse === answers.postLearningDropResponse
+              ? answers.marketDropResponse
+              : `${answers.marketDropResponse} -> ${answers.postLearningDropResponse}`,
+        },
       ],
       explanation:
         "A market crash is a temporary fall in prices, not automatically a reason to sell. The right response depends on your goal timeline, emergency fund, debt, and risk capacity.",
@@ -147,6 +178,7 @@ export function getMentorAnswer({
       summary: "Crashes test behavior more than knowledge.",
     },
     emergency: {
+      actionTrack: activateTrack,
       checkpoints: [
         { label: "Current buffer", value: `${answers.emergencyMonths} months` },
         { label: "Debt level", value: answers.debtLevel },
@@ -167,6 +199,7 @@ export function getMentorAnswer({
       summary: "Emergency money protects your investment plan from forced selling.",
     },
     etf: {
+      actionTrack: understandTrack,
       checkpoints: [
         { label: "Experience", value: answers.experience },
         { label: "Time available", value: answers.timeAvailable },
@@ -190,6 +223,7 @@ export function getMentorAnswer({
       summary: "ETFs can be simple, but buying them still requires market-order awareness.",
     },
     "first-investment": {
+      actionTrack: activateTrack,
       checkpoints: [
         { label: "Monthly savings", value: formatMoney(answers.monthlySavings) },
         { label: "Monthly investing", value: formatMoney(answers.monthlyInvestment) },
@@ -213,6 +247,7 @@ export function getMentorAnswer({
       summary: "The best first investment is the one that creates a lasting habit.",
     },
     gold: {
+      actionTrack: understandTrack,
       checkpoints: [
         { label: "Profile band", value: profile.band },
         { label: "Current gain", value: `${gainPercent}%` },
@@ -234,6 +269,7 @@ export function getMentorAnswer({
       summary: "Gold is a diversifier, not a complete plan.",
     },
     debt: {
+      actionTrack: activateTrack,
       checkpoints: [
         { label: "Debt level", value: answers.debtLevel },
         { label: "Emergency fund", value: `${answers.emergencyMonths} months` },
@@ -257,6 +293,8 @@ export function getMentorAnswer({
       summary: "Debt changes how much market volatility you can honestly carry.",
     },
     risk: {
+      actionTrack:
+        profile.intentGap === "knowledge-gap" ? understandTrack : rehearseTrack,
       checkpoints: [
         { label: "Risk score", value: `${profile.score}/100` },
         { label: "Confidence", value: profile.confidence },
@@ -270,7 +308,7 @@ export function getMentorAnswer({
         portfolioTotal > 0
           ? `Your tracked portfolio is ${formatMoney(portfolioTotal)} with roughly ${gainPercent}% overall gain. `
           : ""
-      }The biggest practical next step is: ${profile.nextActions[0].toLowerCase()}.`,
+      }The biggest practical next step is: ${rehearseTrack.nextMove.toLowerCase()}.`,
       steps: [
         "Improve foundation before increasing risk.",
         "Match risk to goal timeline.",
@@ -279,6 +317,7 @@ export function getMentorAnswer({
       summary: "Risk capacity is personal and changes with your life.",
     },
     sip: {
+      actionTrack: activateTrack,
       checkpoints: [
         { label: "Monthly SIP base", value: formatMoney(answers.monthlyInvestment) },
         { label: "Savings coverage", value: `${savingsCoverage}%` },
@@ -302,6 +341,7 @@ export function getMentorAnswer({
       summary: "SIP is more about discipline than market timing.",
     },
     tax: {
+      actionTrack: understandTrack,
       checkpoints: [
         { label: "Tax awareness", value: answers.taxAwareness },
         { label: "Transactions", value: `${assets.length} holdings` },

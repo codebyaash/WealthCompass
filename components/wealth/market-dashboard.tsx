@@ -25,6 +25,7 @@ import {
   buildIntegrationSchedulerPlan,
   formatSyncTimeLabel,
   getIntegrationHealthMetrics,
+  getIntegrationStrategyLabel,
   getIntegrationSyncState,
   getNextIntegrationSyncAt,
 } from "@/lib/integration-sync";
@@ -41,6 +42,7 @@ import type {
   PortfolioAsset,
 } from "@/lib/local-storage";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import type { RiskProfile } from "@/lib/wealth-rules";
 
 const marketExplainers = [
   {
@@ -69,12 +71,14 @@ export function MarketDashboard({
   marketPreferences,
   onRunIntegrationSync,
   onUpdatePreferences,
+  profile,
 }: {
   assets: PortfolioAsset[];
   integrations: IntegrationConnection[];
   marketPreferences: MarketPreferences;
   onRunIntegrationSync: (connectionId?: string) => void;
   onUpdatePreferences: (preferences: MarketPreferences) => void;
+  profile: RiskProfile;
 }) {
   const [marketData, setMarketData] = useState<MarketSnapshotResponse>(() =>
     buildFallbackMarketResponse("Loading market snapshot."),
@@ -128,6 +132,17 @@ export function MarketDashboard({
       }),
     [holdingsWatchSummary, marketData.sentiment, sectorBreadth],
   );
+  const marketTrack =
+    profile.actionBaskets.find((basket) => basket.id === "understand") ??
+    profile.actionBaskets[0];
+  const marketFocusHeadline =
+    holdingsWatchSummary.trackedTotal > 0
+      ? "Watch the market through your portfolio, not through random headlines"
+      : "Use the market page for context, not for impulsive action";
+  const marketFocusDetail =
+    holdingsWatchSummary.trackedTotal > 0
+      ? "You already have tracked assets, so today’s useful question is how the market tone interacts with your actual mix, not whether one sector is exciting."
+      : "Until the portfolio is mapped in, this page is mainly here to build pattern recognition: breadth, sentiment, sector leadership, and why none of them should override your plan alone.";
 
   useEffect(() => {
     let isMounted = true;
@@ -208,6 +223,11 @@ export function MarketDashboard({
     <div className="grid gap-5">
       <Card>
         <CardHeader>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">{marketData.sentiment}</Badge>
+            <Badge variant="outline">{profile.band}</Badge>
+            <Badge variant="outline">{marketTrack.title}</Badge>
+          </div>
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
             <div>
               <CardTitle>Market Dashboard</CardTitle>
@@ -225,6 +245,60 @@ export function MarketDashboard({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-4 rounded-md border bg-muted/30 p-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div>
+              <p className="text-sm font-medium">{marketFocusHeadline}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {marketFocusDetail}
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    1. Read breadth
+                  </p>
+                  <p className="mt-2 text-sm leading-6">
+                    Check whether strength is broad or being carried by a few heavy sectors.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    2. Check your mix
+                  </p>
+                  <p className="mt-2 text-sm leading-6">
+                    Compare the market tone with your tracked holdings before changing anything.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    3. Stay on-plan
+                  </p>
+                  <p className="mt-2 text-sm leading-6">
+                    Use this page to inform rebalancing and learning, not to manufacture trades.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6">{marketTrack.items[0]}</p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Market read
+                </p>
+                <p className="mt-2 text-sm leading-6">
+                  {marketData.sentiment === "Constructive"
+                    ? "Breadth is supportive. Good time to stick with planned contributions rather than chase heat."
+                    : marketData.sentiment === "Cautious"
+                      ? "Breadth is softer. Useful time to review allocation resilience and emotional readiness."
+                      : "The tape is mixed. Best use of this screen is interpretation, not prediction."}
+                </p>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-col justify-between gap-3 rounded-md border bg-muted/30 p-4 md:flex-row md:items-center">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-background">
@@ -315,11 +389,13 @@ export function MarketDashboard({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Beginner sentiment</CardTitle>
-            <CardDescription>Rule-based interpretation of market breadth.</CardDescription>
-          </CardHeader>
+          <Card>
+            <CardHeader>
+              <CardTitle>Beginner sentiment</CardTitle>
+              <CardDescription>
+                A simple interpretation layer so the market tone feels usable instead of abstract.
+              </CardDescription>
+            </CardHeader>
           <CardContent className="grid gap-4">
             <div>
               <div className="mb-2 flex justify-between text-sm">
@@ -376,39 +452,66 @@ export function MarketDashboard({
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           <div className="rounded-md border bg-muted/30 p-4 md:col-span-2">
-            <div className="grid gap-3 text-sm md:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Avg connector success</p>
-                <p className="mt-2 font-semibold">{integrationHealthSummary.averageSuccessRate}%</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-foreground">
+                  Connector health
+                </p>
+                <div className="mt-3 grid gap-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Avg connector success</p>
+                    <p className="mt-1 font-semibold">{integrationHealthSummary.averageSuccessRate}%</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Tracked sync runs</p>
+                    <p className="mt-1 font-semibold">{integrationHealthSummary.totalRuns}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Warning streaks</p>
+                    <p className="mt-1 font-semibold">{integrationHealthSummary.warningConnections}</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Tracked sync runs</p>
-                <p className="mt-2 font-semibold">{integrationHealthSummary.totalRuns}</p>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-foreground">
+                  Scheduler
+                </p>
+                <div className="mt-3 grid gap-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Due now</p>
+                    <p className="mt-1 font-semibold">{schedulerPlan.dueCount}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">First checks pending</p>
+                    <p className="mt-1 font-semibold">{schedulerPlan.readyCount}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Next connector check</p>
+                    <p className="mt-1 font-semibold">{formatSyncTimeLabel(schedulerPlan.nextRunAt)}</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Due now</p>
-                <p className="mt-2 font-semibold">{schedulerPlan.dueCount}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Warning streaks</p>
-                <p className="mt-2 font-semibold">{integrationHealthSummary.warningConnections}</p>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-foreground">
+                  Source state
+                </p>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {schedulerPlan.activeCount} active source{schedulerPlan.activeCount === 1 ? "" : "s"} · {schedulerPlan.pausedCount} paused · {schedulerPlan.errorCount} need fixes.
+                </p>
+                {schedulerPlan.dueCount > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {schedulerPlan.entries
+                      .filter((entry) => entry.shouldRunNow)
+                      .slice(0, 4)
+                      .map((entry) => (
+                        <Badge key={entry.id} variant="outline">
+                          {entry.providerName}
+                        </Badge>
+                      ))}
+                  </div>
+                )}
               </div>
             </div>
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              {schedulerPlan.activeCount} active source{schedulerPlan.activeCount === 1 ? "" : "s"} · {schedulerPlan.readyCount} ready for first run · {schedulerPlan.pausedCount} paused · {schedulerPlan.errorCount} need fixes. Next connector check {formatSyncTimeLabel(schedulerPlan.nextRunAt)}.
-            </p>
-            {schedulerPlan.dueCount > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {schedulerPlan.entries
-                  .filter((entry) => entry.shouldRunNow)
-                  .slice(0, 4)
-                  .map((entry) => (
-                    <Badge key={entry.id} variant="outline">
-                      {entry.providerName}
-                    </Badge>
-                  ))}
-              </div>
-            )}
           </div>
           {activeIntegrations.length ? (
             activeIntegrations.map((integration) => {
@@ -422,7 +525,7 @@ export function MarketDashboard({
                     <div>
                       <p className="font-medium">{integration.providerName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {integration.importStrategy} · every {integration.syncCadenceMinutes} min
+                        {getIntegrationStrategyLabel(integration.importStrategy)} · every {integration.syncCadenceMinutes} min
                       </p>
                     </div>
                     <Badge
@@ -431,29 +534,54 @@ export function MarketDashboard({
                       {syncState.label}
                     </Badge>
                   </div>
-                  <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
-                    <span>
-                      Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}{integration.lastSyncOrigin ? ` · ${integration.lastSyncOrigin}` : ""}
-                    </span>
-                    <span>
-                      Result {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
-                    </span>
-                    <span>
-                      Scheduler {integration.lastSchedulerStatus} · {integration.lastSchedulerCheckAt ? new Date(integration.lastSchedulerCheckAt).toLocaleString() : "not checked yet"}
-                    </span>
-                    <span>
-                      Success {healthMetrics.successRate}% · avg files {healthMetrics.averageImportedFiles.toFixed(1)}
-                    </span>
-                    <span>
-                      Next check {formatSyncTimeLabel(nextSyncAt)}{nextSyncAt ? ` · ${new Date(nextSyncAt).toLocaleString()}` : ""}
-                    </span>
-                    <span>{syncState.detail}</span>
-                    <span>
-                      Last healthy sync {healthMetrics.lastHealthySyncAt ? new Date(healthMetrics.lastHealthySyncAt).toLocaleString() : "not yet"}
-                      {healthMetrics.warningStreak ? ` · warning streak ${healthMetrics.warningStreak}` : ""}
-                    </span>
-                    <span>{integration.lastSyncMessage}</span>
-                    <span>{integration.lastSchedulerMessage}</span>
+                  <div className="mt-3 grid gap-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                          Current read
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {syncState.detail}
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                          Health
+                        </p>
+                        <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                          <p>
+                            Success rate {healthMetrics.successRate}% · avg files {healthMetrics.averageImportedFiles.toFixed(1)}
+                          </p>
+                          <p>
+                            Last healthy sync {healthMetrics.lastHealthySyncAt ? new Date(healthMetrics.lastHealthySyncAt).toLocaleString() : "not yet"}
+                            {healthMetrics.warningStreak ? ` · streak ${healthMetrics.warningStreak}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                          Schedule
+                        </p>
+                        <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                          <p>
+                            Next check {formatSyncTimeLabel(nextSyncAt)}{nextSyncAt ? ` · ${new Date(nextSyncAt).toLocaleString()}` : ""}
+                          </p>
+                          <p>
+                            Scheduler {integration.lastSchedulerStatus} · {integration.lastSchedulerCheckAt ? new Date(integration.lastSchedulerCheckAt).toLocaleString() : "not checked yet"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground">
+                      <span>
+                        Last sync {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}{integration.lastSyncOrigin ? ` · ${integration.lastSyncOrigin}` : ""}
+                      </span>
+                      <span>
+                        Result {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
+                      </span>
+                      <span>{integration.lastSyncMessage}</span>
+                      <span>{integration.lastSchedulerMessage}</span>
+                    </div>
                   </div>
                   <div className="mt-3 flex justify-end">
                     <Button
@@ -479,7 +607,9 @@ export function MarketDashboard({
       <Card>
         <CardHeader>
           <CardTitle>Market explained simply</CardTitle>
-          <CardDescription>Short notes that translate market noise into useful context.</CardDescription>
+          <CardDescription>
+            Short notes that help you learn what matters without turning every move into a signal.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           {marketExplainers.map((item) => (

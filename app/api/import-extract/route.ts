@@ -3,32 +3,29 @@ import { extractTextFromPdfBuffer } from "@/lib/pdf-import-server";
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const entry = formData.get("file");
-
-    if (!(entry instanceof File)) {
-      return NextResponse.json({ error: "File upload is required." }, { status: 400 });
-    }
+    const encodedFileName = request.headers.get("x-file-name");
+    const fileName = encodedFileName ? decodeURIComponent(encodedFileName) : "upload";
+    const contentType = request.headers.get("content-type") ?? "application/octet-stream";
+    const buffer = new Uint8Array(await request.arrayBuffer());
 
     const isPdf =
-      entry.type === "application/pdf" || entry.name.toLowerCase().endsWith(".pdf");
+      contentType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
 
     if (!isPdf) {
       return NextResponse.json({
-        fileName: entry.name,
+        fileName,
         isPdf: false,
         pageCount: 0,
-        text: await entry.text(),
+        text: new TextDecoder().decode(buffer),
         usedOcr: false,
         warnings: [] as string[],
       });
     }
 
-    const buffer = new Uint8Array(await entry.arrayBuffer());
     const extraction = await extractTextFromPdfBuffer(buffer);
 
     return NextResponse.json({
-      fileName: entry.name,
+      fileName,
       isPdf: true,
       pageCount: extraction.pageCount,
       text: extraction.text,

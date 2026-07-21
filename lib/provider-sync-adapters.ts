@@ -1,9 +1,18 @@
 import { describeReadiness, importSourceDescriptors } from "./import-sources";
+import {
+  createImportJobFromReview,
+  filterNewImportedTransactions,
+} from "./import-jobs";
 import { analyzeImportDocument } from "./import-review";
 import { normalizeImportTextForProvider } from "./provider-import-normalizers";
-import { previewPortfolioImport } from "./csv-import";
+import { applyPortfolioImport, previewPortfolioImport, type PortfolioImportMode } from "./csv-import";
 import type { ImportJob } from "./local-storage";
-import type { IntegrationConnection } from "./local-storage";
+import type {
+  IntegrationConnection,
+  PortfolioAsset,
+  PortfolioTransaction,
+} from "./local-storage";
+import { parseImportedTransactions } from "./transaction-import";
 
 export type SyncExecutionStage =
   | "authenticate"
@@ -35,9 +44,13 @@ export type ProviderSyncExecutionResult = {
   }>;
   connectorStatus: ProviderSyncPreview["connectorStatus"];
   detectedProviderSummary: string;
+  duplicateCount: number;
   importedFileCount: number;
   jobStatus: ImportJob["status"];
   message: string;
+  normalizationCount: number;
+  parsedAssetCount: number;
+  parsedTransactionCount: number;
   providerId: string;
   providerName: string;
   reviewedWarnings: string[];
@@ -54,6 +67,32 @@ export type ProviderSyncInput = {
   fileName?: string;
   sourceText?: string;
   usedOcr?: boolean;
+};
+
+export type AppliedSyncPortfolioResult = {
+  appliedAssetCount: number;
+  appliedTransactionCount: number;
+  duplicateCount: number;
+  importJob: ImportJob;
+  nextAssets: PortfolioAsset[];
+  nextTransactions: PortfolioTransaction[];
+};
+
+export type ProviderSyncExecutionOverview = {
+  actionHint: string;
+  applyLabel: string;
+  canApply: boolean;
+  canStage: boolean;
+  headline: string;
+  importReadyLabel: string;
+  warningLabel: string;
+};
+
+type ProviderSyncArtifacts = {
+  importPreview: ReturnType<typeof previewPortfolioImport> | null;
+  normalizedText: string | null;
+  normalizedWarnings: string[];
+  review: ReturnType<typeof analyzeImportDocument> | null;
 };
 
 export function buildProviderSyncPreview(
@@ -84,23 +123,14 @@ export function executeProviderSync(
   input: ProviderSyncInput = {},
 ): ProviderSyncExecutionResult {
   const preview = buildProviderSyncPreview(connection);
-  const normalized = input.sourceText
-    ? normalizeImportTextForProvider({
-        providerId: connection.providerId,
-        text: input.sourceText,
-      })
-    : null;
-  const review = normalized
-    ? analyzeImportDocument({
-        fileName: input.fileName,
-        normalizationApplied: normalized.applied,
-        text: normalized.text,
-        usedOcr: input.usedOcr ?? false,
-      })
-    : null;
-  const importPreview = normalized
-    ? previewPortfolioImport(normalized.text, [])
-    : null;
+  const { importPreview, normalizedText, normalizedWarnings, review } =
+    getProviderSyncArtifacts(connection, input);
+  const parsedTransactions = normalizedText
+    ? parseImportedTransactions(normalizedText).transactions
+    : [];
+  const parsedTransactionCount = parsedTransactions.length;
+  const parsedAssetCount = importPreview?.assets.length ?? 0;
+  const duplicateCount = importPreview?.duplicates.length ?? 0;
   const isEmail = connection.importStrategy === "email-forward";
   const isCsv = connection.importStrategy === "csv-upload";
   const isDirect = connection.importStrategy === "sync-ready";
@@ -128,14 +158,15 @@ export function executeProviderSync(
     artifacts: getExecutionArtifacts(connection, {
       fileName: input.fileName,
       importPreview,
-      normalizedText: normalized?.text,
+      normalizedText,
       sourceText: input.sourceText,
     }),
     connectorStatus: preview.connectorStatus,
     detectedProviderSummary: review?.summary ?? preview.summary,
+    duplicateCount,
     importedFileCount,
     jobStatus:
-      importPreview?.assets.length
+      parsedAssetCount > 0 || parsedTransactionCount > 0
         ? "reviewed"
         : preview.connectorStatus === "ready"
           ? "reviewed"
@@ -151,14 +182,17 @@ export function executeProviderSync(
         : isCsv
           ? `${connection.providerName} prepared a broker export payload for import review.`
           : `${connection.providerName} prepared a statement-driven payload for import review.`,
+    normalizationCount: normalizedWarnings.length,
+    parsedAssetCount,
+    parsedTransactionCount,
     providerId: connection.providerId,
     providerName: connection.providerName,
     reviewedWarnings,
     sourceLineage: input.sourceText
       ? [
           `${input.fileName || "Manual source text"} received`,
-          ...(normalized?.applied.length
-            ? [`Normalization applied: ${normalized.applied.join("; ")}`]
+          ...(normalizedWarnings.length
+            ? [`Normalization applied: ${normalizedWarnings.join("; ")}`]
             : ["No provider cleanup was required"]),
           review ? `Import review classified this as ${review.documentKind}` : "Import review pending",
         ]
@@ -191,6 +225,288 @@ export function executeProviderSync(
     })),
     summary: review?.summary ?? preview.summary,
   };
+}
+
+export function buildSyncExecutionOverview(
+  execution: ProviderSyncExecutionResult,
+): ProviderSyncExecutionOverview {
+  const canApply = execution.parsedAssetCount > 0 || execution.parsedTransactionCount > 0;
+  const canStage =
+    canApply || execution.reviewedWarnings.length > 0 || execution.connectorStatus === "planned";
+
+  const headline = canApply
+    ? execution.parsedAssetCount > 0 && execution.parsedTransactionCount > 0
+      ? "Ready to apply holdings and transactions"
+      : execution.parsedAssetCount > 0
+        ? "Ready to apply holdings"
+        : "Ready to apply transactions"
+    : execution.connectorStatus === "planned"
+      ? "Waiting on direct connector auth"
+      : execution.reviewedWarnings.length > 0
+        ? "Needs another review pass"
+        : "Preview loaded";
+
+  const importReadyLabel = canApply
+    ? execution.parsedAssetCount > 0 && execution.parsedTransactionCount > 0
+      ? `${execution.parsedAssetCount} holdings · ${execution.parsedTransactionCount} transactions ready`
+      : execution.parsedAssetCount > 0
+        ? `${execution.parsedAssetCount} holdings ready`
+        : `${execution.parsedTransactionCount} transactions ready`
+    : "Nothing importable yet";
+
+  const warningLabel =
+    execution.reviewedWarnings.length > 0
+      ? `${execution.reviewedWarnings.length} warning${execution.reviewedWarnings.length === 1 ? "" : "s"} to review`
+      : "No review warnings";
+
+  return {
+    actionHint: canApply
+      ? "Apply now if the preview looks right, or stage this run in history for a final review."
+      : execution.connectorStatus === "planned"
+        ? "This lane is mapped, but direct account fetches still need connector auth before anything can be applied."
+        : "Use the warnings, artifacts, and normalized source below to improve the next review pass before staging or applying.",
+    applyLabel: canApply
+      ? execution.parsedAssetCount > 0 && execution.parsedTransactionCount > 0
+        ? "Apply holdings and transactions"
+        : execution.parsedAssetCount > 0
+          ? "Apply holdings"
+          : "Apply transactions"
+      : "Apply unavailable",
+    canApply,
+    canStage,
+    headline,
+    importReadyLabel,
+    warningLabel,
+  };
+}
+
+export function createImportJobFromSyncExecution(
+  connection: IntegrationConnection,
+  input: ProviderSyncInput = {},
+  now = new Date(),
+): ImportJob {
+  const execution = executeProviderSync(connection, input);
+  const { importPreview, normalizedText, normalizedWarnings, review } =
+    getProviderSyncArtifacts(connection, input);
+
+  if (review) {
+    const fileName =
+      input.fileName?.trim() ||
+      `${connection.providerId}-${now.toISOString().slice(0, 10)}.txt`;
+    const transactionCount = normalizedText
+      ? parseImportedTransactions(normalizedText).transactions.length
+      : 0;
+    const hasReviewedImportContent =
+      (importPreview?.assets.length ?? 0) > 0 ||
+      transactionCount > 0 ||
+      review.documentKind === "email-statement";
+
+    return createImportJobFromReview({
+      assetCount: importPreview?.assets.length ?? 0,
+      duplicateCount: importPreview?.duplicates.length ?? 0,
+      fileName,
+      notes: `${execution.message} ${connection.sourceHint}`.trim(),
+      normalizationApplied: normalizedWarnings,
+      normalizedText: normalizedText ?? "",
+      rawText: input.sourceText ?? normalizedText ?? "",
+      review,
+      rowWarnings: execution.reviewedWarnings,
+      status:
+        hasReviewedImportContent
+          ? "reviewed"
+          : execution.jobStatus === "failed"
+            ? "failed"
+            : "received",
+      transactionCount,
+    });
+  }
+
+  return {
+    ...createFallbackSyncJob(connection, execution, now),
+    notes: `${execution.message} ${connection.sourceHint}`.trim(),
+  };
+}
+
+export function applySyncExecutionToPortfolio(
+  connection: IntegrationConnection,
+  existingAssets: PortfolioAsset[],
+  existingTransactions: PortfolioTransaction[] = [],
+  input: ProviderSyncInput = {},
+  mode: PortfolioImportMode = "merge",
+): AppliedSyncPortfolioResult | null {
+  const execution = executeProviderSync(connection, input);
+  const { importPreview, normalizedText, normalizedWarnings, review } =
+    getProviderSyncArtifacts(connection, input);
+  const importedTransactions = normalizedText
+    ? filterNewImportedTransactions(
+        parseImportedTransactions(normalizedText).transactions,
+        existingTransactions,
+      )
+    : [];
+
+  if (!review || (!importPreview?.assets.length && importedTransactions.length === 0)) {
+    return null;
+  }
+
+  const importedAssets =
+    mode === "merge"
+      ? (importPreview?.assets ?? [])
+      : [
+          ...(importPreview?.newAssets ?? []),
+          ...((importPreview?.duplicates ?? []).map(({ importedAsset }) => importedAsset)),
+        ];
+  const nextAssets = importedAssets.length
+    ? applyPortfolioImport({
+        existingAssets,
+        importedAssets,
+        mode,
+      })
+    : existingAssets;
+  const nextTransactions = importedTransactions.length
+    ? [...importedTransactions, ...existingTransactions]
+    : existingTransactions;
+  const duplicateCount = importPreview?.duplicates.length ?? 0;
+  const appliedAssetCount = importedAssets.length;
+  const appliedTransactionCount = importedTransactions.length;
+  const importJob = createImportJobFromReview({
+    assetCount: appliedAssetCount,
+    duplicateCount,
+    fileName:
+      input.fileName?.trim() ||
+      `${connection.providerId}-${new Date().toISOString().slice(0, 10)}.txt`,
+    notes: buildSyncApplyNotes({
+      appliedAssetCount,
+      appliedTransactionCount,
+      duplicateCount,
+      mode,
+    }),
+    normalizationApplied: normalizedWarnings,
+    normalizedText: normalizedText ?? "",
+    rawText: input.sourceText ?? normalizedText ?? "",
+    review,
+    rowWarnings: execution.reviewedWarnings,
+    status: "completed",
+    transactionCount: appliedTransactionCount,
+  });
+
+  return {
+    appliedAssetCount,
+    appliedTransactionCount,
+    duplicateCount,
+    importJob,
+    nextAssets,
+    nextTransactions,
+  };
+}
+
+function buildSyncApplyNotes({
+  appliedAssetCount,
+  appliedTransactionCount,
+  duplicateCount,
+  mode,
+}: {
+  appliedAssetCount: number;
+  appliedTransactionCount: number;
+  duplicateCount: number;
+  mode: PortfolioImportMode;
+}) {
+  const parts: string[] = [];
+
+  if (appliedAssetCount > 0) {
+    parts.push(
+      duplicateCount && mode === "merge"
+        ? "Sync plan reviewed and applied with duplicate merge handling."
+        : "Sync plan holdings applied to the portfolio.",
+    );
+  }
+
+  if (appliedTransactionCount > 0) {
+    parts.push("Sync plan transactions added to the journal.");
+  }
+
+  return parts.join(" ").trim() || "Sync plan reviewed and applied to the portfolio.";
+}
+
+function getProviderSyncArtifacts(
+  connection: IntegrationConnection,
+  input: ProviderSyncInput,
+): ProviderSyncArtifacts {
+  const normalized = input.sourceText
+    ? normalizeImportTextForProvider({
+        providerId: connection.providerId,
+        text: input.sourceText,
+      })
+    : null;
+  const review = normalized
+    ? analyzeImportDocument({
+        fileName: input.fileName,
+        normalizationApplied: normalized.applied,
+        text: normalized.text,
+        usedOcr: input.usedOcr ?? false,
+      })
+    : null;
+  const importPreview = normalized
+    ? previewPortfolioImport(normalized.text, [])
+    : null;
+
+  return {
+    importPreview,
+    normalizedText: normalized?.text ?? null,
+    normalizedWarnings: normalized?.applied ?? [],
+    review,
+  };
+}
+
+function createFallbackSyncJob(
+  connection: IntegrationConnection,
+  execution: ProviderSyncExecutionResult,
+  now: Date,
+): ImportJob {
+  const iso = now.toISOString();
+
+  return {
+    assetCount: 0,
+    attemptCount: 1,
+    createdAt: iso,
+    transactionCount: 0,
+    documentId: crypto.randomUUID(),
+    documentKind: mapImportStrategyToDocumentKind(connection.importStrategy),
+    documentStoragePath: null,
+    duplicateCount: execution.reviewedWarnings.some((warning) => /duplicate/i.test(warning)) ? 1 : 0,
+    fileName: `${connection.providerId}-${iso.slice(0, 16).replace(/[:T]/g, "-")}.sync`,
+    id: crypto.randomUUID(),
+    lastActionAt: iso,
+    notes: execution.message,
+    normalizationApplied: [],
+    normalizedText: "",
+    parserProfileId: connection.providerId,
+    providerConfidence: "medium",
+    providerId: connection.providerId,
+    providerName: connection.providerName,
+    rawText: "",
+    reviewedCorrections: [],
+    rowWarnings: execution.reviewedWarnings,
+    status: execution.jobStatus,
+    summary: execution.summary,
+    usedOcr: false,
+  };
+}
+
+function mapImportStrategyToDocumentKind(
+  strategy: IntegrationConnection["importStrategy"],
+) {
+  switch (strategy) {
+    case "email-forward":
+      return "email-statement";
+    case "statement-upload":
+      return "pdf-statement";
+    case "csv-upload":
+      return "broker-export";
+    case "sync-ready":
+      return "table-export";
+    default:
+      return "unclassified";
+  }
 }
 
 function getProviderSteps(connection: IntegrationConnection) {

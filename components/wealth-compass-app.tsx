@@ -6,7 +6,10 @@ import type { SetStateAction } from "react";
 import { Academy } from "@/components/wealth/academy";
 import { AppHeader } from "@/components/wealth/app-header";
 import { AppSidebar, type ActiveView } from "@/components/wealth/app-sidebar";
-import { DataSettings } from "@/components/wealth/data-settings";
+import {
+  DataSettings,
+  type DataSettingsFocusRequest,
+} from "@/components/wealth/data-settings";
 import { Dashboard } from "@/components/wealth/dashboard";
 import { Goals } from "@/components/wealth/goals";
 import { MarketDashboard } from "@/components/wealth/market-dashboard";
@@ -64,7 +67,15 @@ import {
   saveCloudSnapshot,
   saveRiskProfileHistory,
 } from "@/lib/supabase-sync";
-import { derivePortfolioAssetsFromTransactions } from "@/lib/portfolio-rules";
+import {
+  derivePortfolioAssetsFromTransactions,
+  resolveSnapshotPortfolioAssets,
+} from "@/lib/portfolio-rules";
+import {
+  applyRuntimeBrokerSyncResult,
+  getRuntimeSyncEndpoint,
+  type RuntimeBrokerSyncResponse,
+} from "@/lib/runtime-connector-sync";
 import {
   calculateGoalMonthlyInvestment,
   calculateRiskProfile,
@@ -103,6 +114,9 @@ export function WealthCompassApp() {
   const [userId, setUserId] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [hasHydratedCloudWorkspace, setHasHydratedCloudWorkspace] = useState(false);
+  const [settingsFocusRequestKey, setSettingsFocusRequestKey] = useState(0);
+  const [settingsFocusRequest, setSettingsFocusRequest] =
+    useState<DataSettingsFocusRequest | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [lastSyncedRevision, setLastSyncedRevision] = useState(0);
   const [isCloudSaveInFlight, setIsCloudSaveInFlight] = useState(false);
@@ -139,9 +153,10 @@ export function WealthCompassApp() {
     marketPreferences: MarketPreferences;
     transactions: PortfolioTransaction[];
   }) {
-    const derivedAssets = snapshot.transactions.length
-      ? derivePortfolioAssetsFromTransactions(snapshot.transactions, snapshot.assets)
-      : snapshot.assets;
+    const derivedAssets = resolveSnapshotPortfolioAssets(
+      snapshot.transactions,
+      snapshot.assets,
+    );
 
     setAnswers(snapshot.answers);
     setAssets(derivedAssets);
@@ -171,6 +186,8 @@ export function WealthCompassApp() {
 
   useEffect(() => {
     if (!hasLoadedSnapshot) return;
+    if (userId && !hasHydratedCloudWorkspace) return;
+
     const snapshot = {
       answers,
       assets,
@@ -180,7 +197,6 @@ export function WealthCompassApp() {
       marketPreferences,
       transactions,
     };
-    saveSnapshot(snapshot);
 
     if (userId) {
       saveSignedInWorkspaceCache({
@@ -188,12 +204,17 @@ export function WealthCompassApp() {
         snapshot,
         userId,
       });
+      return;
     }
+
+    saveSnapshot(snapshot);
+    saveRiskHistory(riskHistory);
   }, [
     answers,
     assets,
     goals,
     hasLoadedSnapshot,
+    hasHydratedCloudWorkspace,
     importJobs,
     integrations,
     marketPreferences,
@@ -222,12 +243,15 @@ export function WealthCompassApp() {
       if (shouldRestoreCachedWorkspaceAfterCloudError(cachedWorkspace) && cachedWorkspace) {
         const derivedCachedAssets = applySnapshotState(cachedWorkspace.snapshot);
         setRiskHistory(cachedWorkspace.riskHistory);
-        saveSnapshot({ ...cachedWorkspace.snapshot, assets: derivedCachedAssets });
-        saveRiskHistory(cachedWorkspace.riskHistory);
+        saveSignedInWorkspaceCache({
+          riskHistory: cachedWorkspace.riskHistory,
+          snapshot: { ...cachedWorkspace.snapshot, assets: derivedCachedAssets },
+          userId: user.id,
+        });
       }
 
       try {
-        const snapshot = await loadCloudSnapshot(client, user.id);
+        const { snapshot, updatedAt } = await loadCloudSnapshot(client, user.id);
         if (!isMounted) return;
         const history = await loadRiskProfileHistory(client, user.id);
         if (!isMounted) return;
@@ -239,6 +263,7 @@ export function WealthCompassApp() {
           cachedWorkspace,
           cloudHistory: history,
           cloudSnapshot: snapshot,
+          cloudUpdatedAt: updatedAt,
         });
         const derivedAssets = applySnapshotState(resolvedSnapshot);
         saveSnapshot({ ...resolvedSnapshot, assets: derivedAssets });
@@ -248,7 +273,6 @@ export function WealthCompassApp() {
           userId: user.id,
         });
         setRiskHistory(resolvedHistory);
-        saveRiskHistory(resolvedHistory);
         resetWorkspaceSyncTracking();
         setSyncStatus("Cloud synced");
         setSyncMessage(successMessage);
@@ -259,8 +283,11 @@ export function WealthCompassApp() {
         if (shouldRestoreCachedWorkspaceAfterCloudError(cachedWorkspace) && cachedWorkspace) {
           const derivedAssets = applySnapshotState(cachedWorkspace.snapshot);
           setRiskHistory(cachedWorkspace.riskHistory);
-          saveSnapshot({ ...cachedWorkspace.snapshot, assets: derivedAssets });
-          saveRiskHistory(cachedWorkspace.riskHistory);
+          saveSignedInWorkspaceCache({
+            riskHistory: cachedWorkspace.riskHistory,
+            snapshot: { ...cachedWorkspace.snapshot, assets: derivedAssets },
+            userId: user.id,
+          });
           setSyncStatus("Cloud error");
           setSyncMessage("Cloud refresh failed, so the last saved browser copy was restored.");
         } else {
@@ -279,7 +306,7 @@ export function WealthCompassApp() {
 
       if (!isMounted) return;
       if (!user) {
-        const snapshot = loadSnapshot();
+        const snapshot = loadSnapshot(emptySignedInSnapshot);
         applySnapshotState(snapshot);
         setRiskHistory(loadRiskHistory());
         resetWorkspaceSyncTracking();
@@ -299,7 +326,7 @@ export function WealthCompassApp() {
       data: { subscription },
     } = client.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
-        const snapshot = loadSnapshot();
+        const snapshot = loadSnapshot(emptySignedInSnapshot);
         applySnapshotState(snapshot);
         setRiskHistory(loadRiskHistory());
         setUserId("");
@@ -431,9 +458,9 @@ export function WealthCompassApp() {
     const historyItem = createRiskHistoryItem(profile);
     const nextHistory = [historyItem, ...riskHistory].slice(0, 12);
     setRiskHistory(nextHistory);
-    saveRiskHistory(nextHistory);
 
     if (!supabase || !userId) {
+      saveRiskHistory(nextHistory);
       setSyncStatus(isSupabaseConfigured() ? "Local saved" : "Local demo");
       setSyncMessage("Risk profile saved in this browser.");
       return;
@@ -466,7 +493,6 @@ export function WealthCompassApp() {
       });
       const history = await loadRiskProfileHistory(supabase, userId);
       setRiskHistory(history);
-      saveRiskHistory(history);
       setLastSyncedRevision(targetRevision);
       if (workspaceRevisionRef.current > targetRevision) {
         setSyncStatus("Changes pending");
@@ -486,6 +512,12 @@ export function WealthCompassApp() {
   async function handleSignOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
+  }
+
+  function handleOpenSettingsFocus(request: DataSettingsFocusRequest) {
+    setSettingsFocusRequest(request);
+    setSettingsFocusRequestKey((current) => current + 1);
+    setActiveView("settings");
   }
 
   function handleResetPortfolio() {
@@ -519,10 +551,23 @@ export function WealthCompassApp() {
     markWorkspaceChanged("Portfolio import applied.");
   }
 
-  function handleImportBrokerAssets(nextAssets: PortfolioAsset[], job: ImportJob) {
-    setAssets(nextAssets);
+  function handleImportBrokerAssets(
+    nextAssets: PortfolioAsset[],
+    job: ImportJob,
+    nextTransactions?: PortfolioTransaction[],
+  ) {
+    if (nextTransactions) {
+      setTransactions(nextTransactions);
+      setAssets(derivePortfolioAssetsFromTransactions(nextTransactions, nextAssets));
+    } else {
+      setAssets(nextAssets);
+    }
     setImportJobs((current) => [job, ...current].slice(0, 20));
-    markWorkspaceChanged("Broker holdings sync applied.");
+    markWorkspaceChanged(
+      nextTransactions?.length
+        ? "Import history applied to holdings and transactions."
+        : "Broker holdings sync applied.",
+    );
   }
 
   function handleDeleteAsset(assetIndex: number) {
@@ -564,7 +609,6 @@ export function WealthCompassApp() {
       setMarketPreferences(emptySignedInSnapshot.marketPreferences);
       setTransactions(emptySignedInSnapshot.transactions);
       setRiskHistory([]);
-      saveRiskHistory([]);
       markWorkspaceChanged("Signed-in workspace cleared. Add your own portfolio to begin tracking.");
       return;
     }
@@ -614,9 +658,10 @@ export function WealthCompassApp() {
   }
 
   function handleImportWorkspace(workspace: WealthCompassImport) {
-    const derivedAssets = workspace.transactions.length
-      ? derivePortfolioAssetsFromTransactions(workspace.transactions, workspace.assets)
-      : workspace.assets;
+    const derivedAssets = resolveSnapshotPortfolioAssets(
+      workspace.transactions,
+      workspace.assets,
+    );
     setAnswers(workspace.answers);
     setAssets(derivedAssets);
     setGoals(workspace.goals);
@@ -625,7 +670,9 @@ export function WealthCompassApp() {
     setMarketPreferences(workspace.marketPreferences);
     setTransactions(workspace.transactions);
     setRiskHistory(workspace.riskHistory);
-    saveRiskHistory(workspace.riskHistory);
+    if (!userId) {
+      saveRiskHistory(workspace.riskHistory);
+    }
     markWorkspaceChanged("Imported workspace data.");
   }
 
@@ -689,50 +736,90 @@ export function WealthCompassApp() {
         : `Running ${targetConnections.length} integration sync checkpoints.`,
     );
 
-    try {
-      const response = await fetch("/api/integration-sync", {
-        body: JSON.stringify({
-          connectionId,
-          importJobs,
-          integrations: safeIntegrations,
-          mode,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
+    let nextAssets = safeAssets;
+    let nextImportJobs = importJobs;
+    let nextIntegrations = safeIntegrations;
+    const syncedConnectionIds: string[] = [];
+    const runtimeMessages: string[] = [];
+    const runtimeSyncedIds = new Set<string>();
 
-      if (!response.ok) {
-        throw new Error("Integration sync route unavailable.");
+    if (supabase && userId) {
+      const sessionResult = await supabase.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+
+      if (accessToken) {
+        for (const connection of targetConnections) {
+          const endpoint = getRuntimeSyncEndpoint(connection);
+          if (!endpoint) continue;
+
+          try {
+            const response = await fetch(endpoint, {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+              method: "POST",
+            });
+
+            if (!response.ok) {
+              throw new Error("Runtime connector sync unavailable.");
+            }
+
+            const data = (await response.json()) as RuntimeBrokerSyncResponse;
+            const applied = applyRuntimeBrokerSyncResult({
+              connection,
+              currentImportJobs: nextImportJobs,
+              payload: data,
+            });
+
+            nextAssets = applied.nextAssets;
+            nextImportJobs = applied.nextImportJobs;
+            nextIntegrations = nextIntegrations.map((integration) =>
+              integration.id === connection.id ? applied.nextConnection : integration,
+            );
+            runtimeSyncedIds.add(connection.id);
+            syncedConnectionIds.push(connection.id);
+            runtimeMessages.push(applied.statusMessage);
+          } catch {
+            // Fall back to the local checkpoint path below for connectors without a live route.
+          }
+        }
       }
+    }
 
-      const result = (await response.json()) as {
-        importJobs: ImportJob[];
-        integrations: IntegrationConnection[];
-        syncedConnectionIds: string[];
-      };
+    const fallbackConnections = targetConnections.filter(
+      (connection) => !runtimeSyncedIds.has(connection.id),
+    );
 
-      setIntegrations(result.integrations);
-      setImportJobs(result.importJobs);
-      markWorkspaceChanged(
-        result.syncedConnectionIds.length === 1
-          ? `${targetConnections[0].providerName} sync checkpoint recorded.`
-          : `${result.syncedConnectionIds.length} integration sync checkpoints recorded.`,
-      );
-    } catch {
-      const fallback = executeIntegrationSyncBatch(safeIntegrations, {
-        connectionId,
-        importJobs,
-        mode,
+    if (fallbackConnections.length) {
+      const fallback = executeIntegrationSyncBatch(fallbackConnections, {
+        connectionId:
+          mode === "single" ? fallbackConnections[0]?.id : undefined,
+        importJobs: nextImportJobs,
+        mode: fallbackConnections.length === 1 && mode === "single" ? "single" : "all-active",
       });
 
-      setIntegrations(fallback.integrations);
-      setImportJobs(fallback.importJobs);
-      markWorkspaceChanged(
-        fallback.syncedConnectionIds.length === 1
-          ? `${targetConnections[0].providerName} sync checkpoint recorded locally.`
-          : `${fallback.syncedConnectionIds.length} integration sync checkpoints recorded locally.`,
-      );
+      nextImportJobs = fallback.importJobs;
+      nextIntegrations = nextIntegrations.map((integration) => {
+        const updated = fallback.integrations.find((item) => item.id === integration.id);
+        return updated ?? integration;
+      });
+      syncedConnectionIds.push(...fallback.syncedConnectionIds);
     }
+
+    setAssets(nextAssets);
+    setImportJobs(nextImportJobs);
+    setIntegrations(nextIntegrations);
+
+    if (runtimeMessages.length === 1 && syncedConnectionIds.length === 1) {
+      markWorkspaceChanged(runtimeMessages[0]);
+      return;
+    }
+
+    markWorkspaceChanged(
+      syncedConnectionIds.length === 1
+        ? `${targetConnections[0].providerName} sync checkpoint recorded.`
+        : `${syncedConnectionIds.length} integration sync checkpoints recorded.`,
+    );
   }
 
   function handleLogImportJob(job: ImportJob) {
@@ -811,11 +898,11 @@ export function WealthCompassApp() {
   }
 
   return (
-    <main className="min-h-screen">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-4 sm:px-6 lg:flex-row lg:py-6">
+    <main className="market-grid min-h-screen">
+      <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-5 px-4 py-4 sm:px-6 lg:flex-row lg:gap-6 lg:px-8 lg:py-5">
         <AppSidebar activeView={activeView} onNavigate={setActiveView} />
 
-        <section className="min-w-0 flex-1">
+        <section className="min-w-0 flex-1 pb-8">
           <AppHeader
             connectorAttention={connectorAttention}
             onSaveRiskHistory={handleSaveRiskHistory}
@@ -827,7 +914,7 @@ export function WealthCompassApp() {
             userEmail={userEmail}
           />
           {isCloudWorkspaceInitializing ? (
-            <div className="rounded-lg border bg-card p-6 shadow-sm">
+            <div className="rounded-xl border border-white/70 bg-card/90 p-6 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.28)] backdrop-blur-sm">
               <p className="text-sm font-medium">Preparing your workspace</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 We are loading your signed-in data before the app becomes editable.
@@ -839,15 +926,20 @@ export function WealthCompassApp() {
               goals={goals}
               healthScore={healthScore}
               integrations={safeIntegrations}
+              importJobs={importJobs}
               monthlyGoal={monthlyGoal}
               onNavigate={(view) => setActiveView(view)}
+              onOpenConnectorFocus={handleOpenSettingsFocus}
+              onRunIntegrationSync={handleRunIntegrationSync}
               portfolioTotal={portfolioTotal}
               profile={profile}
               transactions={transactions}
             />
           ) : activeView === "onboarding" ? (
-            <Onboarding answers={answers} onChange={handleUpdateAnswers} profile={profile} />
-          ) : activeView === "academy" ? <Academy /> : activeView === "portfolio" ? (
+            <Onboarding answers={answers} onChange={handleUpdateAnswers} />
+          ) : activeView === "academy" ? (
+            <Academy answers={answers} profile={profile} />
+          ) : activeView === "portfolio" ? (
             <Portfolio
               assets={safeAssets}
               onAddAsset={handleAddAsset}
@@ -879,6 +971,7 @@ export function WealthCompassApp() {
               marketPreferences={marketPreferences}
               onRunIntegrationSync={handleRunIntegrationSync}
               onUpdatePreferences={handleUpdateMarketPreferences}
+              profile={profile}
             />
           ) : activeView === "mentor" ? (
             <MentorPanel answers={answers} assets={safeAssets} profile={profile} />
@@ -886,6 +979,8 @@ export function WealthCompassApp() {
             <DataSettings
               answers={answers}
               assets={safeAssets}
+              focusRequestKey={settingsFocusRequestKey}
+              focusRequest={settingsFocusRequest}
               goals={goals}
               integrations={safeIntegrations}
               importJobs={importJobs}

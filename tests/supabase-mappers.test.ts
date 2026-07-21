@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  coerceSupabaseUuid,
   mapImportJobRowToJob,
   mapImportDocumentRowToJob,
   mapImportJobToDocumentInsert,
@@ -32,11 +33,16 @@ const answers: RiskAnswers = {
   age: 40,
   annualIncome: 150000,
   country: "US",
+  decisionStyle: "active",
   debtLevel: "none",
+  dependents: 2,
   emergencyMonths: 9,
   experience: "confident",
   horizonYears: 12,
+  incomeStability: "very-steady",
+  liquidityNeeds: "low",
   marketDropResponse: "buy",
+  postLearningDropResponse: "buy",
   monthlyInvestment: 2500,
   monthlySavings: 5000,
   primaryGoal: "retirement",
@@ -50,11 +56,16 @@ describe("profile mappers", () => {
       age: 40,
       annual_income: 150000,
       country: "US",
+      decision_style: "active",
       debt_level: "none",
+      dependents: 2,
       emergency_months: 9,
       experience: "confident",
       horizon_years: 12,
+      income_stability: "very-steady",
+      liquidity_needs: "low",
       market_drop_response: "buy",
+      post_learning_drop_response: "buy",
       monthly_investment: 2500,
       monthly_savings: 5000,
       primary_goal: "retirement",
@@ -68,11 +79,16 @@ describe("profile mappers", () => {
       age: null,
       annual_income: 90000,
       country: null,
+      decision_style: null,
       debt_level: null,
+      dependents: null,
       emergency_months: null,
       experience: "some",
       horizon_years: 6,
+      income_stability: null,
+      liquidity_needs: null,
       market_drop_response: null,
+      post_learning_drop_response: null,
       monthly_investment: null,
       monthly_savings: 2000,
       primary_goal: "home",
@@ -160,7 +176,7 @@ describe("goal mappers", () => {
     assert.deepEqual(mapGoalToInsert(goal, "user-1"), {
       current_amount: 10000,
       expected_return: 7,
-      id: "goal-1",
+      id: coerceSupabaseUuid("goal-1"),
       name: "Education",
       priority: "essential",
       target_amount: 500000,
@@ -294,7 +310,7 @@ describe("integration mappers", () => {
 
     assert.deepEqual(mapIntegrationToImportSourceInsert(mapped, "user-1"), {
       channel: "broker",
-      id: "integration-1",
+      id: coerceSupabaseUuid("integration-1"),
       last_synced_at: null,
       metadata: {
         importStrategy: "statement-upload",
@@ -366,7 +382,6 @@ describe("import job mappers", () => {
   it("maps import job rows and insert payloads", () => {
     const mapped = mapImportJobRowToJob({
       created_assets: 4,
-      created_at: "2026-07-11T00:00:00.000Z",
       created_transactions: 0,
       error_message: null,
       id: "job-1",
@@ -392,6 +407,7 @@ describe("import job mappers", () => {
         summary: "CAMS pdf statement looks import-ready (88/100).",
         usedOcr: false,
       },
+      started_at: "2026-07-11T00:00:00.000Z",
       status: "completed",
     });
 
@@ -402,16 +418,17 @@ describe("import job mappers", () => {
     assert.equal(mapped.fileName, "cams.pdf");
     assert.equal(mapped.parserProfileId, "cams");
     assert.equal(mapped.status, "completed");
+    assert.equal(mapped.transactionCount, 0);
 
     assert.deepEqual(mapImportJobToInsert(mapped, "user-1"), {
       created_assets: 4,
       created_transactions: 0,
       error_message: null,
-      id: "job-1",
-      import_document_id: "document-1",
+      id: coerceSupabaseUuid("job-1"),
+      import_document_id: coerceSupabaseUuid("document-1"),
       job_payload: {
         attemptCount: 2,
-        documentId: "document-1",
+        documentId: coerceSupabaseUuid("document-1"),
         documentKind: "pdf-statement",
         documentStoragePath: "import-documents/document-1/cams.pdf",
         duplicateCount: 1,
@@ -435,7 +452,7 @@ describe("import job mappers", () => {
     });
 
     assert.deepEqual(mapImportJobToDocumentInsert(mapped, "user-1"), {
-      id: "document-1",
+      id: coerceSupabaseUuid("document-1"),
       detected_provider: "cams",
       extracted_text: "Page 1 of 2\nScheme Name\tCurrent Value",
       file_name: "cams.pdf",
@@ -452,6 +469,7 @@ describe("import job mappers", () => {
         reviewedCorrections: ["Merged duplicate folio rows."],
         rowWarnings: ["Duplicate detected for Axis Bluechip Fund (Mutual Fund)."],
         selectedAssetCount: 4,
+        selectedTransactionCount: 0,
         summary: "CAMS pdf statement looks import-ready (88/100).",
         usedOcr: false,
       },
@@ -479,6 +497,7 @@ describe("import job mappers", () => {
         reviewedCorrections: ["Confirmed merged folios."],
         rowWarnings: ["Units or price missing."],
         selectedAssetCount: 3,
+        selectedTransactionCount: 2,
         summary: "Paytm statement needs review.",
         usedOcr: true,
       },
@@ -491,6 +510,7 @@ describe("import job mappers", () => {
     assert.equal(mapped.status, "reviewed");
     assert.equal(mapped.assetCount, 3);
     assert.equal(mapped.duplicateCount, 2);
+    assert.equal(mapped.transactionCount, 2);
     assert.equal(mapped.rawText, "raw statement text");
     assert.equal(mapped.normalizedText, "normalized statement text");
     assert.equal(mapped.usedOcr, true);

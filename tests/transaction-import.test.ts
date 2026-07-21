@@ -70,4 +70,37 @@ Growth	43268646	0.810	₹	1,234.1590	₹	1,000.00	Confirmed
     );
     assert.equal(result.transactions[3].amount, 1000);
   });
+
+  it("keeps multiline Paytm scheme names intact in legacy extracted text", () => {
+    const result = parseImportedTransactions(`Investment Transaction Summary
+Date*	Date*	Mutual Fund Scheme Name	Mutual Fund Scheme Name	Folio No	Folio No	Type	Type	Units	Units	NAV	NAV	Amount	Amount	Status	Status
+HDFC Large Cap Fund Direct Plan-
+03 Jul	Purchase -
+Growth	43268646	0.810	₹	1,234.1590	₹	1,000.00	Confirmed
+2026	SIP
+(Equity - Large Cap)
+03 Jul	Edelweiss Mid Cap Direct Plan-Growth	Purchase -
+91050161892	3.935	₹	127.0640	₹	500.00	Confirmed
+2026	(Equity - Mid Cap)	SIP
+03 Jul	Bandhan Small Cap Fund Direct-Growth	Purchase -
+9397378	9.013	₹	55.4730	₹	500.00	Confirmed
+2026	(Equity - Small Cap)	SIP
+Quant Small Cap Fund Direct Plan-
+03 Jul	Purchase -
+Growth	510106862082	3.189	₹	313.5792	₹	1,000.00	Confirmed
+2026	SIP
+(Equity - Small Cap)
+*Transactions details shown is as per the units allocation date.`);
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(
+      result.transactions.map((transaction) => transaction.assetName),
+      [
+        "HDFC Large Cap Fund Direct Plan-Growth",
+        "Edelweiss Mid Cap Direct Plan-Growth",
+        "Bandhan Small Cap Fund Direct-Growth",
+        "Quant Small Cap Fund Direct Plan-Growth",
+      ],
+    );
+  });
 });

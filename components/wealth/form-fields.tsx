@@ -4,10 +4,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function NumberField({
+  inputTestId,
   label,
   onChange,
   value,
 }: {
+  inputTestId?: string;
   label: string;
   onChange: (value: number) => void;
   value: number;
@@ -18,6 +20,7 @@ export function NumberField({
     <div className="grid gap-2">
       <Label htmlFor={fieldId}>{label}</Label>
       <Input
+        data-testid={inputTestId}
         id={fieldId}
         min={0}
         type="number"
@@ -29,10 +32,12 @@ export function NumberField({
 }
 
 export function TextField({
+  inputTestId,
   label,
   onChange,
   value,
 }: {
+  inputTestId?: string;
   label: string;
   onChange: (value: string) => void;
   value: string;
@@ -42,7 +47,12 @@ export function TextField({
   return (
     <div className="grid gap-2">
       <Label htmlFor={fieldId}>{label}</Label>
-      <Input id={fieldId} value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input
+        data-testid={inputTestId}
+        id={fieldId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }
@@ -51,11 +61,13 @@ export function SelectField({
   label,
   onChange,
   options,
+  selectTestId,
   value,
 }: {
   label: string;
   onChange: (value: string) => void;
   options: Array<[string, string]>;
+  selectTestId?: string;
   value: string;
 }) {
   const fieldId = useId();
@@ -64,6 +76,7 @@ export function SelectField({
     <div className="grid gap-2">
       <Label htmlFor={fieldId}>{label}</Label>
       <select
+        data-testid={selectTestId}
         id={fieldId}
         className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={value}
