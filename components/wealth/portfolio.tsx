@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -22,9 +22,11 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
 import { Roadmap } from "@/components/wealth/roadmap";
 import { HealthCheck } from "@/components/wealth/health-check";
 import { MetricMini } from "@/components/wealth/metric-mini";
+import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
 import { Badge } from "@/components/ui/badge";
 import {
   NumberField,
@@ -78,6 +80,7 @@ import {
   type PortfolioAsset,
   type PortfolioTransaction,
 } from "@/lib/local-storage";
+import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import {
   calculatePortfolioInvestedValue,
   getAllocationInsights,
@@ -106,14 +109,32 @@ const defaultDraftAsset: PortfolioAsset = {
   value: 25000,
 };
 
+export type PortfolioFocusTarget =
+  | "import-review"
+  | "manual-entry"
+  | "transaction-journal";
+export type PortfolioReturnState = {
+  csvText: string;
+  importArtifacts: ImportDiagnostics | null;
+  importReview: ImportReview | null;
+  uploadedFileLabel: string | null;
+  uploadedImportStatus: "idle" | "selected" | "processing" | "ready" | "error";
+  uploadedImportText: string;
+};
+
 export function Portfolio({
   assets,
+  focusRequest,
+  focusRequestKey,
+  returnState,
+  mentorRevision,
   onAddAsset,
   onAddTransaction,
   onDeleteAsset,
   onDeleteTransaction,
   onImportAssets,
   onLogImportJob,
+  onOpenMentor,
   onResetAssets,
   onUpdateAsset,
   portfolioTotal,
@@ -121,12 +142,17 @@ export function Portfolio({
   transactions,
 }: {
   assets: PortfolioAsset[];
+  focusRequest?: PortfolioFocusTarget | null;
+  focusRequestKey?: number;
+  returnState?: PortfolioReturnState | null;
+  mentorRevision: number;
   onAddAsset: (asset: PortfolioAsset) => void;
   onAddTransaction: (transaction: PortfolioTransaction) => void;
   onDeleteAsset: (assetIndex: number) => void;
   onDeleteTransaction: (transactionId: string) => void;
   onImportAssets: (assets: PortfolioAsset[]) => void;
   onLogImportJob: (job: ImportJob) => void;
+  onOpenMentor: (request: MentorLaunchRequest) => void;
   onResetAssets: () => void;
   onUpdateAsset: (assetIndex: number, asset: PortfolioAsset) => void;
   portfolioTotal: number;
@@ -154,6 +180,9 @@ export function Portfolio({
   const [draftTransaction, setDraftTransaction] = useState<PortfolioTransaction>(
     createPortfolioTransaction(),
   );
+  const manualEntryRef = useRef<HTMLDivElement | null>(null);
+  const importReviewRef = useRef<HTMLDivElement | null>(null);
+  const transactionJournalRef = useRef<HTMLDivElement | null>(null);
   const safeAssets = useMemo(() => coercePortfolioAssets(assets, []), [assets]);
   const exportedCsv = useMemo(() => portfolioAssetsToCsv(safeAssets), [safeAssets]);
   const hasUploadedImport = uploadedImportText.trim().length > 0;
@@ -211,6 +240,33 @@ export function Portfolio({
       transactionImportPreview.transactions.length - newTransactionImportPreview.length,
     [newTransactionImportPreview.length, transactionImportPreview.transactions.length],
   );
+
+  useEffect(() => {
+    if (!focusRequest) return;
+
+    window.requestAnimationFrame(() => {
+      (
+        {
+          "import-review": importReviewRef,
+          "manual-entry": manualEntryRef,
+          "transaction-journal": transactionJournalRef,
+        } satisfies Record<PortfolioFocusTarget, typeof importReviewRef>
+      )[focusRequest]?.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [focusRequest, focusRequestKey]);
+
+  useEffect(() => {
+    if (!returnState) return;
+    setCsvText(returnState.csvText);
+    setImportArtifacts(returnState.importArtifacts);
+    setImportReview(returnState.importReview);
+    setUploadedFileLabel(returnState.uploadedFileLabel);
+    setUploadedImportStatus(returnState.uploadedImportStatus);
+    setUploadedImportText(returnState.uploadedImportText);
+  }, [returnState, focusRequestKey]);
   const combinedImportOverview = useMemo(
     () =>
       buildCombinedImportOverview({
@@ -254,6 +310,17 @@ export function Portfolio({
   const learningTrack =
     profile.actionBaskets.find((basket) => basket.id === "understand") ??
     profile.actionBaskets[0];
+  const portfolioMentorReturnState = {
+    csvText,
+    importArtifacts,
+    importReview,
+    uploadedFileLabel,
+    uploadedImportStatus,
+    uploadedImportText,
+  } satisfies PortfolioReturnState;
+  const importHelpLabel = hasUploadedImport
+    ? "Ask AI mentor about this import"
+    : "Ask AI mentor how to structure your portfolio";
   const portfolioHeadline =
     safeAssets.length === 0
       ? "Start with one holding or one imported statement"
@@ -280,6 +347,49 @@ export function Portfolio({
     safeAssets.length === 0
       ? "Load a statement, add a first holding, or start the transaction journal so allocation, health checks, and coaching can become specific."
       : "This page works best when holdings, invested basis, and transactions are all captured well enough to support cleaner allocation and health signals.";
+  const operatingDeskMentorPrompt = hasUploadedImport
+    ? [
+        `I uploaded ${uploadedFileLabel ?? "a statement"} and the portfolio desk says "${operatingHeadline}".`,
+        `Right now I have ${safeAssets.length} holdings, ${transactions.length} tracked transactions, and ${formatMoney(portfolioTotal)} in tracked value.`,
+        importReview
+          ? `The review reads ${importReview.providerConfidence ?? "unknown"} provider confidence with ${importReview.parseReadiness ?? "unknown"} readiness.`
+          : "The import review has not been analyzed yet.",
+        importPreview.assets.length > 0 || transactionImportPreview.transactions.length > 0
+          ? `The preview currently shows ${importPreview.assets.length} holding rows and ${transactionImportPreview.transactions.length} transaction rows.`
+          : "No useful rows have been parsed into preview yet.",
+        `Help me decide what to trust, what to verify manually, and whether I should merge this import now.`,
+      ].join(" ")
+    : [
+        `The portfolio desk says "${operatingHeadline}".`,
+        `I currently have ${safeAssets.length} holdings, ${transactions.length} tracked transactions, and ${formatMoney(portfolioTotal)} in tracked value.`,
+        `My diversification score is ${diversificationScore}/100 and the portfolio read is "${portfolioHeadline}".`,
+        `Help me understand how to structure the portfolio from here and what to clean up first.`,
+      ].join(" ");
+  const importLaneMentorPrompt = [
+    `Before I import ${uploadedFileLabel ?? "this statement"}, tell me what I should check so I do not merge messy or misleading portfolio data.`,
+    uploadedImportStatus === "ready"
+      ? "The upload is ready for review."
+      : uploadedImportStatus === "processing"
+        ? "The upload is still processing."
+        : hasUploadedImport
+          ? "An uploaded source is already loaded into the review lane."
+          : "I am still at the paste-or-upload stage.",
+    `Current parser preview: ${importPreview.assets.length} holding rows, ${transactionImportPreview.transactions.length} transaction rows, ${importPreview.duplicates.length} holding duplicates, and ${duplicateTransactionCount} duplicate transactions.`,
+    importArtifacts ? `Diagnostics summary: ${importArtifacts.summary}.` : null,
+    `Help me know what to inspect first before I import anything.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const importReviewMentorPrompt = [
+    `Walk me through this import review.`,
+    `The provider confidence is ${importReview?.providerConfidence ?? "unknown"} and parse readiness is ${importReview?.parseReadiness ?? "unknown"}.`,
+    `The current file is ${uploadedFileLabel ?? "manual text"}.`,
+    `The preview currently has ${importPreview.assets.length} holdings, ${importPreview.duplicates.length} duplicate holdings, ${transactionImportPreview.transactions.length} parsed transactions, and ${newTransactionImportPreview.length} transaction rows ready after deduping.`,
+    importReview?.warnings?.length
+      ? `Warnings: ${importReview.warnings.join(" ")}`
+      : "There are no parser warnings right now.",
+    `Tell me what looks reliable, what needs a manual check, and what I should do next.`,
+  ].join(" ");
 
   useEffect(() => {
     setSelectedImportKeys(
@@ -678,6 +788,16 @@ export function Portfolio({
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
                 {operatingSubcopy}
               </p>
+              <div className="mt-3">
+                <AskMentorLink
+                  label={importHelpLabel}
+                  returnState={portfolioMentorReturnState}
+                  mentorPrompt={operatingDeskMentorPrompt}
+                  mentorQuestionId="allocation"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Portfolio operating desk"
+                />
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border/70 bg-muted/20 p-4">
@@ -709,6 +829,16 @@ export function Portfolio({
                     ? "A statement is ready for review before you merge anything into the portfolio."
                     : "CSV, email text, HTML tables, and OCR-backed PDFs can all flow through the same review lane."}
                 </p>
+                <div className="mt-3">
+                  <AskMentorLink
+                    label="Ask AI mentor before importing"
+                    returnState={portfolioMentorReturnState}
+                    mentorPrompt={importLaneMentorPrompt}
+                    mentorQuestionId="allocation"
+                    onOpenMentor={onOpenMentor}
+                    sourceLabel="Portfolio import lane"
+                  />
+                </div>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -831,6 +961,16 @@ export function Portfolio({
                 </p>
               </div>
             </div>
+            <MentorOpenCue
+              cueLabel="Still open before importing"
+              description="You already have an open mentor thread that could help you review this portfolio setup or import decision before you merge more data."
+              mentorRevision={mentorRevision}
+              onOpenMentor={onOpenMentor}
+              questionIds={["allocation", "etf", "gold", "tax"]}
+              resumeLabel="Check this with AI mentor"
+              sourceLabel="Portfolio"
+              stuckLabel="Unblock this before importing more"
+            />
           </div>
           <div className="grid gap-3 md:grid-cols-4">
             <MetricMini label="Tracked value" value={formatMoney(portfolioTotal)} />
@@ -839,6 +979,7 @@ export function Portfolio({
             <MetricMini label="Diversification" value={`${diversificationScore}/100`} />
           </div>
           <div
+            ref={manualEntryRef}
             className="grid gap-3 rounded-md border bg-muted/30 p-3"
           >
             <div>
@@ -851,6 +992,7 @@ export function Portfolio({
           </div>
 
           <div
+            ref={transactionJournalRef}
             className="grid gap-3 rounded-md border bg-muted/30 p-3"
             data-testid="transaction-journal"
             aria-label="Transaction journal"
@@ -957,7 +1099,10 @@ export function Portfolio({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div
+            ref={importReviewRef}
+            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+          >
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
                 <p className="text-sm font-medium">Import and review</p>
@@ -1049,6 +1194,16 @@ export function Portfolio({
                       ? `${importPreview.assets.length} holding${importPreview.assets.length === 1 ? "" : "s"} and ${transactionImportPreview.transactions.length} transaction row${transactionImportPreview.transactions.length === 1 ? "" : "s"} are currently in preview.`
                       : "No parsed rows yet. The review starts becoming useful once real statement text or a file has been loaded."}
                   </p>
+                  <div className="mt-3">
+                    <AskMentorLink
+                      label="Ask AI mentor about this review"
+                      returnState={portfolioMentorReturnState}
+                      mentorPrompt={importReviewMentorPrompt}
+                      mentorQuestionId="allocation"
+                      onOpenMentor={onOpenMentor}
+                      sourceLabel="Portfolio import review"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

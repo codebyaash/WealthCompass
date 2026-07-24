@@ -26,6 +26,8 @@ import {
   TrendingUp,
   WalletCards,
 } from "lucide-react";
+import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
+import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +39,7 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Roadmap } from "@/components/wealth/roadmap";
+import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import {
   buildPortfolioTrajectory,
   getDashboardAction,
@@ -102,8 +105,10 @@ export function Dashboard({
   healthScore,
   integrations,
   importJobs,
+  mentorRevision,
   monthlyGoal,
   onNavigate,
+  onOpenMentor,
   onOpenConnectorFocus,
   onRunIntegrationSync,
   portfolioTotal,
@@ -115,8 +120,10 @@ export function Dashboard({
   healthScore: number;
   integrations: IntegrationConnection[];
   importJobs: ImportJob[];
+  mentorRevision: number;
   monthlyGoal: number;
   onNavigate: (view: DashboardNavigationTarget) => void;
+  onOpenMentor: (request: MentorLaunchRequest) => void;
   onOpenConnectorFocus: (request: DataSettingsFocusRequest) => void;
   onRunIntegrationSync: (connectionId?: string) => void | Promise<void>;
   portfolioTotal: number;
@@ -234,6 +241,23 @@ export function Dashboard({
       label: "Goal pressure",
     },
   ];
+  const dashboardMentorPrompt = [
+    `My dashboard next action is "${isFreshWorkspace ? "Complete onboarding" : action.cta}" and my health score is ${healthScore}.`,
+    `I have ${goals.length} goals, ${assets.length} holdings, ${integrations.length} connector workflows, and ${importJobs.length} import job records.`,
+    totalMonthlyContributions > 0
+      ? `${formatMoney(totalMonthlyContributions)} is moving monthly across goals and investing.`
+      : "I do not yet have a stable monthly investing rhythm.",
+    connectorAttention.count > 0
+      ? `${connectorAttention.count} connector or import workflow items currently need attention.`
+      : "No connector workflows are asking for attention right now.",
+    goals.length > 0
+      ? `Goal progress is ${goalProgress}% against a total target of ${formatMoney(totalGoalTarget)}.`
+      : "I have not defined any live goals yet.",
+    portfolioTotal > 0
+      ? `Tracked portfolio value is ${formatMoney(portfolioTotal)}.`
+      : "I do not have tracked portfolio value yet.",
+    `Help me decide what deserves my attention first across onboarding, portfolio, goals, connectors, and learning.`,
+  ].join(" ");
   const latestImportJobByProviderId = useMemo(() => {
     const nextMap = new Map<string, ImportJob>();
 
@@ -673,6 +697,13 @@ export function Dashboard({
                 {isFreshWorkspace ? "Complete onboarding" : action.cta}
                 <ArrowRight className="h-4 w-4" />
               </Button>
+              <AskMentorLink
+                label="Ask AI mentor"
+                mentorPrompt={dashboardMentorPrompt}
+                mentorQuestionId="first-investment"
+                onOpenMentor={onOpenMentor}
+                sourceLabel="Dashboard summary"
+              />
               <Button type="button" variant="outline" onClick={() => onNavigate("portfolio")}>
                 Open portfolio
               </Button>
@@ -687,6 +718,16 @@ export function Dashboard({
                 Review data feeds
               </Button>
             </div>
+            <MentorOpenCue
+              cueLabel="Still open before moving on"
+              description="You already have an open mentor thread that could help you choose the next best move across onboarding, goals, portfolio, or learning."
+              mentorRevision={mentorRevision}
+              onOpenMentor={onOpenMentor}
+              questionIds={["first-investment", "allocation", "sip", "risk"]}
+              resumeLabel="Use AI mentor to decide next"
+              sourceLabel="Dashboard"
+              stuckLabel="Unblock this before your next move"
+            />
           </div>
 
           <div className="grid gap-3 content-start">

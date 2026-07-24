@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightLeft,
   BookOpen,
@@ -12,6 +12,8 @@ import {
   SplitSquareVertical,
   Sparkles,
 } from "lucide-react";
+import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
+import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
 import {
   academyUseCases,
   buildAcademyTrackPlans,
@@ -32,13 +34,31 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import type { RiskAnswers, RiskProfile } from "@/lib/wealth-rules";
+
+export type AcademyFocusTarget = "comparator" | "track-plans" | "use-cases";
+export type AcademyReturnState = {
+  leftCategoryId: string;
+  rightCategoryId: string;
+  searchQuery: string;
+};
 
 export function Academy({
   answers,
+  focusRequest,
+  focusRequestKey,
+  returnState,
+  mentorRevision,
+  onOpenMentor,
   profile,
 }: {
   answers: RiskAnswers;
+  focusRequest?: AcademyFocusTarget | null;
+  focusRequestKey?: number;
+  returnState?: AcademyReturnState | null;
+  mentorRevision: number;
+  onOpenMentor: (request: MentorLaunchRequest) => void;
   profile: RiskProfile;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -103,12 +123,56 @@ export function Academy({
     () => buildAcademyTrackPlans({ answers, profile }),
     [answers, profile],
   );
+  const academyMentorReturnState = {
+    leftCategoryId: leftCategory.id,
+    rightCategoryId: rightCategory.id,
+    searchQuery,
+  } satisfies AcademyReturnState;
   const academyReadinessLabel =
     normalizedQuery.length > 0
       ? "Search in progress"
       : trackPlans.length > 0
         ? "Learning plan ready"
         : "Explore categories";
+  const academyMentorPrompt = [
+    `I am comparing ${leftCategory.name} versus ${rightCategory.name}${searchQuery.trim() ? ` while searching for "${searchQuery.trim()}"` : ""}.`,
+    `My current learning posture is ${academyReadinessLabel}.`,
+    `My profile is ${profile.band} with ${profile.confidence} confidence, and my investing personality reads as ${profile.personality}.`,
+    `My main goal is ${answers.primaryGoal}, my experience level is ${answers.experience}, and my current market-drop response is ${answers.marketDropResponse}.`,
+    trackPlans[0]
+      ? `The top suggested learning lane right now is "${trackPlans[0].title}".`
+      : null,
+    `Help me decide which category fits my goal and profile better, and tell me what confusion I should clear up before choosing.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const trackPlansRef = useRef<HTMLDivElement | null>(null);
+  const useCasesRef = useRef<HTMLDivElement | null>(null);
+  const comparatorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+
+    window.requestAnimationFrame(() => {
+      (
+        {
+          comparator: comparatorRef,
+          "track-plans": trackPlansRef,
+          "use-cases": useCasesRef,
+        } satisfies Record<AcademyFocusTarget, typeof comparatorRef>
+      )[focusRequest]?.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [focusRequest, focusRequestKey]);
+
+  useEffect(() => {
+    if (!returnState) return;
+    setSearchQuery(returnState.searchQuery);
+    setLeftCategoryId(returnState.leftCategoryId);
+    setRightCategoryId(returnState.rightCategoryId);
+  }, [returnState, focusRequestKey]);
 
   return (
     <div className="grid gap-5">
@@ -126,8 +190,30 @@ export function Academy({
                 Learn the category job first, then choose the product.
               </h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                This page is meant to reduce decision noise. Use the guided tracks when you want a focused next step, the shortlists when you know the job to be done, and the comparator when two categories look similar on the surface.
+              This page is meant to reduce decision noise. Use the guided tracks when you want a focused next step, the shortlists when you know the job to be done, and the comparator when two categories look similar on the surface.
               </p>
+              <div className="mt-3">
+                <AskMentorLink
+                  label="Ask AI mentor which category fits your goal"
+                  returnState={academyMentorReturnState}
+                  mentorPrompt={academyMentorPrompt}
+                  mentorQuestionId="etf"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Academy category fit"
+                />
+              </div>
+              <div className="mt-3">
+                <MentorOpenCue
+                  cueLabel="Still open before choosing"
+                  description="You already have an open mentor thread that could sharpen this category decision before you compare further."
+                  mentorRevision={mentorRevision}
+                  onOpenMentor={onOpenMentor}
+                  questionIds={["etf", "tax", "gold", "crash"]}
+                  resumeLabel="Talk this through with AI mentor"
+                  sourceLabel="Academy"
+                  stuckLabel="Unblock this before choosing a lane"
+                />
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border/70 bg-muted/20 p-4">
@@ -182,7 +268,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card ref={trackPlansRef} className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.personality}</Badge>
@@ -243,7 +329,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card ref={useCasesRef} className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Investment Academy</CardTitle>
           <CardDescription>
@@ -274,7 +360,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card ref={comparatorRef} className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Beginner Navigation Map</CardTitle>
           <CardDescription>

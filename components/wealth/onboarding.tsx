@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   ArrowRight,
@@ -11,6 +11,8 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
+import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
+import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
 import { NumberField, SegmentedControl, TextField } from "@/components/wealth/form-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import { calculateRiskProfile, goalLabels, type RiskAnswers } from "@/lib/wealth-rules";
 
 const colors = [
@@ -56,6 +59,15 @@ const onboardingSteps = [
   },
 ] as const;
 
+export type OnboardingFocusTarget = (typeof onboardingSteps)[number]["id"];
+
+export type OnboardingReturnState = {
+  draftAnswers: RiskAnswers;
+  hasSubmittedAssessment: boolean;
+  step: number;
+  submittedAnswers: RiskAnswers;
+};
+
 function areAnswersEqual(left: RiskAnswers, right: RiskAnswers) {
   return (
     left.age === right.age &&
@@ -81,20 +93,54 @@ function areAnswersEqual(left: RiskAnswers, right: RiskAnswers) {
 
 export function Onboarding({
   answers,
+  focusRequest,
+  focusRequestKey,
+  returnState,
   onChange,
+  mentorRevision,
+  onOpenMentor,
 }: {
   answers: RiskAnswers;
+  focusRequest?: OnboardingFocusTarget | null;
+  focusRequestKey?: number;
+  returnState?: OnboardingReturnState | null;
   onChange: Dispatch<SetStateAction<RiskAnswers>>;
+  mentorRevision: number;
+  onOpenMentor: (request: MentorLaunchRequest) => void;
 }) {
   const [draftAnswers, setDraftAnswers] = useState<RiskAnswers>(answers);
   const [submittedAnswers, setSubmittedAnswers] = useState<RiskAnswers>(answers);
   const [hasSubmittedAssessment, setHasSubmittedAssessment] = useState(false);
   const [step, setStep] = useState(0);
+  const onboardingCardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDraftAnswers(answers);
     setSubmittedAnswers(answers);
   }, [answers]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const nextIndex = onboardingSteps.findIndex((item) => item.id === focusRequest);
+    if (nextIndex === -1) return;
+    setStep(nextIndex);
+    window.requestAnimationFrame(() => {
+      onboardingCardRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [focusRequest, focusRequestKey]);
+
+  useEffect(() => {
+    if (!returnState) return;
+    setDraftAnswers(returnState.draftAnswers);
+    setSubmittedAnswers(returnState.submittedAnswers);
+    setHasSubmittedAssessment(returnState.hasSubmittedAssessment);
+    setStep(
+      Math.max(0, Math.min(onboardingSteps.length - 1, returnState.step)),
+    );
+  }, [returnState, focusRequestKey]);
 
   const update = <K extends keyof RiskAnswers>(key: K, value: RiskAnswers[K]) => {
     setDraftAnswers((current) => ({ ...current, [key]: value }));
@@ -130,6 +176,41 @@ export function Onboarding({
     0,
   );
   const roadmapPreview = profileForPreview.roadmap.slice(0, 3);
+  const onboardingMentorReturnState = {
+    draftAnswers,
+    hasSubmittedAssessment,
+    step,
+    submittedAnswers,
+  } satisfies OnboardingReturnState;
+  const assessmentMentorPrompt = [
+    `I am ${completionPercent}% through the onboarding assessment and I am currently on the ${currentStep.title.toLowerCase()} step.`,
+    `My draft profile currently looks like ${draftProfile.band} with ${draftProfile.confidence} confidence.`,
+    `My primary goal is ${goalLabels[draftAnswers.primaryGoal]}.`,
+    `I have ${draftAnswers.emergencyMonths} emergency months, ${draftAnswers.debtLevel} debt, and about ${draftAnswers.monthlySavings} in monthly savings versus ${draftAnswers.monthlyInvestment} in planned monthly investing.`,
+    monthlyReadiness > 0
+      ? `That leaves roughly ${monthlyReadiness} of monthly readiness after planned investing.`
+      : "My current monthly investing already uses up most of my current monthly savings capacity.",
+    draftProfile.potentialScore && draftProfile.potentialScore > draftProfile.score
+      ? `The preview says my potential risk score may be higher than my current score after learning, so I may have a knowledge gap rather than a pure risk-intent gap.`
+      : null,
+    hasSubmittedAssessment
+      ? hasDraftChanges
+        ? "I already submitted once, but I have draft changes now and want help understanding what those changes might mean before I submit again."
+        : "I already submitted this assessment once and want help understanding the result more clearly."
+      : "I have not submitted the assessment yet and want help understanding what this result is really saying about my investing starting point.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const stepMentorPrompt = [
+    `I am on the ${currentStep.title.toLowerCase()} step of onboarding and ${completionPercent}% complete.`,
+    `The current draft risk band is ${draftProfile.band}.`,
+    currentStep.id === "profile"
+      ? `The profile inputs I am working through include country ${draftAnswers.country || "not filled yet"}, age ${draftAnswers.age || 0}, annual income ${draftAnswers.annualIncome || 0}, and monthly savings ${draftAnswers.monthlySavings || 0}.`
+      : currentStep.id === "risk"
+        ? `The behavior inputs I am working through include decision style ${draftAnswers.decisionStyle}, liquidity needs ${draftAnswers.liquidityNeeds}, market-drop response ${draftAnswers.marketDropResponse}, and post-learning response ${draftAnswers.postLearningDropResponse}.`
+        : `The planning inputs I am working through include horizon ${draftAnswers.horizonYears} years, tax awareness ${draftAnswers.taxAwareness}, and time available ${draftAnswers.timeAvailable}.`,
+    "A question on this step feels unclear. Help me interpret it in simple language before I answer so I do not guess blindly.",
+  ].join(" ");
   const unlockedFeatures = [
     {
       icon: ShieldCheck,
@@ -161,7 +242,7 @@ export function Onboarding({
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
-      <Card>
+      <Card ref={onboardingCardRef}>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Assessment</Badge>
@@ -173,6 +254,26 @@ export function Onboarding({
             Finish the assessment first, submit it once, and then review your starter
             plan with clearer context behind it.
           </CardDescription>
+          <div className="pt-1">
+            <AskMentorLink
+              label="Ask AI mentor about this assessment"
+              mentorPrompt={assessmentMentorPrompt}
+              mentorQuestionId="risk"
+              onOpenMentor={onOpenMentor}
+              returnState={onboardingMentorReturnState}
+              sourceLabel="Onboarding assessment"
+            />
+          </div>
+          <MentorOpenCue
+            cueLabel="Still open before answering"
+            description="You already have an open mentor thread that could help before you finish this assessment."
+            mentorRevision={mentorRevision}
+            onOpenMentor={onOpenMentor}
+            questionIds={["risk", "emergency", "debt", "first-investment"]}
+            resumeLabel="Review this with AI mentor"
+            sourceLabel="Onboarding"
+            stuckLabel="Clear this up before submitting"
+          />
         </CardHeader>
         <CardContent className="grid gap-5">
           <div className="rounded-lg border border-border/75 bg-background/70 p-4">
@@ -192,6 +293,16 @@ export function Onboarding({
                 </div>
                 <Progress value={completionPercent} />
               </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <AskMentorLink
+                label="Ask AI mentor if a question feels unclear"
+                mentorPrompt={stepMentorPrompt}
+                mentorQuestionId="first-investment"
+                onOpenMentor={onOpenMentor}
+                returnState={onboardingMentorReturnState}
+                sourceLabel={`Onboarding ${currentStep.title}`}
+              />
             </div>
           </div>
 

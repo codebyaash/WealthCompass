@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   Bar,
   BarChart,
@@ -10,8 +11,10 @@ import {
   YAxis,
 } from "recharts";
 import { ArrowRight, Plus, Target, TimerReset, Trash2 } from "lucide-react";
+import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
 import { HealthCheck } from "@/components/wealth/health-check";
 import { MetricMini } from "@/components/wealth/metric-mini";
+import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
 import { NumberField, SelectField, TextField } from "@/components/wealth/form-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +27,7 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatMoney } from "@/lib/formatters";
+import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import {
   calculateGoalFundingGap,
   getGoalMilestones,
@@ -42,17 +46,39 @@ const goalPriorityLabels: Record<GoalPriority, string> = {
   important: "Important",
 };
 
+export type GoalsFocusTarget = "goal-list" | "goal-priorities" | "monthly-split";
+
+function getGoalPriorityWeight(priority: GoalPriority) {
+  switch (priority) {
+    case "essential":
+      return 3;
+    case "important":
+      return 2;
+    case "aspirational":
+    default:
+      return 1;
+  }
+}
+
 export function Goals({
+  focusRequest,
+  focusRequestKey,
   goals,
+  mentorRevision,
   monthlyGoal,
   onAddGoal,
   onDeleteGoal,
+  onOpenMentor,
   onUpdateGoal,
 }: {
+  focusRequest?: GoalsFocusTarget | null;
+  focusRequestKey?: number;
   goals: WealthGoal[];
+  mentorRevision: number;
   monthlyGoal: number;
   onAddGoal: () => void;
   onDeleteGoal: (goalId: string) => void;
+  onOpenMentor: (request: MentorLaunchRequest) => void;
   onUpdateGoal: (goalId: string, goal: WealthGoal) => void;
 }) {
   const { priorityCount, totalCurrent, totalProgress, totalTarget } = getGoalSummary(goals);
@@ -64,6 +90,25 @@ export function Goals({
     priorityCount,
     totalProgress,
   });
+  const goalWithHighestMonthlyNeed = goals.reduce<WealthGoal | null>((current, goal) => {
+    if (!current) return goal;
+    return calculateGoalMonthlyInvestment(goal) > calculateGoalMonthlyInvestment(current)
+      ? goal
+      : current;
+  }, null);
+  const nearestDeadlineGoal = goals.reduce<WealthGoal | null>((current, goal) => {
+    if (!current) return goal;
+    if (goal.years !== current.years) {
+      return goal.years < current.years ? goal : current;
+    }
+    return getGoalPriorityWeight(goal.priority) > getGoalPriorityWeight(current.priority)
+      ? goal
+      : current;
+  }, null);
+  const lowestProgressGoal = goals.reduce<WealthGoal | null>((current, goal) => {
+    if (!current) return goal;
+    return calculateGoalProgress(goal) < calculateGoalProgress(current) ? goal : current;
+  }, null);
   const essentialShare = goals.length
     ? Math.round((priorityCount / goals.length) * 100)
     : 0;
@@ -88,13 +133,58 @@ export function Goals({
       ? "Setup in progress"
       : totalProgress < 10
         ? "Needs sequencing"
-        : totalProgress < 40
-          ? "Funding in motion"
-          : "Plan taking shape";
+      : totalProgress < 40
+        ? "Funding in motion"
+        : "Plan taking shape";
+  const goalsMentorPrompt =
+    goals.length > 0
+      ? [
+          `I have ${goals.length} active goals and a combined monthly goal pace of ${formatMoney(monthlyGoal)}.`,
+          `The current planning read is "${planningHeadline}".`,
+          priorityCount > 0
+            ? `${priorityCount} goals are marked essential.`
+            : "I have not marked any goals essential yet.",
+          goalWithHighestMonthlyNeed
+            ? `The heaviest monthly goal is ${goalWithHighestMonthlyNeed.name} at ${formatMoney(calculateGoalMonthlyInvestment(goalWithHighestMonthlyNeed))} per month.`
+            : null,
+          nearestDeadlineGoal
+            ? `The nearest deadline goal is ${nearestDeadlineGoal.name} with ${nearestDeadlineGoal.years} years left.`
+            : null,
+          lowestProgressGoal
+            ? `The least-funded goal right now is ${lowestProgressGoal.name} at ${calculateGoalProgress(lowestProgressGoal)}% progress.`
+            : null,
+          "Help me decide what to fund first, what can wait, and what looks unrealistic.",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : "I have not added any goals yet. Help me choose the first real goal I should define so this planner becomes useful.";
+  const prioritiesRef = useRef<HTMLDivElement | null>(null);
+  const goalListRef = useRef<HTMLDivElement | null>(null);
+  const monthlySplitRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+
+    window.requestAnimationFrame(() => {
+      (
+        {
+          "goal-list": goalListRef,
+          "goal-priorities": prioritiesRef,
+          "monthly-split": monthlySplitRef,
+        } satisfies Record<GoalsFocusTarget, typeof prioritiesRef>
+      )[focusRequest]?.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [focusRequest, focusRequestKey]);
 
   return (
     <div className="grid gap-5">
-      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+      <Card
+        ref={prioritiesRef}
+        className="overflow-hidden border-border/70 bg-card/95 shadow-sm"
+      >
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -151,7 +241,24 @@ export function Goals({
                 Add goal
                 <ArrowRight className="h-4 w-4" />
               </Button>
+              <AskMentorLink
+                label="Ask AI mentor how to prioritize goals"
+                mentorPrompt={goalsMentorPrompt}
+                mentorQuestionId="sip"
+                onOpenMentor={onOpenMentor}
+                sourceLabel="Goals prioritization"
+              />
             </div>
+            <MentorOpenCue
+              cueLabel="Still open before funding"
+              description="You already have an open mentor thread that could help you sequence this goal plan before committing more monthly money."
+              mentorRevision={mentorRevision}
+              onOpenMentor={onOpenMentor}
+              questionIds={["sip", "first-investment", "risk"]}
+              resumeLabel="Refine this with AI mentor"
+              sourceLabel="Goals"
+              stuckLabel="Unblock this before funding further"
+            />
           </div>
 
           <div className="grid gap-3 content-start">
@@ -274,7 +381,7 @@ export function Goals({
       </Card>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_0.75fr]">
-        <div className="grid gap-4">
+        <div ref={goalListRef} className="grid gap-4">
           {goals.length === 0 ? (
             <Card className="border-border/70 bg-card/95 shadow-sm">
               <CardHeader>
@@ -304,6 +411,13 @@ export function Goals({
                     </p>
                   </div>
                 </div>
+                <AskMentorLink
+                  label="Ask AI mentor what first goal to add"
+                  mentorPrompt="I do not have any goals yet. Help me pick the first goal that will make my financial plan feel concrete instead of vague."
+                  mentorQuestionId="first-investment"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Goals first real goal"
+                />
                 <Button type="button" data-testid="goals-empty-add" onClick={onAddGoal}>
                   <Plus className="h-4 w-4" />
                   Add your first goal
@@ -323,12 +437,37 @@ export function Goals({
         </div>
 
         <div className="grid gap-5">
-          <Card className="border-border/70 bg-card/95 shadow-sm">
+          <Card ref={monthlySplitRef} className="border-border/70 bg-card/95 shadow-sm">
             <CardHeader>
               <CardTitle>Monthly split</CardTitle>
               <CardDescription>Required monthly investment by goal.</CardDescription>
             </CardHeader>
-            <CardContent className="h-72">
+            <CardContent className="grid gap-4">
+              <div className="flex flex-wrap gap-2">
+                <AskMentorLink
+                  label="Ask AI mentor if this split is realistic"
+                  mentorPrompt={
+                    goals.length > 0
+                      ? [
+                          `My current goal plan needs about ${formatMoney(monthlyGoal)} per month in total.`,
+                          goalWithHighestMonthlyNeed
+                            ? `${goalWithHighestMonthlyNeed.name} alone needs ${formatMoney(calculateGoalMonthlyInvestment(goalWithHighestMonthlyNeed))} per month.`
+                            : null,
+                          nearestDeadlineGoal
+                            ? `${nearestDeadlineGoal.name} is the nearest deadline goal at ${nearestDeadlineGoal.years} years.`
+                            : null,
+                          "Tell me whether this monthly split looks realistic and where I should simplify first.",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                      : "I have no active goals yet. Help me understand what a realistic first monthly split usually looks like."
+                  }
+                  mentorQuestionId="sip"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Goals monthly split"
+                />
+              </div>
+              <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -342,6 +481,7 @@ export function Goals({
                   <Bar dataKey="monthly" radius={[6, 6, 0, 0]} fill="var(--color-chart-2)" />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
             </CardContent>
           </Card>
 

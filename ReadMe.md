@@ -95,6 +95,14 @@ data modeling.
 - Personalized notes using current onboarding answers and risk profile
 - Designed so OpenAI can replace the answer engine later without changing the UI
 
+## Phase 11.5: AI Mentor Conversation
+
+- Added an in-app mentor conversation surface inside the Mentor tab
+- Uses current profile, holdings, goals, and active coaching topic as context
+- Calls live OpenAI chat when `OPENAI_API_KEY` is configured
+- Falls back to the built-in rule-based mentor coach when AI is unavailable
+- Keeps the experience useful in both fully local and API-backed setups
+
 ## Phase 12: Settings and Data Controls
 
 - Dedicated Settings tab

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRef } from "react";
 import type { SetStateAction } from "react";
 import { Academy } from "@/components/wealth/academy";
+import type { AcademyFocusTarget, AcademyReturnState } from "@/components/wealth/academy";
 import { AppHeader } from "@/components/wealth/app-header";
 import { AppSidebar, type ActiveView } from "@/components/wealth/app-sidebar";
 import {
@@ -12,10 +13,17 @@ import {
 } from "@/components/wealth/data-settings";
 import { Dashboard } from "@/components/wealth/dashboard";
 import { Goals } from "@/components/wealth/goals";
+import type { GoalsFocusTarget } from "@/components/wealth/goals";
 import { MarketDashboard } from "@/components/wealth/market-dashboard";
 import { MentorPanel } from "@/components/wealth/mentor-panel";
+import { loadSavedMentorInsights } from "@/lib/mentor-chat";
 import { Onboarding } from "@/components/wealth/onboarding";
+import type {
+  OnboardingFocusTarget,
+  OnboardingReturnState,
+} from "@/components/wealth/onboarding";
 import { Portfolio } from "@/components/wealth/portfolio";
+import type { PortfolioFocusTarget, PortfolioReturnState } from "@/components/wealth/portfolio";
 import { RiskHistory } from "@/components/wealth/risk-history";
 import {
   defaultRiskAnswers,
@@ -44,6 +52,7 @@ import {
   type WealthGoal,
   createWealthGoal,
   defaultGoals,
+  workspaceHasMeaningfulUserData,
 } from "@/lib/local-storage";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { createImportJobFromReview } from "@/lib/import-jobs";
@@ -81,6 +90,7 @@ import {
   calculateRiskProfile,
   type RiskAnswers,
 } from "@/lib/wealth-rules";
+import type { MentorLaunchContext, MentorLaunchRequest } from "@/lib/mentor-chat";
 
 type SyncStatus =
   | "Local demo"
@@ -90,6 +100,27 @@ type SyncStatus =
   | "Syncing"
   | "Cloud synced"
   | "Cloud error";
+
+type WorkspaceFocusRequest =
+  | {
+      returnState?: AcademyReturnState | null;
+      target: AcademyFocusTarget;
+      view: "academy";
+    }
+  | {
+      target: GoalsFocusTarget;
+      view: "goals";
+    }
+  | {
+      returnState?: OnboardingReturnState | null;
+      target: OnboardingFocusTarget;
+      view: "onboarding";
+    }
+  | {
+      returnState?: PortfolioReturnState | null;
+      target: PortfolioFocusTarget;
+      view: "portfolio";
+    };
 
 export function WealthCompassApp() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
@@ -117,6 +148,12 @@ export function WealthCompassApp() {
   const [settingsFocusRequestKey, setSettingsFocusRequestKey] = useState(0);
   const [settingsFocusRequest, setSettingsFocusRequest] =
     useState<DataSettingsFocusRequest | null>(null);
+  const [mentorLaunchContext, setMentorLaunchContext] =
+    useState<MentorLaunchContext | null>(null);
+  const [mentorRevision, setMentorRevision] = useState(0);
+  const [workspaceFocusRequest, setWorkspaceFocusRequest] =
+    useState<WorkspaceFocusRequest | null>(null);
+  const [workspaceFocusRequestKey, setWorkspaceFocusRequestKey] = useState(0);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [lastSyncedRevision, setLastSyncedRevision] = useState(0);
   const [isCloudSaveInFlight, setIsCloudSaveInFlight] = useState(false);
@@ -142,6 +179,75 @@ export function WealthCompassApp() {
 
     setSyncStatus(isSupabaseConfigured() ? "Local saved" : "Local demo");
     setSyncMessage(message);
+  }
+
+  function handleOpenMentor(request: MentorLaunchRequest) {
+    setMentorLaunchContext({
+      ...request,
+      nonce: Date.now(),
+    });
+    setActiveView("mentor");
+  }
+
+  function handleMentorStateChange() {
+    setMentorRevision((current) => current + 1);
+  }
+
+  function handleMentorNavigate(
+    view: ActiveView,
+    focusTarget?: string,
+    returnState?: Record<string, unknown>,
+  ) {
+    if (
+      view === "academy" &&
+      (focusTarget === "comparator" ||
+        focusTarget === "track-plans" ||
+        focusTarget === "use-cases")
+    ) {
+      setWorkspaceFocusRequest({
+        returnState: (returnState as AcademyReturnState | undefined) ?? null,
+        target: focusTarget,
+        view,
+      });
+      setWorkspaceFocusRequestKey((current) => current + 1);
+    } else if (
+      view === "goals" &&
+      (focusTarget === "goal-list" ||
+        focusTarget === "goal-priorities" ||
+        focusTarget === "monthly-split")
+    ) {
+      setWorkspaceFocusRequest({
+        target: focusTarget,
+        view,
+      });
+      setWorkspaceFocusRequestKey((current) => current + 1);
+    } else if (
+      view === "onboarding" &&
+      (focusTarget === "profile" || focusTarget === "risk" || focusTarget === "plan")
+    ) {
+      setWorkspaceFocusRequest({
+        returnState: (returnState as OnboardingReturnState | undefined) ?? null,
+        target: focusTarget,
+        view,
+      });
+      setWorkspaceFocusRequestKey((current) => current + 1);
+    } else if (
+      view === "portfolio" &&
+      (focusTarget === "import-review" ||
+        focusTarget === "manual-entry" ||
+        focusTarget === "transaction-journal")
+    ) {
+      setWorkspaceFocusRequest({
+        returnState: (returnState as PortfolioReturnState | undefined) ?? null,
+        target: focusTarget,
+        view,
+      });
+      setWorkspaceFocusRequestKey((current) => current + 1);
+    } else {
+      setWorkspaceFocusRequest(null);
+    }
+
+    setActiveView(view);
   }
 
   function applySnapshotState(snapshot: {
@@ -174,6 +280,7 @@ export function WealthCompassApp() {
       applySnapshotState(emptySignedInSnapshot);
       setRiskHistory([]);
       resetWorkspaceSyncTracking();
+      setMentorRevision(loadSavedMentorInsights().length);
       return;
     }
 
@@ -181,6 +288,7 @@ export function WealthCompassApp() {
     applySnapshotState(snapshot);
     setRiskHistory(loadRiskHistory());
     resetWorkspaceSyncTracking();
+    setMentorRevision(loadSavedMentorInsights().length);
     setHasLoadedSnapshot(true);
   }, []);
 
@@ -228,6 +336,19 @@ export function WealthCompassApp() {
 
     let isMounted = true;
     const client = supabase;
+
+    function restoreLocalWorkspaceAfterAuthIssue(message: string) {
+      const snapshot = loadSnapshot(emptySignedInSnapshot);
+      applySnapshotState(snapshot);
+      setRiskHistory(loadRiskHistory());
+      setUserId("");
+      setUserEmail("");
+      resetWorkspaceSyncTracking();
+      setHasHydratedCloudWorkspace(true);
+      setHasLoadedSnapshot(true);
+      setSyncStatus("Local saved");
+      setSyncMessage(message);
+    }
 
     async function hydrateWorkspaceForUser(user: NonNullable<Awaited<ReturnType<typeof client.auth.getSession>>["data"]["session"]>["user"]) {
       if (!isMounted) return;
@@ -301,23 +422,23 @@ export function WealthCompassApp() {
     }
 
     async function loadSession() {
-      const { data } = await client.auth.getSession();
-      const user = data.session?.user;
+      try {
+        const { data } = await client.auth.getSession();
+        const user = data.session?.user;
 
-      if (!isMounted) return;
-      if (!user) {
-        const snapshot = loadSnapshot(emptySignedInSnapshot);
-        applySnapshotState(snapshot);
-        setRiskHistory(loadRiskHistory());
-        resetWorkspaceSyncTracking();
-        setHasHydratedCloudWorkspace(true);
-        setHasLoadedSnapshot(true);
-        setSyncStatus("Local saved");
-        setSyncMessage("Browser autosave is active.");
-        return;
+        if (!isMounted) return;
+        if (!user) {
+          restoreLocalWorkspaceAfterAuthIssue("Browser autosave is active.");
+          return;
+        }
+
+        await hydrateWorkspaceForUser(user);
+      } catch {
+        if (!isMounted) return;
+        restoreLocalWorkspaceAfterAuthIssue(
+          "Cloud session check failed, so the browser workspace was restored.",
+        );
       }
-
-      await hydrateWorkspaceForUser(user);
     }
 
     void loadSession();
@@ -425,7 +546,36 @@ export function WealthCompassApp() {
     () => getConnectorAttentionSummary(safeIntegrations),
     [safeIntegrations],
   );
-  const isCloudWorkspaceInitializing = Boolean(supabase) && !hasHydratedCloudWorkspace;
+  const hasRenderableWorkspaceDuringCloudLoad = useMemo(
+    () =>
+      workspaceHasMeaningfulUserData(
+        {
+          answers,
+          assets: safeAssets,
+          goals,
+          integrations: safeIntegrations,
+          importJobs,
+          marketPreferences,
+          transactions,
+        },
+        riskHistory,
+      ),
+    [
+      answers,
+      goals,
+      importJobs,
+      marketPreferences,
+      riskHistory,
+      safeAssets,
+      safeIntegrations,
+      transactions,
+    ],
+  );
+  const isCloudWorkspaceInitializing =
+    syncStatus === "Loading cloud" &&
+    Boolean(supabase) &&
+    !hasHydratedCloudWorkspace &&
+    !hasRenderableWorkspaceDuringCloudLoad;
   const isFreshWorkspace =
     userId.length > 0 &&
     safeAssets.length === 0 &&
@@ -927,8 +1077,10 @@ export function WealthCompassApp() {
               healthScore={healthScore}
               integrations={safeIntegrations}
               importJobs={importJobs}
+              mentorRevision={mentorRevision}
               monthlyGoal={monthlyGoal}
               onNavigate={(view) => setActiveView(view)}
+              onOpenMentor={handleOpenMentor}
               onOpenConnectorFocus={handleOpenSettingsFocus}
               onRunIntegrationSync={handleRunIntegrationSync}
               portfolioTotal={portfolioTotal}
@@ -936,18 +1088,63 @@ export function WealthCompassApp() {
               transactions={transactions}
             />
           ) : activeView === "onboarding" ? (
-            <Onboarding answers={answers} onChange={handleUpdateAnswers} />
+            <Onboarding
+              answers={answers}
+              focusRequest={
+                workspaceFocusRequest?.view === "onboarding"
+                  ? workspaceFocusRequest.target
+                  : null
+              }
+              focusRequestKey={workspaceFocusRequestKey}
+              returnState={
+                workspaceFocusRequest?.view === "onboarding"
+                  ? workspaceFocusRequest.returnState ?? null
+                  : null
+              }
+              onChange={handleUpdateAnswers}
+              mentorRevision={mentorRevision}
+              onOpenMentor={handleOpenMentor}
+            />
           ) : activeView === "academy" ? (
-            <Academy answers={answers} profile={profile} />
+            <Academy
+              answers={answers}
+              focusRequest={
+                workspaceFocusRequest?.view === "academy"
+                  ? workspaceFocusRequest.target
+                  : null
+              }
+              focusRequestKey={workspaceFocusRequestKey}
+              returnState={
+                workspaceFocusRequest?.view === "academy"
+                  ? workspaceFocusRequest.returnState ?? null
+                  : null
+              }
+              mentorRevision={mentorRevision}
+              onOpenMentor={handleOpenMentor}
+              profile={profile}
+            />
           ) : activeView === "portfolio" ? (
             <Portfolio
               assets={safeAssets}
+              focusRequest={
+                workspaceFocusRequest?.view === "portfolio"
+                  ? workspaceFocusRequest.target
+                  : null
+              }
+              focusRequestKey={workspaceFocusRequestKey}
+              returnState={
+                workspaceFocusRequest?.view === "portfolio"
+                  ? workspaceFocusRequest.returnState ?? null
+                  : null
+              }
+              mentorRevision={mentorRevision}
               onAddAsset={handleAddAsset}
               onAddTransaction={handleAddTransaction}
               onDeleteAsset={handleDeleteAsset}
               onDeleteTransaction={handleDeleteTransaction}
               onImportAssets={handleImportAssets}
               onLogImportJob={handleLogImportJob}
+              onOpenMentor={handleOpenMentor}
               onResetAssets={handleResetPortfolio}
               onUpdateAsset={handleUpdateAsset}
               portfolioTotal={portfolioTotal}
@@ -956,10 +1153,18 @@ export function WealthCompassApp() {
             />
           ) : activeView === "goals" ? (
             <Goals
+              focusRequest={
+                workspaceFocusRequest?.view === "goals"
+                  ? workspaceFocusRequest.target
+                  : null
+              }
+              focusRequestKey={workspaceFocusRequestKey}
               goals={goals}
+              mentorRevision={mentorRevision}
               monthlyGoal={monthlyGoal}
               onAddGoal={handleAddGoal}
               onDeleteGoal={handleDeleteGoal}
+              onOpenMentor={handleOpenMentor}
               onUpdateGoal={handleUpdateGoal}
             />
           ) : activeView === "history" ? (
@@ -969,12 +1174,21 @@ export function WealthCompassApp() {
               assets={safeAssets}
               integrations={safeIntegrations}
               marketPreferences={marketPreferences}
+              onOpenMentor={handleOpenMentor}
               onRunIntegrationSync={handleRunIntegrationSync}
               onUpdatePreferences={handleUpdateMarketPreferences}
               profile={profile}
             />
           ) : activeView === "mentor" ? (
-            <MentorPanel answers={answers} assets={safeAssets} profile={profile} />
+            <MentorPanel
+              answers={answers}
+              assets={safeAssets}
+              goals={goals}
+              launchContext={mentorLaunchContext}
+              onMentorStateChange={handleMentorStateChange}
+              onNavigate={handleMentorNavigate}
+              profile={profile}
+            />
           ) : activeView === "settings" ? (
             <DataSettings
               answers={answers}
