@@ -515,6 +515,15 @@ export function MentorPanel({
     () => savedInsights.filter((insight) => insight.status === "stuck"),
     [savedInsights],
   );
+  const mentorSessionStats = useMemo(
+    () => ({
+      activeLanes: topicThreadSummary.filter((topic) => topic.hasHistory).length,
+      liveFocusCount: groupedSavedInsights["do-now"].length,
+      savedCount: savedInsights.length,
+      stuckCount: stuckInsights.length,
+    }),
+    [groupedSavedInsights, savedInsights.length, stuckInsights.length, topicThreadSummary],
+  );
   const pinnedInsight =
     savedInsights.find((insight) => insight.isPinned) ??
     groupedSavedInsights["do-now"][0] ??
@@ -606,6 +615,67 @@ export function MentorPanel({
         };
       }),
     [activeQuestionId, conversationThreads, savedInsights],
+  );
+  const mentorOperatingLenses = useMemo(
+    () => [
+      {
+        title: "Session posture",
+        value:
+          mentorConversationMode === "resume-mode"
+            ? "Resume live"
+            : mentorConversationMode === "guided-start"
+              ? "Guided start"
+              : mentorConversationMode === "live-thread"
+                ? "In progress"
+                : "Fresh lane",
+        detail:
+          mentorConversationMode === "resume-mode"
+            ? "You already have an open takeaway here, so the best use of this session is to unblock or finish it."
+            : mentorConversationMode === "guided-start"
+              ? "You came in from another page, so this lane should help you return with more clarity."
+              : mentorConversationMode === "live-thread"
+                ? "This lane already has live context, so follow-up questions should stay narrow and practical."
+                : "Start with the most relevant question instead of opening too many topics at once.",
+      },
+      {
+        title: "Lane pressure",
+        value: `${mentorSessionStats.activeLanes} active`,
+        detail:
+          mentorSessionStats.activeLanes > 3
+            ? "You have several active coaching lanes, so closing one before opening another will keep the advice easier to use."
+            : "Your active coaching load is still manageable, so you can stay focused without losing past context.",
+      },
+      {
+        title: "Best reset",
+        value:
+          mentorSessionStats.stuckCount > 0
+            ? "Unblock a stuck action"
+            : pinnedInsight
+              ? "Return to today focus"
+              : `Start with ${topSuggestedQuestion.label}`,
+        detail:
+          mentorSessionStats.stuckCount > 0
+            ? "A stuck takeaway is the highest-leverage place to use the mentor because it turns stalled thinking back into movement."
+            : pinnedInsight
+              ? "Your pinned takeaway is the cleanest place to continue because it already reflects what mattered most recently."
+              : "The best next question is the shortest path to a useful answer when no prior thread needs attention.",
+      },
+    ],
+    [
+      mentorConversationMode,
+      mentorSessionStats.activeLanes,
+      mentorSessionStats.stuckCount,
+      pinnedInsight,
+      topSuggestedQuestion.label,
+    ],
+  );
+  const mentorWorkingOrder = useMemo(
+    () => [
+      `Start with ${topSuggestedQuestion.label}.`,
+      "Read the personalized why-it-fits cues before asking a broader follow-up.",
+      `Leave with one move you can act on in ${currentActionTarget.label.toLowerCase()}.`,
+    ],
+    [currentActionTarget.label, topSuggestedQuestion.label],
   );
 
   function createChatMessageId(prefix: "assistant" | "user") {
@@ -1067,6 +1137,32 @@ export function MentorPanel({
                 </p>
               </div>
             </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Use mentor for
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  One real doubt that is blocking a decision on risk, allocation, goal pacing, or what to do next.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Avoid using it for
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Collecting too much theory at once. If the chat creates more branches than clarity, the session is too wide.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best session outcome
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  You leave with one calmer next move, one saved takeaway, and a clear page to return to.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-3 content-start">
@@ -1113,6 +1209,66 @@ export function MentorPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-4">
+            <div className="rounded-md border border-border/70 bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Active lanes
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {mentorSessionStats.activeLanes}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Topics with saved thread context
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Do now
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {mentorSessionStats.liveFocusCount}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Practical takeaways still in motion
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Saved
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {mentorSessionStats.savedCount}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Answers worth revisiting later
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Needs unblock
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {mentorSessionStats.stuckCount}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Decisions that still need a second pass
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {mentorOperatingLenses.map((lens) => (
+              <div
+                key={lens.title}
+                className="rounded-md border border-border/70 bg-muted/20 p-4"
+              >
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {lens.title}
+                </p>
+                <p className="mt-3 text-sm font-semibold text-foreground">{lens.value}</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{lens.detail}</p>
+              </div>
+            ))}
+          </div>
           <div className="grid gap-4 rounded-md border border-border/70 bg-muted/20 p-4">
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary">{profile.band}</Badge>
@@ -1187,10 +1343,49 @@ export function MentorPanel({
                     {answer.actionTrack.description}
                   </p>
                 </div>
+                <div className="rounded-md border border-border/70 bg-background p-4">
+                  <p className="text-sm font-medium">Working order</p>
+                  <div className="mt-3 grid gap-3">
+                    {mentorWorkingOrder.map((step, index) => (
+                      <div key={step} className="flex items-start gap-3">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-muted-foreground">
+                          {index + 1}
+                        </span>
+                        <p className="text-xs leading-5 text-muted-foreground">{step}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
           <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  First move
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Pick the question that matches the decision you are actually trying to make this week.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Switch lanes only when
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  The current answer is clear enough that a different topic would create a new action, not more confusion.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best outcome
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  One saved takeaway, one calmer decision, and one clear return path into the product.
+                </p>
+              </div>
+            </div>
             <p className="text-sm font-medium">Recommended now</p>
             <div className="mt-3 grid gap-2">
               {suggestedQuestions.map((questionId) => {
@@ -1222,6 +1417,32 @@ export function MentorPanel({
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               Each topic keeps its own conversation thread, so you can return to allocation, tax, or SIP questions without mixing the coaching history together.
             </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best use
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Keep each topic lane narrow so you can return without re-explaining the whole situation.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Good signal
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  A lane has one clear takeaway, one note if needed, and one next action.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Watch out
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  If multiple lanes stay open without action, use one as today focus and park the rest for later.
+                </p>
+              </div>
+            </div>
             <div className="mt-3 grid gap-2">
               {topicThreadSummary.map((topic) => {
                 const question = mentorQuestions.find((item) => item.id === topic.id);
@@ -1423,6 +1644,32 @@ export function MentorPanel({
           <CardDescription>{answer.summary}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                What this answer is for
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                This panel translates the topic into your current context so you can decide, not just understand.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                How to read it
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Move top to bottom: summary, checkpoints, plain-language answer, then decision steps.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best outcome
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                You should be able to explain the decision in your own words before you leave this topic.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-[1fr_0.95fr]">
             <div>
               <p className="text-sm font-medium">What this answer is optimizing for</p>
@@ -1551,6 +1798,32 @@ export function MentorPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best way to chat
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Ask one question in plain language, then press the answer until the next move feels obvious.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Avoid
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Starting a brand-new topic before the current takeaway is saved, pinned, or turned into an action.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best session finish
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Save or pin the one reply you want to keep, then go back and act on it right away.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 rounded-md border border-border/70 bg-background p-4 md:grid-cols-4">
             <div className="rounded-md border border-border/70 bg-muted/20 p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

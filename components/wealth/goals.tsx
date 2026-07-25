@@ -136,6 +136,65 @@ export function Goals({
       : totalProgress < 40
         ? "Funding in motion"
         : "Plan taking shape";
+  const goalsTopStats = [
+    {
+      label: "Goal count",
+      value: `${goals.length}`,
+      detail:
+        goals.length > 0
+          ? `${priorityCount} essential goal${priorityCount === 1 ? "" : "s"} in the stack.`
+          : "No active goals yet.",
+    },
+    {
+      label: "Essential share",
+      value: goals.length ? `${essentialShare}%` : "0%",
+      detail:
+        goals.length > 0
+          ? "Shows how much of the plan is non-negotiable."
+          : "This becomes useful once priorities are marked.",
+    },
+    {
+      label: "Monthly pressure",
+      value: formatMoney(monthlyGoal),
+      detail:
+        monthlyGoal > 0
+          ? "Current combined monthly contribution pace."
+          : "Still unclear until targets and timelines are real.",
+    },
+    {
+      label: "Plan progress",
+      value: `${totalProgress}%`,
+      detail:
+        goals.length > 0
+          ? "Whole-plan progress, not just one goal."
+          : "Progress appears once the first goal is defined.",
+    },
+  ];
+  const goalsOperatingLenses = [
+    {
+      label: "Funding strain",
+      value: goalWithHighestMonthlyNeed
+        ? goalWithHighestMonthlyNeed.name
+        : "Not visible",
+      detail: goalWithHighestMonthlyNeed
+        ? `${formatMoney(calculateGoalMonthlyInvestment(goalWithHighestMonthlyNeed))} per month is the heaviest single ask.`
+        : "The biggest monthly strain shows up once goals have real detail.",
+    },
+    {
+      label: "Deadline pressure",
+      value: nearestDeadlineGoal ? nearestDeadlineGoal.name : "Unknown",
+      detail: nearestDeadlineGoal
+        ? `${nearestDeadlineGoal.years} year${nearestDeadlineGoal.years === 1 ? "" : "s"} left on the nearest goal.`
+        : "Deadline tension becomes clearer after timelines are filled in.",
+    },
+    {
+      label: "Weakest progress",
+      value: lowestProgressGoal ? lowestProgressGoal.name : "--",
+      detail: lowestProgressGoal
+        ? `${calculateGoalProgress(lowestProgressGoal)}% funded right now.`
+        : "Once multiple goals exist, this highlights what is falling behind.",
+    },
+  ];
   const goalsMentorPrompt =
     goals.length > 0
       ? [
@@ -179,6 +238,104 @@ export function Goals({
     });
   }, [focusRequest, focusRequestKey]);
 
+  const scrollToPriorities = () => {
+    prioritiesRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  const scrollToMonthlySplit = () => {
+    monthlySplitRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  const goalsPriorityQueue = [
+    goals.length === 0
+      ? {
+          action: "add-goal" as const,
+          detail:
+            "One real goal with a number and timeline is enough to turn this page from theory into a useful monthly plan.",
+          label: "Add the first real goal",
+          section: "Goal list",
+          tone: "urgent" as const,
+        }
+      : totalProgress < 10
+        ? {
+            action: "priorities" as const,
+            detail:
+              "The plan exists, but it still needs a clear funding order before monthly pressure becomes trustworthy.",
+            label: "Sequence the goal stack",
+            section: "Priorities",
+            tone: "urgent" as const,
+          }
+        : {
+            action: "priorities" as const,
+            detail: planningDetail,
+            label: "Keep the goal stack realistic",
+            section: "Planning posture",
+            tone: "urgent" as const,
+          },
+    goalWithHighestMonthlyNeed
+      ? {
+          action: "monthly-split" as const,
+          detail: `${goalWithHighestMonthlyNeed.name} is asking for ${formatMoney(calculateGoalMonthlyInvestment(goalWithHighestMonthlyNeed))} per month, which is currently the heaviest single strain in the plan.`,
+          label: "Review the biggest monthly ask",
+          section: "Monthly split",
+          tone: "watch" as const,
+        }
+      : {
+          action: "add-goal" as const,
+          detail:
+            "Once goals have target amounts and timelines, the biggest monthly pressure point will appear here.",
+          label: "Build a visible monthly split",
+          section: "Monthly split",
+          tone: "watch" as const,
+        },
+    planningChecks[0]
+      ? {
+          action: "monthly-split" as const,
+          detail: planningChecks[0].status,
+          label: `Clear ${planningChecks[0].label.toLowerCase()}`,
+          section: "Planning checks",
+          tone:
+            `${planningChecks[0].status} ${planningChecks[0].label}`.toLowerCase().includes(
+              "healthy",
+            ) ||
+            `${planningChecks[0].status} ${planningChecks[0].label}`.toLowerCase().includes(
+              "good",
+            )
+              ? ("steady" as const)
+              : ("watch" as const),
+        }
+      : {
+          action: "monthly-split" as const,
+          detail:
+            "Checks become more useful as soon as multiple goals are competing for the same monthly cash flow.",
+          label: "Watch for planning strain",
+          section: "Checks",
+          tone: "steady" as const,
+        },
+  ];
+
+  const handlePriorityQueueAction = (
+    action: "add-goal" | "priorities" | "monthly-split",
+  ) => {
+    if (action === "add-goal") {
+      onAddGoal();
+      return;
+    }
+
+    if (action === "priorities") {
+      scrollToPriorities();
+      return;
+    }
+
+    scrollToMonthlySplit();
+  };
+
   return (
     <div className="grid gap-5">
       <Card
@@ -200,6 +357,35 @@ export function Goals({
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
                 This page works best when each goal has a real amount, a real timeline, and a clear priority. Once that is in place, monthly pressure, scenario drift, and milestone pacing become much easier to judge.
               </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-muted/20 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Step 1
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">Define the real goals</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Start with the goals you genuinely intend to fund, not every nice-to-have idea at once.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Step 2
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">Sequence by importance and time</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Essential and near-term goals should become visible before aspirational goals compete for the same monthly cash flow.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Step 3
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">Stress the monthly pace</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Use the split, scenarios, and checks to see whether the plan still feels livable in the real world.
+                </p>
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border/70 bg-muted/20 p-4">
@@ -231,8 +417,75 @@ export function Goals({
                 <p className="mt-3 text-sm font-medium leading-6 text-foreground">
                   {monthlyGoal > 0
                     ? `${formatMoney(monthlyGoal)} per month is the current combined contribution pace.`
-                    : "Monthly pace is still unclear because the goals need more detail."}
+                  : "Monthly pace is still unclear because the goals need more detail."}
                 </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {goalsTopStats.map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-md border border-border/70 bg-background/80 p-4"
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {stat.label}
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-foreground">{stat.value}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{stat.detail}</p>
+                </div>
+              ))}
+            </div>
+            <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Priority queue</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Use this when you want the shortest route from a goal overview to the next planning move.
+                  </p>
+                </div>
+                <Badge variant="outline">{goalsPriorityQueue.length} active focus</Badge>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {goalsPriorityQueue.map(({ action, detail, label, section, tone }) => (
+                  <div
+                    key={`${section}-${label}`}
+                    className="rounded-md border border-border/70 bg-muted/20 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-foreground">{label}</p>
+                      <Badge
+                        variant="outline"
+                        className={
+                          tone === "urgent"
+                            ? "border-amber-500/40 text-amber-600 dark:text-amber-300"
+                            : tone === "watch"
+                              ? "border-primary/30 text-primary"
+                              : "border-emerald-500/40 text-emerald-600 dark:text-emerald-300"
+                        }
+                      >
+                        {tone === "urgent"
+                          ? "Now"
+                          : tone === "watch"
+                            ? "Next"
+                            : "Keep in view"}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {section}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => handlePriorityQueueAction(action)}
+                    >
+                      Open lane
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -280,6 +533,24 @@ export function Goals({
                     "Tighten the highest-priority goal first, then make sure the monthly number still feels livable."}
               </p>
             </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Do not confuse
+              </p>
+              <p className="mt-3 text-sm leading-6 text-foreground">
+                A long goal list is not a real plan. The plan becomes useful only when amount, timeline, and monthly funding order are honest.
+              </p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Working order
+              </p>
+              <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
+                <li>Protect essential and near-term goals before stretching into aspirational ones.</li>
+                <li>Make the monthly number livable first, then optimize for faster outcomes.</li>
+                <li>Let lower-priority goals wait if the plan starts feeling tight too early.</li>
+              </ul>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -316,6 +587,48 @@ export function Goals({
           <CardDescription>{planningHeadline}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-md border bg-muted/20 p-4 xl:col-span-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Use this for
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Understanding whether the plan is coherent before you over-optimize individual goals.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Watch closely
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Monthly pressure, essential share, and whether short timelines are colliding with weak funding.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best move
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Fix sequencing and realism first, then refine return assumptions and milestone pacing.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-3 xl:col-span-2 xl:grid-cols-3">
+            {goalsOperatingLenses.map((lens) => (
+              <div
+                key={lens.label}
+                className="rounded-md border border-border/70 bg-background p-4"
+              >
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {lens.label}
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">{lens.value}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{lens.detail}</p>
+              </div>
+            ))}
+          </div>
           <div className="rounded-md border border-border/70 bg-muted/20 p-4">
             <p className="text-sm leading-6 text-muted-foreground">{planningDetail}</p>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -392,6 +705,29 @@ export function Goals({
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Best first pick</p>
+                    <p className="mt-1 text-sm font-medium">Choose the most real goal</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Start with the goal you are most likely to fund consistently, not the most impressive one.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Keep it useful</p>
+                    <p className="mt-1 text-sm font-medium">Use a number and a date</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      A rough target amount and realistic timeline are enough to unlock a meaningful monthly plan.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Best next move</p>
+                    <p className="mt-1 text-sm font-medium">Let one goal anchor the plan</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Once the first goal is in place, the rest of the page becomes much easier to trust and compare.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-md border border-border/70 bg-muted/20 p-3">
                     <p className="text-sm font-medium">Emergency buffer</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -443,6 +779,34 @@ export function Goals({
               <CardDescription>Required monthly investment by goal.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
+              <div className="rounded-md border bg-muted/20 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What this shows
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      The monthly load each goal is asking from the same pool of money.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What to notice
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Which single goal is crowding out the others, and whether the combined pace still feels realistic.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Best move
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      If one bar dominates, revisit that goal’s amount, timeline, or priority before forcing the whole plan to stretch around it.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <AskMentorLink
                   label="Ask AI mentor if this split is realistic"
@@ -491,6 +855,34 @@ export function Goals({
               <CardDescription>Rule-based warnings for unrealistic timelines.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
+              <div className="rounded-md border bg-muted/20 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What this shows
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Checks that catch timelines, funding loads, or return assumptions that are drifting out of range.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      How to read it
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Treat these as early warning lights, not final judgments on whether a goal is possible.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Best move
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Fix the most strained assumption first, then recheck whether the overall plan still feels livable.
+                    </p>
+                  </div>
+                </div>
+              </div>
               {planningChecks.map((check) => (
                 <HealthCheck key={check.label} {...check} />
               ))}
@@ -503,6 +895,34 @@ export function Goals({
               <CardDescription>Read the plan before the plan reads you.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
+              <div className="rounded-md border bg-muted/20 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What it means
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      This is the overall temperament of the plan, not just the arithmetic.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Good sign
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Essential goals are protected and the monthly load still feels sustainable.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Bad sign
+                    </p>
+                    <p className="mt-2 text-sm text-foreground">
+                      Aspirational goals are competing too early or the average monthly need is already uncomfortable.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <MetricMini
                 label="Avg monthly per goal"
                 value={goals.length ? formatMoney(Math.round(monthlyGoal / goals.length)) : formatMoney(0)}
@@ -556,6 +976,32 @@ function GoalEditor({
         </div>
       </CardHeader>
       <CardContent className="grid gap-5">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border bg-muted/20 p-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              This goal asks for
+            </p>
+            <p className="mt-2 text-sm text-foreground">
+              {formatMoney(monthlyInvestment)} per month on the current base-case path.
+            </p>
+          </div>
+          <div className="rounded-md border bg-muted/20 p-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Watch closely
+            </p>
+            <p className="mt-2 text-sm text-foreground">
+              Whether the timeline is too aggressive for the funding gap you still have left.
+            </p>
+          </div>
+          <div className="rounded-md border bg-muted/20 p-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Best move
+            </p>
+            <p className="mt-2 text-sm text-foreground">
+              Adjust amount, years, or priority until this goal fits the rest of the plan without distorting it.
+            </p>
+          </div>
+        </div>
         <div>
           <div className="mb-2 flex justify-between text-sm">
             <span>{formatMoney(goal.currentAmount)}</span>

@@ -470,14 +470,14 @@ export function DataSettings({
         detail: isSupabaseConfigured()
           ? userEmail
             ? `Signed in as ${userEmail}. Cloud sync and connector auth are available.`
-            : "Supabase keys are configured. Sign in from /auth to enable cloud sync and connector auth."
-          : "Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY in .env.local.",
+            : "Cloud services are connected. Sign in to unlock saved history, live connectors, and account-backed sync."
+          : "Connect Supabase in local settings to unlock cloud sync, saved history, and connector sign-in.",
         done: isSupabaseConfigured() && Boolean(userEmail),
         label: "Sign-in and cloud sync",
       },
       {
         detail:
-          "Add ALPHA_VANTAGE_API_KEY in .env.local to replace fallback market snapshots with live refreshes.",
+          "Add a live market data key in local settings to replace fallback sector snapshots with fresh refreshes.",
         done: false,
         label: "Live market feed",
       },
@@ -491,7 +491,7 @@ export function DataSettings({
         detail:
           "Direct broker API sync is implemented for Zerodha only right now. Paytm Money live account linking still needs its own connector.",
         done: false,
-        label: "Paytm live account link",
+        label: "Paytm live linking",
       },
     ],
     [userEmail],
@@ -529,6 +529,196 @@ export function DataSettings({
         "Keep a fresh workspace export around before major connector or import changes.",
       icon: Download,
       title: "3. Protect the workspace",
+    },
+  ];
+  const settingsSectionLinks = [
+    {
+      badge: `${operationsSummary.activeCount} active`,
+      detail: "Connect brokers, inboxes, and manual statement lanes.",
+      onClick: () => scrollToSection(connectedSourcesSectionRef),
+      title: "Connector lanes",
+    },
+    {
+      badge: `${importJobSummary.openCount} open`,
+      detail: "Review staged imports before they touch holdings or transactions.",
+      onClick: () => scrollToSection(importHistorySectionRef),
+      title: "Review queue",
+    },
+    {
+      badge: syncPreviewConnection ? "in progress" : "ready",
+      detail: "Rehearse a provider flow before trusting live cadence.",
+      onClick: () => scrollToSection(syncPlanSectionRef),
+      title: "Sync plan",
+    },
+    {
+      badge: marketPreferences.watchlist.length
+        ? `${marketPreferences.watchlist.length} tracked`
+        : "set once",
+      detail: "Tune market refresh behavior and saved watch preferences.",
+      onClick: () => {
+        document
+          .getElementById("settings-market-controls")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+      title: "Market controls",
+    },
+  ];
+  const settingsStatusCards = [
+    {
+      detail:
+        operationsSummary.attentionCount > 0
+          ? `${operationsSummary.attentionCount} source${operationsSummary.attentionCount === 1 ? "" : "s"} need a fix or manual intervention.`
+          : "No source is currently blocked by an error or attention state.",
+      label: "Attention pressure",
+      toneClassName:
+        operationsSummary.attentionCount > 0
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10",
+      value: operationsSummary.attentionCount > 0 ? "Needs review" : "In range",
+    },
+    {
+      detail:
+        importJobSummary.openCount > 0
+          ? `${importJobSummary.openCount} import review${importJobSummary.openCount === 1 ? "" : "s"} are waiting for a decision.`
+          : "Nothing is staged right now, so the import lane is clear.",
+      label: "Import pressure",
+      toneClassName:
+        importJobSummary.openCount > 0
+          ? "border-sky-500/30 bg-sky-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10",
+      value: importJobSummary.openCount > 0 ? "Queue open" : "Clear",
+    },
+    {
+      detail: `Next scheduled connector check ${formatSyncTimeLabel(schedulerPlan.nextRunAt)} across ${schedulerPlan.activeCount} active source${schedulerPlan.activeCount === 1 ? "" : "s"}.`,
+      label: "Cadence health",
+      toneClassName: "border-border bg-background",
+      value: schedulerPlan.dueCount > 0 ? `${schedulerPlan.dueCount} due now` : "On cadence",
+    },
+    {
+      detail:
+        userEmail && isSupabaseConfigured()
+          ? "Signed-in cloud sync is available for account-backed connectors and saved history."
+          : "The browser copy is available now, and cloud mode unlocks saved history plus connector-backed workflows.",
+      label: "Workspace mode",
+      toneClassName: userEmail
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : "border-border bg-background",
+      value: userEmail ? "Cloud ready" : "Local only",
+    },
+  ];
+  const connectorLaneMix = useMemo(
+    () => ({
+      brokerConnectedCount: brokerConnections.filter(
+        (connection) => connection.status === "connected",
+      ).length,
+      inboxConnectedCount: inboxConnections.filter(
+        (connection) => connection.status === "connected",
+      ).length,
+      manualLaneCount: integrations.filter(
+        (integration) => integration.importStrategy !== "sync-ready",
+      ).length,
+      autoLaneCount: integrations.filter(
+        (integration) => integration.importStrategy === "sync-ready",
+      ).length,
+    }),
+    [brokerConnections, inboxConnections, integrations],
+  );
+  const connectorSuggestedLane = userEmail
+    ? connectorLaneMix.brokerConnectedCount === 0
+      ? "Start with a broker or inbox lane so the first live proof can land quickly."
+      : importJobSummary.openCount > 0
+        ? "Work the open review queue before adding another live connector."
+        : "Your signed-in lanes are ready. Add only the next source that removes real manual work."
+    : "Start with a manual statement rehearsal first, then unlock inbox and broker lanes after sign-in.";
+  const exportPreviewStats = useMemo(
+    () => ({
+      charCount: exportedSnapshot.length,
+      lineCount: exportedSnapshot.split("\n").length,
+      watchlistCount: marketPreferences.watchlist.length,
+    }),
+    [exportedSnapshot, marketPreferences.watchlist.length],
+  );
+  const settingsOperatingLenses = [
+    {
+      label: "Source posture",
+      value:
+        operationsSummary.activeCount > 0
+          ? `${operationsSummary.activeCount} active`
+          : "Setup first",
+      detail:
+        operationsSummary.activeCount > 0
+          ? "Enough live lanes exist to focus on review quality, not just setup."
+          : "Add one dependable source before widening the connector surface.",
+    },
+    {
+      label: "Review load",
+      value:
+        importJobSummary.openCount > 0
+          ? `${importJobSummary.openCount} open`
+          : "Clear",
+      detail:
+        importJobSummary.openCount > 0
+          ? "Open staged imports deserve decisions before more data is added."
+          : "The review lane is clean enough to add the next source carefully.",
+    },
+    {
+      label: "Backup confidence",
+      value: userEmail ? "Cloud + local" : "Local first",
+      detail: userEmail
+        ? "Account-backed sync is available, but exports still matter before risky changes."
+        : "Browser storage is workable, but exports are your safety net.",
+    },
+  ];
+  const settingsWorkingOrder = [
+    "Connect one dependable lane before adding more automation.",
+    "Review and stage the first output carefully before letting cadence take over.",
+    "Export a clean checkpoint before resets, connector changes, or bigger imports.",
+  ];
+  type ConnectorPriorityAction =
+    | "broker"
+    | "inbox"
+    | "import-history"
+    | "sync-plan";
+  const connectorPriorityQueue = [
+    {
+      title:
+        operationsSummary.attentionCount > 0
+          ? `Resolve ${operationsSummary.attentionCount} attention item${operationsSummary.attentionCount === 1 ? "" : "s"}`
+          : "Review connected sources",
+      detail:
+        operationsSummary.attentionCount > 0
+          ? "Fix or inspect unstable lanes before adding any new source, otherwise trust in downstream reads drops fast."
+          : "Use the connected source view to check which lanes are healthy, due, or waiting on first proof.",
+      action: "import-history" as ConnectorPriorityAction,
+    },
+    {
+      title:
+        importJobSummary.openCount > 0
+          ? `Work ${importJobSummary.openCount} open import review${importJobSummary.openCount === 1 ? "" : "s"}`
+          : "Rehearse one source workflow",
+      detail:
+        importJobSummary.openCount > 0
+          ? "A clean review queue matters more than another connector badge. Finish staged reviews before you widen the setup."
+          : "If nothing is waiting in review, run one proof cycle end to end so the next lane starts from a reliable pattern.",
+      action: importJobSummary.openCount > 0 ? "import-history" : "sync-plan",
+    },
+    {
+      title: userEmail ? "Open a live-source lane" : "Start with manual rehearsal",
+      detail: userEmail
+        ? "Broker and inbox lanes are available. Choose the one that removes the most repeated manual effort first."
+        : "Stay with the statement rehearsal path until the first reviewed import feels dependable, then add account-backed lanes.",
+      action: userEmail ? "broker" : "sync-plan",
+    },
+    {
+      title:
+        connectorLaneMix.inboxConnectedCount > 0
+          ? "Inspect inbox automation"
+          : "Set up an inbox lane next",
+      detail:
+        connectorLaneMix.inboxConnectedCount > 0
+          ? "Use inbox workflows when statements already arrive naturally and you want less chasing."
+          : "Inbox lanes are best once one manual or broker lane already has a clean review rhythm.",
+      action: "inbox" as ConnectorPriorityAction,
     },
   ];
 
@@ -603,6 +793,17 @@ export function DataSettings({
 
   function scrollToSection(ref: { current: HTMLDivElement | null }) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleConnectorPriorityAction(action: ConnectorPriorityAction) {
+    const focusMap: Record<ConnectorPriorityAction, { current: HTMLDivElement | null }> = {
+      broker: brokerSectionRef,
+      inbox: inboxSectionRef,
+      "import-history": importHistorySectionRef,
+      "sync-plan": syncPlanSectionRef,
+    };
+
+    scrollToSection(focusMap[action]);
   }
 
   function getAutoOpenActionNotice(
@@ -1629,11 +1830,104 @@ export function DataSettings({
             </div>
           </div>
 
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
+            <div className="rounded-md border bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Use this page for
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Connecting feeds, reviewing staged imports, protecting the workspace, and keeping sync behavior understandable.
+              </p>
+            </div>
+            <div className="rounded-md border bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Watch closely
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                A connected source is only useful if the review lane stays clean. Bad automation is just faster confusion.
+              </p>
+            </div>
+            <div className="rounded-md border bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating rhythm
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Add one dependable source, rehearse it once, review the first output carefully, then let cadence take over.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+              <div>
+                <p className="text-sm font-medium">Control tower</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Use the current posture first, then jump straight into the lane that needs action.
+                </p>
+              </div>
+              <Badge variant="outline">Settings navigator</Badge>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {settingsStatusCards.map((item) => (
+                  <div key={item.label} className={`rounded-md border p-3 ${item.toneClassName}`}>
+                    <p className="text-xs text-muted-foreground">{item.label}</p>
+                    <p className="mt-2 text-sm font-semibold text-foreground">{item.value}</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                {settingsSectionLinks.map((item) => (
+                  <button
+                    key={item.title}
+                    type="button"
+                    onClick={item.onClick}
+                    className="rounded-md border bg-background px-4 py-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-foreground">{item.title}</p>
+                      <Badge variant="outline">{item.badge}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[1.05fr_0.95fr]">
+            <div className="grid gap-3 md:grid-cols-3">
+              {settingsOperatingLenses.map((lens) => (
+                <div
+                  key={lens.label}
+                  className="rounded-md border border-border/70 bg-background p-4"
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {lens.label}
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-foreground">{lens.value}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{lens.detail}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Working order
+              </p>
+              <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
+                {settingsWorkingOrder.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
           <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
             <div>
               <p className="text-sm font-medium">MVP setup checklist</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                This is the shortest path from a fresh workspace to a dependable demo.
+                This is the shortest path from a fresh workspace to a dependable working setup.
               </p>
             </div>
             <div className="grid gap-3">
@@ -1665,19 +1959,42 @@ export function DataSettings({
 
           <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
             <div>
-              <p className="text-sm font-medium">Workspace export</p>
+              <p className="text-sm font-medium">Safety export</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Includes onboarding answers, risk profile, portfolio, transactions, goals, and saved risk snapshots.
+                Save a full checkpoint of the working state before risky imports, resets, or major edits.
               </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Best use</p>
+                <p className="mt-1 text-sm font-medium">Freeze a clean checkpoint</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Export before major imports, demo walkthroughs, or allocation experiments.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">What it saves</p>
+                <p className="mt-1 text-sm font-medium">Portfolio plus learning state</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  The file captures not just holdings, but risk context, goals, and workflow history too.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-medium">Keep one stable demo copy</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  A clean export makes it easy to recover from rough test imports without losing momentum.
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={handleCopySnapshot}>
                 <Copy className="h-4 w-4" />
-                Copy JSON
+                Copy checkpoint
               </Button>
               <Button type="button" variant="outline" onClick={handleDownloadSnapshot}>
                 <Download className="h-4 w-4" />
-                Download
+                Download file
               </Button>
             </div>
             <p className="text-xs leading-5 text-muted-foreground">{actionMessage}</p>
@@ -1686,19 +2003,42 @@ export function DataSettings({
           <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
-                <p className="text-sm font-medium">Workspace import</p>
+                <p className="text-sm font-medium">Restore from checkpoint</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Paste a `wealthcompass-data.json` export to restore onboarding, portfolio, transactions, goals, integrations, market preferences, and history.
+                  Paste a saved `wealthcompass-data.json` file here to restore the full workspace state.
                 </p>
               </div>
               <Button type="button" variant="outline" onClick={handleImportWorkspace}>
                 <Upload className="h-4 w-4" />
-                Import JSON
+                Restore file
               </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Use this when</p>
+                <p className="mt-1 text-sm font-medium">You want a full restore</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Imports replace the current working posture more broadly than a single portfolio upload.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Check before restore</p>
+                <p className="mt-1 text-sm font-medium">Source and recency</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Confirm the file belongs to the right investor profile and includes the latest goal state.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-medium">Export before restoring</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  That gives you an immediate rollback point if you only meant to compare states.
+                </p>
+              </div>
             </div>
             <textarea
               className="min-h-36 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="{ ... }"
+              placeholder="{ saved checkpoint JSON }"
               value={importJson}
               onChange={(event) => setImportJson(event.target.value)}
             />
@@ -1706,19 +2046,42 @@ export function DataSettings({
 
           <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
             <div>
-              <p className="text-sm font-medium">Reset controls</p>
+              <p className="text-sm font-medium">Reset and restore</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Demo resets are useful for walkthroughs, screenshots, and portfolio reviews.
+                Use resets to recover quickly during walkthroughs, test imports, and cleanup passes.
               </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Portfolio reset</p>
+                <p className="mt-1 text-sm font-medium">Narrow cleanup</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Use this when imports or manual edits need a quick holdings-only reset.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Demo workspace reset</p>
+                <p className="mt-1 text-sm font-medium">Full workspace restore</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  This is the fastest path back to a polished walkthrough state across pages.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-xs text-muted-foreground">Use carefully</p>
+                <p className="mt-1 text-sm font-medium">Snapshot first</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Reset actions are safest when paired with a fresh export you can restore in seconds.
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={handleResetPortfolio}>
                 <RotateCcw className="h-4 w-4" />
-                Portfolio
+                Reset portfolio
               </Button>
               <Button type="button" variant="secondary" onClick={handleRestoreDemoWorkspace}>
                 <RotateCcw className="h-4 w-4" />
-                Demo workspace
+                Restore workspace
               </Button>
             </div>
           </div>
@@ -1814,6 +2177,202 @@ export function DataSettings({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {connectorPriorityQueue.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => handleConnectorPriorityAction(item.action)}
+                  className="rounded-md border bg-background p-4 text-left transition hover:bg-muted/40"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Next move
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.detail}</p>
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Connector rollout plan</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Treat this like a trading desk setup, not a feature scavenger hunt. One dependable lane with clean review proof beats five half-connected sources.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Suggested first lane</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {userEmail ? "Live-source path" : "Manual-source path"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {connectorSuggestedLane}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Start one lane, prove it, then expand.</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  The cleanest connector setup rhythm is: connect a source, run or rehearse it once, review the first output carefully, then let cadence take over only after the review lane looks trustworthy.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button type="button" variant="outline" onClick={() => scrollToSection(brokerSectionRef)}>
+                  Broker lane
+                </Button>
+                <Button type="button" variant="outline" onClick={() => scrollToSection(inboxSectionRef)}>
+                  Inbox lane
+                </Button>
+                <Button type="button" variant="outline" onClick={() => scrollToSection(syncPlanSectionRef)}>
+                  Rehearse flow
+                </Button>
+                <Button type="button" variant="outline" onClick={() => scrollToSection(importHistorySectionRef)}>
+                  Review queue
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Setup posture
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {operationsSummary.activeCount > 0 ? "Operate existing lanes" : "Build first lane"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {operationsSummary.activeCount > 0
+                    ? "You already have enough connector surface to focus on trust, review quality, and cadence discipline."
+                    : "The highest-value move is still getting one dependable source through a full reviewed cycle."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Review pressure
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {importJobSummary.openCount > 0
+                    ? `${importJobSummary.openCount} open review${importJobSummary.openCount === 1 ? "" : "s"}`
+                    : "Queue is clear"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {importJobSummary.openCount > 0
+                    ? "Open imports should usually be resolved before another connector is added, otherwise trust decays quickly."
+                    : "A clear queue is the best time to introduce the next source because you can inspect it with full attention."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Scale only when
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {connectorLaneMix.autoLaneCount > connectorLaneMix.manualLaneCount
+                    ? "Cadence is earning trust"
+                    : "Manual proof still matters"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {connectorLaneMix.autoLaneCount > connectorLaneMix.manualLaneCount
+                    ? "More lanes are already on reliable cadence, so expansion is fine if it removes actual manual friction."
+                    : "Do not widen the setup just because a source connected. Promote lanes only after the first proof looks clean."}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Connector operating order</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Strong connector setups usually follow a boring order on purpose: connect, rehearse, review, then automate. The boring version is the one that keeps imports trustworthy.
+                </p>
+              </div>
+              <div className="grid gap-3">
+                {[
+                  "Connect the lane that removes the most repeated manual effort.",
+                  "Run one proof cycle and inspect the review queue before trusting cadence.",
+                  "Add the next lane only after the current one feels boring and dependable.",
+                ].map((step, index) => (
+                  <div key={step} className="flex items-start gap-3 rounded-md border bg-background p-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold text-muted-foreground">
+                      {index + 1}
+                    </span>
+                    <p className="text-xs leading-5 text-muted-foreground">{step}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Broker lanes
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {connectorLaneMix.brokerConnectedCount} connected
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Best for direct holdings sync and recurring live proof.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Inbox lanes
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {connectorLaneMix.inboxConnectedCount} connected
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Best for statement emails that naturally arrive without manual chasing.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Manual lanes
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {connectorLaneMix.manualLaneCount} active
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Good for exported statements, OCR review, and first-pass rehearsals.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Auto lanes
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {connectorLaneMix.autoLaneCount} active
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Use once you trust the first reviewed output and want cadence to take over.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Start here
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Pick one connector lane first: broker sync, inbox OAuth, or manual statement rehearsal.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Do not assume
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  A connected badge is not the finish line. The first useful proof is a clean reviewed import.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Connect one source, run or rehearse it once, then inspect the review queue before adding another lane.
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-md border bg-muted/30 p-4">
                 <div className="flex items-center gap-2">
@@ -1849,6 +2408,29 @@ export function DataSettings({
                   <Database className="h-4 w-4" />
                   {isBrokerLoading ? "Loading..." : "Refresh"}
                 </Button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Best use</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Live holdings refresh</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Use broker APIs when you want direct holdings sync instead of repeated manual exports.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Watch closely</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Connection trust</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Reconnect, auth expiry, and failed checks matter more here than formatting cleanup.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Best next move</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Connect then sync once</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Treat the first sync as validation. Only trust cadence after you inspect the imported result.
+                  </p>
+                </div>
               </div>
               {brokerProviderDescriptors.map((provider) => {
                 const connection = brokerConnectionMap.get(provider.id);
@@ -1940,6 +2522,29 @@ export function DataSettings({
                   <Mail className="h-4 w-4" />
                   {isInboxLoading ? "Loading..." : "Refresh"}
                 </Button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Best use</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Statement capture</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Use inbox access when statements naturally arrive by email and you want less manual forwarding.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">What matters most</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Readiness and review</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    OAuth success is step one. The real win is a clean parsed statement moving into review.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Best next move</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Run one inbox check</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    After connecting, run one check and confirm the right message type enters the pipeline.
+                  </p>
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-md border bg-background p-3">
@@ -2087,6 +2692,29 @@ export function DataSettings({
                   Ingest email
                 </Button>
               </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Use this for</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Safe rehearsal</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Test the future forwarding flow without depending on live inbox connectors.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Most important check</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Chosen input quality</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Make sure the attachment or body text actually contains the usable statement signal.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Best next move</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">Open in sync plan</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Once the simulator output looks right, move it into source rehearsal before applying anything.
+                  </p>
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <TextField label="From" value={emailFrom} onChange={setEmailFrom} />
                 <TextField label="Subject" value={emailSubject} onChange={setEmailSubject} />
@@ -2217,6 +2845,69 @@ export function DataSettings({
                     <Plus className="h-4 w-4" />
                     Add source
                   </Button>
+                  </div>
+                </div>
+                <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Source builder</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Build a lane in this order: pick the provider template, confirm cadence and channel, add the source, then use one small proof run before trusting it in the background.
+                    </p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">1. Template first</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">Load a known playbook</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">2. Proof second</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">Run or rehearse once</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">3. Cadence last</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">Let the schedule take over</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <p className="text-sm font-medium">Feed mix</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {connectorLaneMix.autoLaneCount} auto lane{connectorLaneMix.autoLaneCount === 1 ? "" : "s"}, {connectorLaneMix.manualLaneCount} manual lane{connectorLaneMix.manualLaneCount === 1 ? "" : "s"}, and {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} still waiting on a first real check.
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/30 p-4">
+                      <p className="text-sm font-medium">Best next move</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {schedulerPlan.readyCount > 0
+                          ? "Convert one first-check-pending source into a clean proof run before adding more lanes."
+                          : operationsSummary.attentionCount > 0
+                            ? "Repair the noisiest lane first so the source board stays trustworthy."
+                            : "Use templates to add only the next source that removes real manual review work."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-3">
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">Read first</p>
+                    <p className="mt-1 text-sm font-semibold text-foreground">Lane status</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Start with posture, cadence, and the next scheduled check before you open diagnostics.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">Then decide</p>
+                    <p className="mt-1 text-sm font-semibold text-foreground">One next move</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Sync now, review history, or open rehearsal. Do the smallest useful action first.
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">Escalate only if needed</p>
+                    <p className="mt-1 text-sm font-semibold text-foreground">Open deeper diagnostics later</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      Event timelines and provider cues are for confirmation, not the first read.
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-3 rounded-md border bg-background p-3">
@@ -2534,15 +3225,15 @@ export function DataSettings({
                     <div className="rounded-md border bg-muted/30 p-4">
                       <p className="text-sm font-medium">Feed summary</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        {filteredIntegrations.length} source{filteredIntegrations.length === 1 ? "" : "s"} in view, {operationsSummary.attentionCount} needing attention, and the next scheduled run is {formatSyncTimeLabel(schedulerPlan.nextRunAt)}.
+                        {filteredIntegrations.length} source{filteredIntegrations.length === 1 ? "" : "s"} in view, {operationsSummary.attentionCount} needing attention, and the next scheduled check is {formatSyncTimeLabel(schedulerPlan.nextRunAt)}.
                       </p>
                     </div>
                     <div className="rounded-md border bg-muted/30 p-4">
                       <p className="text-sm font-medium">Best next move</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {operationsSummary.attentionCount > 0
-                          ? "Clear the highest-attention lane first, then rerun or rehearse the source before touching the portfolio."
-                          : "Use sync plan for new feeds, then rely on cadence and history to keep the pipeline calm."}
+                          ? "Clear the noisiest lane first, then rerun or rehearse it before trusting any downstream portfolio read."
+                          : "Use rehearsal for new feeds, then let cadence and review history keep the pipeline calm."}
                       </p>
                     </div>
                   </div>
@@ -2566,6 +3257,31 @@ export function DataSettings({
                   const latestImportStats = latestImportJob
                     ? getImportJobOutcomeStats(latestImportJob)
                     : null;
+                  const proofLabel = latestImportMeta
+                    ? latestImportMeta.label
+                    : integration.lastSyncAt
+                      ? "Lane has run"
+                      : "Awaiting first proof";
+                  const proofDetail = latestImportJob
+                    ? latestImportJob.summary
+                    : integration.lastSyncAt
+                      ? `Last connector run ${new Date(integration.lastSyncAt).toLocaleString()}.`
+                      : "Run a sync or rehearse a statement once so this lane has a first verified outcome.";
+                  const laneModeLabel =
+                    integration.importStrategy === "sync-ready"
+                      ? "Live-sync lane"
+                      : integration.importStrategy === "manual-review"
+                        ? "Review-first lane"
+                        : "Statement lane";
+                  const laneRiskLabel =
+                    healthMetrics.warningStreak > 0
+                      ? `${healthMetrics.warningStreak} warning streak`
+                      : latestImportMeta?.badgeVariant === "secondary"
+                        ? "Recent proof looks healthy"
+                        : "Needs first clean review";
+                  const secondaryActionItems = primaryAction
+                    ? actionItems.slice(1, 3)
+                    : actionItems.slice(0, 2);
 
                   return (
                     <div
@@ -2627,14 +3343,43 @@ export function DataSettings({
                               {integration.notes}
                             </p>
                           )}
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Lane mode</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{laneModeLabel}</p>
+                              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                                {integration.importStrategy === "sync-ready"
+                                  ? "This source can usually move from connector check to reusable sync cadence."
+                                  : integration.importStrategy === "manual-review"
+                                    ? "This source is healthiest when you review staged output before each apply."
+                                    : "This lane depends on fresh exported statements more than scheduled checks."}
+                              </p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Latest proof</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{proofLabel}</p>
+                              <p className="mt-2 text-xs leading-5 text-muted-foreground">{proofDetail}</p>
+                            </div>
+                            <div className="rounded-md border bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">Trust read</p>
+                              <p className="mt-1 text-sm font-semibold text-foreground">{laneRiskLabel}</p>
+                              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                                {healthMetrics.warningStreak > 0
+                                  ? "Clear the warning pattern before relying on automation here."
+                                  : syncState.tone === "healthy"
+                                    ? "This lane looks steady enough for routine use."
+                                    : "A first successful run is still the main trust milestone for this source."}
+                              </p>
+                            </div>
+                          </div>
                           <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
                             <div className="rounded-md border bg-muted/30 p-3">
-                              <p className="text-xs text-muted-foreground">Current lane read</p>
+                              <p className="text-xs text-muted-foreground">What this means</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{syncState.label}</p>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">{laneRead}</p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
-                              <p className="text-xs text-muted-foreground">Best next move</p>
+                            <div className={`rounded-md border p-3 ${primaryAction ? "border-primary/20 bg-primary/5" : "bg-muted/30"}`}>
+                              <p className="text-xs text-muted-foreground">Do this now</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {primaryAction ? primaryAction.label : "Stay on cadence"}
                               </p>
@@ -2643,6 +3388,20 @@ export function DataSettings({
                                   ? primaryAction.detail
                                   : "Nothing urgent is blocking this feed right now. Use history or sync plan only when you want to inspect the lane."}
                               </p>
+                              {primaryAction ? (
+                                <div className="mt-3 flex items-center justify-between gap-3">
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Highest-value action for this lane right now.
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => void handleIntegrationActionClick(integration, primaryAction)}
+                                  >
+                                    {primaryAction.label}
+                                  </Button>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                           <div className="grid gap-3 md:grid-cols-4">
@@ -2797,7 +3556,7 @@ export function DataSettings({
                                   onClick={() => handleOpenImportHistoryForProvider(integration)}
                                 >
                                   <FileText className="h-4 w-4" />
-                                  Open history
+                                  Review history
                                 </Button>
                               </div>
                             </div>
@@ -2824,12 +3583,12 @@ export function DataSettings({
                               ))}
                             </div>
                           )}
-                          {actionItems.length > 0 && (
+                          {secondaryActionItems.length > 0 && (
                             <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
-                                Recommended next actions
+                                Supporting moves
                               </p>
-                              {actionItems.map((item) => (
+                              {secondaryActionItems.map((item) => (
                                 <div key={`${integration.id}-${item.label}`} className="grid gap-2 text-[11px] text-muted-foreground">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <p className="font-medium text-foreground">
@@ -2841,7 +3600,7 @@ export function DataSettings({
                                       variant="outline"
                                       onClick={() => void handleIntegrationActionClick(integration, item)}
                                     >
-                                      Open
+                                      Use
                                     </Button>
                                   </div>
                                   <p>{item.detail}</p>
@@ -2851,7 +3610,20 @@ export function DataSettings({
                           )}
                         </div>
                       )}
-                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                        <p className="text-[11px] text-muted-foreground">
+                          Quick tools for reruns, rehearsal, history, and connector edits.
+                        </p>
+                        <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onRunIntegrationSync(integration.id)}
+                        >
+                          <Cloud className="h-4 w-4" />
+                          Run check
+                        </Button>
                         <Button
                           type="button"
                           size="sm"
@@ -2859,7 +3631,7 @@ export function DataSettings({
                           onClick={() => void handlePreviewSyncPlan(integration)}
                         >
                           <ScanSearch className="h-4 w-4" />
-                          Sync plan
+                          Rehearse
                         </Button>
                         <Button
                           type="button"
@@ -2868,16 +3640,7 @@ export function DataSettings({
                           onClick={() => handleOpenImportHistoryForProvider(integration)}
                         >
                           <FileText className="h-4 w-4" />
-                          History
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onRunIntegrationSync(integration.id)}
-                        >
-                          <Cloud className="h-4 w-4" />
-                          Sync now
+                          Review
                         </Button>
                         <Button
                           type="button"
@@ -2899,12 +3662,29 @@ export function DataSettings({
                           <Trash2 className="h-4 w-4" />
                           Remove
                         </Button>
+                        </div>
                       </div>
                     </div>
                   );
                 }) : (
-                  <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
-                    No connected sources match this filter yet.
+                  <div className="grid gap-3 rounded-md border bg-background p-4">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">No source matches this view yet.</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Start one lane first or loosen the filter so we can bring a connector back into the operating view.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => scrollToSection(brokerSectionRef)}>
+                        Broker lane
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => scrollToSection(inboxSectionRef)}>
+                        Inbox lane
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => scrollToSection(syncPlanSectionRef)}>
+                        Rehearse a source
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2921,6 +3701,64 @@ export function DataSettings({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
+            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Queue posture before action</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  This lane is healthiest when you separate triage from apply. Read the queue pressure first, then open only the run that deserves a decision.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Queue pressure</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {importJobSummary.openCount > 0 ? `${importJobSummary.openCount} open reviews` : "Queue is clear"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {importJobSummary.openCount > 0
+                      ? "Work open items before replaying older completed runs."
+                      : "Use history mainly for auditability and replays now."}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Failure pressure</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {importJobSummary.failedCount > 0 ? `${importJobSummary.failedCount} failed runs` : "No failed runs"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {importJobSummary.failedCount > 0
+                      ? "Failed imports usually need cleaner source text, a better export, or OCR review."
+                      : "Nothing failed is dragging down the queue right now."}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Use this queue for
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Final review before holdings or transactions merge into the tracked workspace.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Most common mistake
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Applying a run because the provider was recognized, even though warnings or duplicates still need a look.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Open the newest reviewed run with saved payload, confirm the parse, then either apply or reopen rehearsal.
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="grid gap-3">
                 <div>
@@ -3094,6 +3932,118 @@ export function DataSettings({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Rehearsal status
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {syncPreview ? "Provider loaded" : "Awaiting provider"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Start by opening one source lane into rehearsal before you paste any text.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Input quality
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {syncInputText.trim() ? "Sample loaded" : "No sample yet"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  The fastest useful proof is one realistic statement body, table, or extracted PDF text.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Warning pressure
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {syncExecution ? `${syncExecution.reviewedWarnings.length} warning${syncExecution.reviewedWarnings.length === 1 ? "" : "s"}` : "No run yet"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Warnings do not always block progress, but they usually mean stage-first is the safer path.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Decision lane
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {syncExecutionOverview?.canApply
+                    ? "Apply-ready"
+                    : syncExecutionOverview?.canStage
+                      ? "Stage-first"
+                      : "Inspect-first"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Let the execution read decide whether this belongs in history, apply, or another cleanup pass.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Rehearse first, automate second</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  This section is the safety rail between a promising connector and a trustworthy one. The goal is not more output, it is cleaner output.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Execution read</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {syncExecutionOverview ? syncExecutionOverview.importReadyLabel : "Awaiting sample"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {syncExecutionOverview
+                      ? syncExecutionOverview.actionHint
+                      : "Load one realistic sample so the runner can prove the exact path it will take."}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Best decision rule</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {syncExecution?.reviewedWarnings.length
+                      ? "Stage before apply"
+                      : syncExecution
+                        ? "Apply only if clean"
+                        : "Inspect first"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {syncExecution?.reviewedWarnings.length
+                      ? "Warnings or duplicates mean history is usually the safer next stop than direct merge."
+                      : "A rehearsal only graduates to apply when the parsed output feels trustworthy end to end."}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best use
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Dry-run a provider with real input before trusting live cadence or manual apply.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  What matters most
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Parsed output quality, warning count, duplicate handling, and whether the job belongs in history or straight to apply.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground">
+                  Rehearse with one realistic sample, inspect the execution preview, then stage or apply only if it reads cleanly.
+                </p>
+              </div>
+            </div>
             {syncPreview ? (
               <>
                 <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -3401,6 +4351,7 @@ export function DataSettings({
         </div>
 
         <Card>
+          <div id="settings-market-controls" />
           <CardHeader>
             <CardTitle>Live market controls</CardTitle>
             <CardDescription>
@@ -3408,6 +4359,135 @@ export function DataSettings({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Source mode
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {marketPreferences.preferredSource === "alpha-vantage" ? "Live market feed" : "Fallback market mode"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Choose live only when the feed is configured and the extra motion helps more than it hurts.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Refresh rhythm
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {marketPreferences.autoRefresh ? `${marketPreferences.pollingIntervalSeconds}s polling` : "Manual / static"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Slower refresh makes demos calmer. Faster refresh makes stale feeds more obvious.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Holdings watch
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {marketPreferences.includeHoldingsWatch ? "Included in market read" : "Sector-only read"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Keep this on when portfolio context matters. Turn it off when you want a broader market-only screen.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Watchlist coverage
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {marketPreferences.watchlist.length} tracked sector{marketPreferences.watchlist.length === 1 ? "" : "s"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Suggested sectors become more useful when the watchlist reflects the lanes you actually care to revisit.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">Pick the market posture you can trust</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  These settings are less about feeling live and more about keeping the market page believable: source quality, refresh rhythm, and whether holdings should participate in the read.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Current source mode</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {marketPreferences.preferredSource === "alpha-vantage" ? "Live source" : "Fallback only"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {marketPreferences.preferredSource === "alpha-vantage"
+                      ? "Use this when the external feed is configured and you want fresher market signals."
+                      : "Use this when demo stability matters more than live feed freshness."}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Refresh posture</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {marketPreferences.autoRefresh
+                      ? `Every ${marketPreferences.pollingIntervalSeconds}s`
+                      : "Manual / static"}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {marketPreferences.autoRefresh
+                      ? "Faster polling feels more live, but it also makes stale or rate-limited sources more obvious."
+                      : "Turn refresh off when you want the screen to stay stable during walkthroughs."}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Use this for</p>
+                <p className="mt-1 text-sm font-medium">Confidence in timing</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  These controls decide whether the market page feels live, conservative, or demo-safe.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Best demo posture</p>
+                <p className="mt-1 text-sm font-medium">Fallback plus watchlist on</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  That keeps the screen dependable even when external pricing feeds are noisy.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Watch closely</p>
+                <p className="mt-1 text-sm font-medium">Polling speed</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Faster intervals feel live, but they also make stale or rate-limited sources more obvious.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/20 p-4 md:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  First question
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Do you want this page to feel live, or do you want it to stay calm and dependable during review sessions?
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Read this with
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Pair source mode with refresh rhythm. Fast polling only helps if the upstream feed is trustworthy enough.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best move
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Keep fallback or slower refresh for demos, and only switch to livelier settings when fresh market motion genuinely helps.
+                </p>
+              </div>
+            </div>
             <SegmentedControl
               label="Market source"
               options={[
@@ -3468,7 +4548,86 @@ export function DataSettings({
             <CardTitle>Export preview</CardTitle>
             <CardDescription>Readable backup format for demos and debugging.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Snapshot size</p>
+                <p className="mt-1 text-sm font-medium">{exportPreviewStats.charCount.toLocaleString()} chars</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Quick signal for whether you are exporting a full working state or a very sparse shell.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Readable lines</p>
+                <p className="mt-1 text-sm font-medium">{exportPreviewStats.lineCount.toLocaleString()} lines</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  A useful sanity check before sharing or restoring the workspace elsewhere.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Portfolio story</p>
+                <p className="mt-1 text-sm font-medium">{assets.length} holdings · {transactions.length} transactions</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Make sure the saved asset story and the journal story still match.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Market context</p>
+                <p className="mt-1 text-sm font-medium">{exportPreviewStats.watchlistCount} watch item{exportPreviewStats.watchlistCount === 1 ? "" : "s"}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Helpful when you want the restored workspace to bring back the same market lens too.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-background p-4 md:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  First question
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Does this snapshot tell one coherent story across onboarding, portfolio, goals, and market watch state?
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Read this with
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Check size, line count, and portfolio context together before treating the export as a clean restore point.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best move
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Use this preview right before resets, risky imports, or walkthroughs so the backup reflects the exact state you mean to preserve.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Why this matters</p>
+                <p className="mt-1 text-sm font-medium">Readable before downloadable</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  You can inspect the exact snapshot shape before sharing it or restoring it elsewhere.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Best use</p>
+                <p className="mt-1 text-sm font-medium">Spot-check the story</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Review whether goals, risk posture, and portfolio state all reflect the same narrative.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-medium">Use it before resets</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  A quick visual check here helps avoid exporting stale or half-edited workspace data.
+                </p>
+              </div>
+            </div>
             <pre className="max-h-[420px] overflow-auto rounded-md border bg-muted/40 p-4 text-xs leading-5">
               {exportedSnapshot}
             </pre>

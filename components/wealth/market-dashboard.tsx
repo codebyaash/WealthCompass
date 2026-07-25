@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, Compass, Landmark, TrendingDown, TrendingUp } from "lucide-react";
 import { AskMentorLink } from "@/components/wealth/ask-mentor-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,7 +61,7 @@ import {
 import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import type { RiskProfile } from "@/lib/wealth-rules";
-import { SelectField } from "@/components/wealth/form-fields";
+import { SegmentedControl, SelectField } from "@/components/wealth/form-fields";
 
 const marketExplainers = [
   {
@@ -92,6 +92,24 @@ const fallbackMarketTrack = {
   ],
   title: "Market context",
 };
+
+type MarketActionTone = "neutral" | "open" | "save" | "remove";
+type MarketPriorityAction =
+  | "open-overview"
+  | "open-fit"
+  | "open-compare"
+  | "open-trends"
+  | "open-operations"
+  | "review-next"
+  | "focus-top-suggested";
+type MarketSectionId =
+  | "heatmap"
+  | "overview"
+  | "compare"
+  | "trends"
+  | "conversation"
+  | "fit"
+  | "operations";
 
 function resolveDistinctSectorIds(
   sectorIds: string[],
@@ -302,9 +320,29 @@ export function MarketDashboard({
   const [watchlistFilter, setWatchlistFilter] = useState<"all" | "review-now" | "suggested">(
     "all",
   );
-  const [marketActionMessage, setMarketActionMessage] = useState(
-    "Compare sectors to decide what to study next or save for review.",
-  );
+  const watchlistLaneRefs = useRef<
+    Record<"reviewed" | "study-now" | "watch", HTMLDivElement | null>
+  >({
+    reviewed: null,
+    "study-now": null,
+    watch: null,
+  });
+  const marketSectionRefs = useRef<Record<MarketSectionId, HTMLDivElement | null>>({
+    compare: null,
+    conversation: null,
+    fit: null,
+    heatmap: null,
+    operations: null,
+    overview: null,
+    trends: null,
+  });
+  const [marketActionFeedback, setMarketActionFeedback] = useState<{
+    message: string;
+    tone: MarketActionTone;
+  }>({
+    message: "Compare sectors to decide what to study next or save for review.",
+    tone: "neutral",
+  });
   const marketPortfolioNote = useMemo(
     () =>
       getMarketPortfolioNote({
@@ -326,10 +364,85 @@ export function MarketDashboard({
     holdingsWatchSummary.trackedTotal > 0
       ? "You already have tracked assets, so today’s useful question is how the market tone interacts with your actual mix, not whether one sector is exciting."
       : "Until the portfolio is mapped in, this page is mainly here to build pattern recognition: breadth, sentiment, sector leadership, and why none of them should override your plan alone.";
+  const marketStatusCards = [
+    {
+      detail:
+        marketData.sentiment === "Constructive"
+          ? "Breadth is supportive, so this is a good session for planned study and calm comparison."
+          : marketData.sentiment === "Cautious"
+            ? "Breadth is softer, so this is a better session for resilience checks than for fresh conviction."
+            : "The tape is mixed, which makes comparison and context more valuable than prediction.",
+      label: "Market posture",
+      value: marketData.sentiment,
+    },
+    {
+      detail:
+        holdingsWatchSummary.trackedTotal > 0
+          ? `${holdingsWatchSummary.trackedCount} tracked holding${holdingsWatchSummary.trackedCount === 1 ? "" : "s"} are feeding the live market lens.`
+          : "Add more tracked holdings if you want the market page to feel more personal than generic.",
+      label: "Portfolio link",
+      value:
+        holdingsWatchSummary.trackedTotal > 0
+          ? `${holdingsWatchSummary.deltaPercent >= 0 ? "+" : ""}${holdingsWatchSummary.deltaPercent.toFixed(2)}% watch`
+          : "Needs mapping",
+    },
+    {
+      detail:
+        reviewQueueSummary.reviewNow.length > 0
+          ? `${reviewQueueSummary.reviewNow.length} saved sector${reviewQueueSummary.reviewNow.length === 1 ? "" : "s"} deserve a fresh look before they go stale.`
+          : "Your saved sector queue does not have anything urgent waiting for review.",
+      label: "Watchlist pressure",
+      value:
+        reviewQueueSummary.reviewNow.length > 0
+          ? `${reviewQueueSummary.reviewNow.length} review now`
+          : "Clear",
+    },
+    {
+      detail: marketPreferences.autoRefresh
+        ? `Polling every ${marketPreferences.pollingIntervalSeconds} seconds with ${marketPreferences.preferredSource} as the source mode.`
+        : `Auto refresh is paused, so this page will stay stable until you refresh or reopen it.`,
+      label: "Refresh posture",
+      value: marketPreferences.autoRefresh ? "Live loop" : "Manual",
+    },
+  ];
+  const marketJumpCards = [
+    {
+      badge: topSuggestedSector ? topSuggestedSector.name : "Suggested lens",
+      detail: "Review the reordered sector view that mixes live market leadership with your own fit gaps.",
+      sectionId: "fit" as const,
+      title: "Suggested sectors",
+    },
+    {
+      badge: selectedSectorId === "all-suggested" ? "All suggested" : selectedSectorGroup?.name ?? "Selected",
+      detail: "Jump straight into the sector explorer and sub-sector drilldown for the current focus lane.",
+      sectionId: "trends" as const,
+      title: "Trend explorer",
+    },
+    {
+      badge: compareLeftSector && compareRightSector ? "Comparison loaded" : "Ready",
+      detail: "Use the compare strip when two sectors both look relevant and you need a sharper read.",
+      sectionId: "compare" as const,
+      title: "Compare sectors",
+    },
+    {
+      badge: marketConversation[0]?.title ?? "Now vs suggested",
+      detail: "Read the plain-English market conversation when the tape feels noisier than your conviction.",
+      sectionId: "conversation" as const,
+      title: "Guided conversation",
+    },
+  ];
   const selectedSectorGroup = useMemo(
     () => sectorGroups.find((group) => group.id === selectedSectorId) ?? sectorGroups[0] ?? null,
     [sectorGroups, selectedSectorId],
   );
+  const marketActionBannerClassName =
+    marketActionFeedback.tone === "open"
+      ? "border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300"
+      : marketActionFeedback.tone === "save"
+        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+        : marketActionFeedback.tone === "remove"
+          ? "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+          : "border-border bg-background text-muted-foreground";
   const sectorSelectorOptions = useMemo(
     () => [
       ["all-suggested", "All suggested sectors"],
@@ -357,6 +470,167 @@ export function MarketDashboard({
       : suggestedSectorSnapshot.sectors.find((idea) => idea.id === selectedSectorId) ?? null;
   const topSuggestedSector = suggestedSectorSnapshot.topSuggestions[0] ?? null;
   const secondSuggestedSector = suggestedSectorSnapshot.topSuggestions[1] ?? null;
+  const trendExplorerSummary = useMemo(() => {
+    const firstPoint = visibleTrendSeries[0]?.value ?? 0;
+    const lastPoint = visibleTrendSeries[visibleTrendSeries.length - 1]?.value ?? firstPoint;
+    const delta = lastPoint - firstPoint;
+    const focusLabel =
+      selectedSectorId === "all-suggested"
+        ? "Suggested sector basket"
+        : selectedSectorGroup?.name ?? "Selected sector";
+    const strongestPocket =
+      selectedSectorId === "all-suggested"
+        ? topSuggestedSector?.strongestSubSector ?? "Suggested leaders"
+        : selectedSectorGroup?.subSectors[0]?.name ?? "Core names";
+    const windowLabel =
+      trendWindow === "1d" ? "Intraday read" : trendWindow === "1w" ? "Weekly read" : "Monthly read";
+    const directionLabel =
+      delta > 0.35 ? "Building strength" : delta < -0.35 ? "Losing strength" : "Moving sideways";
+    const directionDetail =
+      delta > 0.35
+        ? `${focusLabel} is improving through this ${windowLabel.toLowerCase()}, so use the chart to confirm whether strength is broadening.`
+        : delta < -0.35
+          ? `${focusLabel} is softening through this ${windowLabel.toLowerCase()}, so read it as a context cue before reacting.`
+          : `${focusLabel} is relatively balanced through this ${windowLabel.toLowerCase()}, which makes comparison more useful than conviction.`;
+    const actionTitle =
+      selectedSectorId === "all-suggested"
+        ? "Review one suggested lane"
+        : selectedSuggestedSector
+          ? "Compare before acting"
+          : "Use as context first";
+    const actionDetail =
+      selectedSectorId === "all-suggested"
+        ? "Use this combined trend to decide which suggested sector deserves your first deeper read."
+        : selectedSuggestedSector
+          ? "This chart is most useful when you compare today’s tape with your portfolio-fit gap before making a move."
+          : "This chart is better for learning the market backdrop than forcing an allocation idea right away.";
+
+    return {
+      actionDetail,
+      actionTitle,
+      delta,
+      directionDetail,
+      directionLabel,
+      focusLabel,
+      strongestPocket,
+      windowLabel,
+    };
+  }, [
+    selectedSectorGroup,
+    selectedSectorId,
+    selectedSuggestedSector,
+    topSuggestedSector,
+    trendWindow,
+    visibleTrendSeries,
+  ]);
+  const marketOperatingLenses = [
+    {
+      label: "Active lane",
+      value:
+        selectedSectorId === "all-suggested"
+          ? "Suggested basket"
+          : selectedSectorGroup?.name ?? "Pick a sector",
+      detail:
+        selectedSectorId === "all-suggested"
+          ? "You are reading the curated sector basket instead of one isolated lane."
+          : selectedSectorPriority
+            ? `${selectedSectorPriority} this lane before deciding whether it deserves compare or watchlist space.`
+            : "Choose one sector to turn the market page into a more specific read.",
+    },
+    {
+      label: "Best comparison",
+      value:
+        quickCompare?.primarySector.name && quickCompare?.secondarySector.name
+          ? `${quickCompare.primarySector.name} vs ${quickCompare.secondarySector.name}`
+          : "Compare pending",
+      detail:
+        quickCompare?.detail ??
+        "Once sectors are loaded, this points you to the cleanest next comparison.",
+    },
+    {
+      label: "Review pressure",
+      value:
+        reviewQueueSummary.reviewNow.length > 0
+          ? `${reviewQueueSummary.reviewNow.length} sector${reviewQueueSummary.reviewNow.length === 1 ? "" : "s"}`
+          : "Clear",
+      detail:
+        reviewQueueSummary.reviewNow.length > 0
+          ? "Saved sectors are waiting for a fresh pass before they turn into stale bookmarks."
+          : "No saved sector currently needs an urgent revisit.",
+    },
+  ];
+  const marketWorkingOrder = [
+    "Read breadth first so one hot sector does not hijack your session.",
+    "Review one lane, then compare only when two ideas both still look relevant.",
+    "Save sectors for follow-up, not as a reaction to every strong move.",
+  ];
+  const marketPriorityQueue = [
+    sectorBreadth.advanceRatio < 45
+      ? {
+          action: "open-overview" as const,
+          detail:
+            "Breadth is soft enough that context matters more than conviction right now. Start with the broad market read before drilling into a single lane.",
+          label: "Read market breadth first",
+          section: "Overview",
+          tone: "urgent" as const,
+        }
+      : topSuggestedSector
+        ? {
+            action: "focus-top-suggested" as const,
+            detail: `${topSuggestedSector.name} is the clearest suggested starting point right now, so it is the best lane to open before you widen the study session.`,
+            label: `Open ${topSuggestedSector.name}`,
+            section: "Suggested sectors",
+            tone: "urgent" as const,
+          }
+        : {
+            action: "open-trends" as const,
+            detail:
+              "Open the sector explorer first so the live tape turns into one focused lane instead of a scattered market read.",
+            label: "Open the trend explorer",
+            section: "Trends",
+            tone: "urgent" as const,
+          },
+    reviewQueueSummary.next
+      ? {
+          action: "review-next" as const,
+          detail: `${reviewQueueSummary.next.sector.name} is already saved and due for review, which is usually a better next move than chasing a brand-new sector idea.`,
+          label: `Review ${reviewQueueSummary.next.sector.name}`,
+          section: "Watchlist",
+          tone: "watch" as const,
+        }
+      : quickCompare
+        ? {
+            action: "open-compare" as const,
+            detail: `${quickCompare.primarySector.name} vs ${quickCompare.secondarySector.name} is the cleanest next comparison if you need to separate tape strength from actual portfolio fit.`,
+            label: "Load the best comparison",
+            section: "Compare",
+            tone: "watch" as const,
+          }
+        : {
+            action: "open-fit" as const,
+            detail:
+              "Use the fit view to separate genuinely relevant sectors from the ones that are only loud today.",
+            label: "Review portfolio fit gaps",
+            section: "Fit",
+            tone: "watch" as const,
+          },
+    marketPreferences.autoRefresh
+      ? {
+          action: "open-operations" as const,
+          detail: `The page is polling every ${marketPreferences.pollingIntervalSeconds} seconds, so keep one eye on the feed posture before over-trusting a single print.`,
+          label: "Check the live feed posture",
+          section: "Operations",
+          tone: "steady" as const,
+        }
+      : {
+          action: "open-operations" as const,
+          detail:
+            "Refresh is manual right now, so use the operations lane to decide whether the snapshot is fresh enough for a serious read.",
+          label: "Check snapshot freshness",
+          section: "Operations",
+          tone: "steady" as const,
+        },
+  ];
   const marketActionItems = useMemo(
     () =>
       buildMarketActionItems({
@@ -549,6 +823,15 @@ export function MarketDashboard({
       };
     });
   }, [savedWatchlistQueue]);
+  const marketSectionJumpActions = [
+    ["heatmap", "Heatmap"],
+    ["overview", "Overview"],
+    ["compare", "Compare"],
+    ["trends", "Trends"],
+    ["conversation", "Now vs suggested"],
+    ["fit", "Why it fits"],
+    ["operations", "Ops"],
+  ] as const;
   const savedWatchlistStatusCounts = useMemo(() => {
     return {
       newCount: savedWatchlistQueueWithStatus.filter((item) => item.reviewStatus === "new").length,
@@ -572,6 +855,51 @@ export function MarketDashboard({
 
     return savedWatchlistQueueWithStatus;
   }, [savedWatchlistQueueWithStatus, suggestedSectorIds, watchlistFilter]);
+  const groupedSavedWatchlistSections = useMemo(() => {
+    const studyNow = filteredSavedWatchlistQueue.filter(
+      (item) => item.bucket === "study-now" && item.reviewStatus !== "recent",
+    );
+    const watch = filteredSavedWatchlistQueue.filter(
+      (item) => item.bucket !== "study-now" && item.reviewStatus !== "recent",
+    );
+    const reviewed = filteredSavedWatchlistQueue.filter((item) => item.reviewStatus === "recent");
+
+    return [
+      {
+        description:
+          "These are the saved sectors that still deserve a focused learning pass before they fade into background noise.",
+        empty:
+          watchlistFilter === "review-now"
+            ? "Nothing currently needs a fresh study pass."
+            : "No saved sectors are sitting in the study-now lane right now.",
+        key: "study-now",
+        label: "Study now",
+        rows: studyNow,
+      },
+      {
+        description:
+          "These sectors are worth keeping in rotation, but they do not need your deepest attention right now.",
+        empty:
+          watchlistFilter === "review-now"
+            ? "Nothing is waiting in the lighter watch lane right now."
+            : "No saved sectors are in the active watch lane right now.",
+        key: "watch",
+        label: "Watch",
+        rows: watch,
+      },
+      {
+        description:
+          "These were reviewed recently, so they can stay parked here until the regime changes or you want another pass.",
+        empty:
+          watchlistFilter === "review-now"
+            ? "Nothing has been reviewed recently inside this filtered view."
+            : "Nothing has been marked reviewed recently yet.",
+        key: "reviewed",
+        label: "Reviewed",
+        rows: reviewed,
+      },
+    ] as const;
+  }, [filteredSavedWatchlistQueue, watchlistFilter]);
   const compareLeftSector = useMemo(
     () => sectorGroups.find((group) => group.id === compareLeftSectorId) ?? null,
     [compareLeftSectorId, sectorGroups],
@@ -609,6 +937,10 @@ export function MarketDashboard({
     selectedSectorGroup,
     selectedSuggestedSector,
   ]);
+  const currentLeaderSectorGroup = useMemo(
+    () => sectorGroups.find((group) => group.name === sectorBreadth.strongest) ?? null,
+    [sectorBreadth.strongest, sectorGroups],
+  );
   const topSuggestedSectorGroup = useMemo(
     () => sectorGroups.find((group) => group.id === topSuggestedSector?.id) ?? null,
     [sectorGroups, topSuggestedSector?.id],
@@ -699,6 +1031,21 @@ export function MarketDashboard({
         : softerPriority === "Study"
           ? softer
           : stronger;
+    const studyVerdict =
+      strongerPriority === "Study" && softerPriority !== "Study"
+        ? `${stronger.name} is the better study lane right now because it combines market strength with a more urgent portfolio-use case.`
+        : softerPriority === "Study" && strongerPriority !== "Study"
+          ? `${softer.name} is the better study lane right now because the fit gap matters more than the stronger tape move.`
+          : `Start with ${studySector.name}, then use the other sector as a contrast read instead of trying to act on both.`;
+    const trackSector = studySector.id === stronger.id ? softer : stronger;
+    const trackVerdict =
+      trackSector.id === stronger.id
+        ? `${trackSector.name} is worth tracking for market leadership, but it does not need to become your first move.`
+        : `${trackSector.name} is worth tracking as the comparison lane so you can keep perspective on what the leader is doing.`;
+    const restraintVerdict =
+      strongerPriority === "Study" && softerPriority === "Study"
+        ? "Do not treat this comparison like a reason to widen exposure immediately. Learn the sector structure first, then decide slowly."
+        : `Do not chase ${stronger.name} just because it is stronger on tape today. Use the fit and sub-sector read before changing anything.`;
 
     return {
       fitLead:
@@ -711,7 +1058,15 @@ export function MarketDashboard({
       softer,
       stronger,
       strongerPriority,
+      studyVerdict,
       studySector,
+      takeawayTone:
+        studySector.id === stronger.id
+          ? "momentum-with-fit"
+          : "fit-over-momentum",
+      trackSector,
+      trackVerdict,
+      restraintVerdict,
       takeaway,
     };
   }, [
@@ -735,8 +1090,27 @@ export function MarketDashboard({
     [compareAutoSync, compareLeftSectorId, compareRightSectorId, selectedSectorId],
   );
 
-  function focusSectorFromSuggestion(sectorId: string) {
+  function focusSectorFromSuggestion(
+    sectorId: string,
+    source: "compare" | "watchlist" | "suggested" | "explorer" | "review-queue" = "explorer",
+  ) {
     if (!sectorGroups.some((group) => group.id === sectorId)) return;
+    const sectorLabel =
+      sectorGroups.find((group) => group.id === sectorId)?.name ?? "This sector";
+
+    setMarketActionFeedback({
+      message:
+        source === "compare"
+          ? `Opened ${sectorLabel} from the sector comparison view.`
+          : source === "watchlist"
+            ? `Opened ${sectorLabel} from your saved market watchlist.`
+            : source === "suggested"
+              ? `Opened ${sectorLabel} from the suggested sector view.`
+              : source === "review-queue"
+                ? `Opened ${sectorLabel} from the market review queue.`
+                : `Opened ${sectorLabel} from the sector explorer.`,
+      tone: "open",
+    });
     setSelectedSectorId(sectorId);
   }
 
@@ -749,7 +1123,10 @@ export function MarketDashboard({
     setCompareRightSectorId(sectorId);
   }
 
-  function handleToggleSectorWatchlist(sectorId: string) {
+  function handleToggleSectorWatchlist(
+    sectorId: string,
+    source: "compare" | "explorer" | "watchlist" | "suggested" = "explorer",
+  ) {
     const sectorLabel =
       sectorGroups.find((group) => group.id === sectorId)?.name ?? "This sector";
 
@@ -757,11 +1134,27 @@ export function MarketDashboard({
       const exists = current.some((entry) => entry.sectorId === sectorId);
       const nextEntries = toggleMarketWatchlistSector(sectorId, current);
 
-      setMarketActionMessage(
-        exists
-          ? `${sectorLabel} removed from your saved market watchlist.`
-          : `${sectorLabel} saved to your market watchlist.`,
-      );
+      const addedMessage =
+        source === "compare"
+          ? `${sectorLabel} saved for review from this sector comparison.`
+          : source === "suggested"
+            ? `${sectorLabel} saved from the suggested sector view.`
+            : source === "watchlist"
+              ? `${sectorLabel} added back to your saved market watchlist.`
+              : `${sectorLabel} saved from the sector explorer.`;
+      const removedMessage =
+        source === "compare"
+          ? `${sectorLabel} removed from your saved market watchlist after this comparison.`
+          : source === "suggested"
+            ? `${sectorLabel} removed from your saved list from the suggested sector view.`
+            : source === "watchlist"
+              ? `${sectorLabel} removed from your saved market watchlist.`
+              : `${sectorLabel} removed from your saved list from the sector explorer.`;
+
+      setMarketActionFeedback({
+        message: exists ? removedMessage : addedMessage,
+        tone: exists ? "remove" : "save",
+      });
 
       return nextEntries;
     });
@@ -769,6 +1162,100 @@ export function MarketDashboard({
 
   function handleMarkSectorReviewed(sectorId: string) {
     setSavedWatchlistEntries((current) => markMarketWatchlistSectorReviewed(sectorId, current));
+    const sectorLabel =
+      sectorGroups.find((group) => group.id === sectorId)?.name ?? "This sector";
+    setMarketActionFeedback({
+      message: `${sectorLabel} marked as reviewed for now.`,
+      tone: "save",
+    });
+  }
+
+  function openWatchlistLane(lane: "reviewed" | "study-now" | "watch") {
+    watchlistLaneRefs.current[lane]?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    setMarketActionFeedback({
+      message:
+        lane === "study-now"
+          ? "Jumped to the Study now lane in your saved market watchlist."
+          : lane === "watch"
+            ? "Jumped to the Watch lane in your saved market watchlist."
+            : "Jumped to the Reviewed lane in your saved market watchlist.",
+      tone: "open",
+    });
+  }
+
+  function loadConversationComparison(focusSectorId: string) {
+    const focusSector = sectorGroups.find((group) => group.id === focusSectorId) ?? null;
+    if (!focusSector) return;
+
+    const primarySector = currentLeaderSectorGroup ?? focusSector;
+    const secondarySector =
+      primarySector.id !== focusSector.id
+        ? focusSector
+        : topSuggestedSectorGroup && topSuggestedSectorGroup.id !== primarySector.id
+          ? topSuggestedSectorGroup
+          : secondSuggestedSectorGroup && secondSuggestedSectorGroup.id !== primarySector.id
+            ? secondSuggestedSectorGroup
+            : null;
+
+    if (!secondarySector) {
+      focusSectorFromSuggestion(focusSector.id, "compare");
+      return;
+    }
+
+    setCompareAutoSync(false);
+    setCompareLeftSectorId(primarySector.id);
+    setCompareRightSectorId(secondarySector.id);
+    setMarketActionFeedback({
+      message: `Loaded ${primarySector.name} vs ${secondarySector.name} into the sector comparison strip.`,
+      tone: "open",
+    });
+  }
+
+  function openMarketSection(sectionId: MarketSectionId, label: string) {
+    marketSectionRefs.current[sectionId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    setMarketActionFeedback({
+      message: `Opened ${label.toLowerCase()} on the market page.`,
+      tone: "open",
+    });
+  }
+
+  function handleMarketPriorityAction(action: MarketPriorityAction) {
+    switch (action) {
+      case "open-overview":
+        openMarketSection("overview", "Overview");
+        return;
+      case "open-fit":
+        openMarketSection("fit", "Why it fits");
+        return;
+      case "open-compare":
+        openMarketSection("compare", "Compare");
+        return;
+      case "open-trends":
+        openMarketSection("trends", "Trends");
+        return;
+      case "open-operations":
+        openMarketSection("operations", "Ops");
+        return;
+      case "review-next":
+        if (reviewQueueSummary.next) {
+          handleMarkSectorReviewed(reviewQueueSummary.next.sector.id);
+          focusSectorFromSuggestion(reviewQueueSummary.next.sector.id, "review-queue");
+        }
+        return;
+      case "focus-top-suggested":
+        if (topSuggestedSector) {
+          focusSectorFromSuggestion(topSuggestedSector.id, "suggested");
+        }
+        return;
+      default:
+        return;
+    }
   }
 
   useEffect(() => {
@@ -923,7 +1410,7 @@ export function MarketDashboard({
                         focusSectorFromSuggestion(reviewQueueSummary.next?.sector.id ?? "");
                       }}
                     >
-                      Open {reviewQueueSummary.next.sector.name}
+                      Review {reviewQueueSummary.next.sector.name}
                     </Button>
                   ) : null}
                 </>
@@ -1003,6 +1490,328 @@ export function MarketDashboard({
                   />
                 </div>
               </div>
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border bg-background p-4 xl:grid-cols-[1.05fr_0.95fr]">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {marketStatusCards.map((item) => (
+                <div key={item.label} className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className="mt-2 text-sm font-semibold text-foreground">{item.value}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+            <div className="grid gap-2">
+              {marketJumpCards.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => openMarketSection(item.sectionId, item.title)}
+                  className="rounded-md border bg-muted/10 px-4 py-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{item.title}</p>
+                    <Badge variant="outline">{item.badge}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Priority queue</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Use this when you want the shortest route from market context to the next useful study or compare move.
+                </p>
+              </div>
+              <Badge variant="outline">{marketPriorityQueue.length} active focus</Badge>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {marketPriorityQueue.map(({ action, detail, label, section, tone }) => (
+                <div
+                  key={`${section}-${label}`}
+                  className="rounded-md border border-border/70 bg-muted/20 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{label}</p>
+                    <Badge
+                      variant="outline"
+                      className={
+                        tone === "urgent"
+                          ? "border-amber-500/40 text-amber-600 dark:text-amber-300"
+                          : tone === "watch"
+                            ? "border-primary/30 text-primary"
+                            : "border-emerald-500/40 text-emerald-600 dark:text-emerald-300"
+                      }
+                    >
+                      {tone === "urgent"
+                        ? "Now"
+                        : tone === "watch"
+                          ? "Next"
+                          : "Keep in view"}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {section}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => handleMarketPriorityAction(action)}
+                  >
+                    Open lane
+                    <TrendingUp className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-[1.05fr_0.95fr]">
+            <div className="grid gap-3 md:grid-cols-3">
+              {marketOperatingLenses.map((lens) => (
+                <div
+                  key={lens.label}
+                  className="rounded-md border border-border/70 bg-background p-4"
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {lens.label}
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-foreground">{lens.value}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{lens.detail}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Working order
+              </p>
+              <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
+                {marketWorkingOrder.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border bg-background p-4 xl:grid-cols-[1.05fr_0.95fr]">
+            <div>
+              <p className="text-sm font-medium">Explorer controls</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Pick the market lens you want to inspect first, then decide whether this is a study lane, a compare lane, or just context.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SelectField
+                label="Sector lens"
+                value={selectedSectorId}
+                options={sectorSelectorOptions}
+                onChange={setSelectedSectorId}
+              />
+              <SegmentedControl
+                label="Trend lens"
+                options={[
+                  ["1d", "Day"],
+                  ["1w", "Week"],
+                  ["1m", "Month"],
+                ]}
+                value={trendWindow}
+                onChange={(value) => setTrendWindow(value as MarketTrendWindow)}
+              />
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                First question
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Is this lane useful because it is leading the tape, because it fits your portfolio gap, or just because it is noisy today?
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Read this with
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Use sector lens, trend lens, and compare together before treating any move as an allocation idea.
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Best move
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Review one lane, then either compare it or save it. Do not try to process the whole market at once.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-md border bg-background p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-medium">Market workspace guide</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Move through the page in order: scan the tape, compare the fit, read the trend,
+                  then decide what to save or study.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {marketSectionJumpActions.map(([sectionId, label]) => (
+                  <Button
+                    key={sectionId}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => openMarketSection(sectionId as MarketSectionId, label)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="rounded-md border bg-background p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-sm font-medium">Today on market</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Start with the highest-signal lane, then jump directly into the section that can sharpen your next decision.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {reviewQueueSummary.next ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => {
+                      handleMarkSectorReviewed(reviewQueueSummary.next?.sector.id ?? "");
+                      focusSectorFromSuggestion(reviewQueueSummary.next?.sector.id ?? "");
+                    }}
+                  >
+                    Review {reviewQueueSummary.next.sector.name}
+                  </Button>
+                ) : null}
+                <AskMentorLink
+                  label="Ask AI mentor"
+                  mentorPrompt={`From the market page, help me decide what deserves my attention first between live breadth, suggested sectors, my review queue, and my tracked holdings watch.`}
+                  mentorQuestionId="allocation"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Market summary"
+                />
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 xl:grid-cols-4">
+              <button
+                type="button"
+                onClick={() => openMarketSection("heatmap", "Heatmap")}
+                className="rounded-md border border-border/70 bg-muted/15 p-4 text-left transition hover:bg-muted/30"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Market tone
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">{marketData.sentiment}</p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                    <Activity className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {marketData.sentiment === "Constructive"
+                    ? "Breadth is supportive, so this is a good read-and-compare session, not a chase session."
+                    : marketData.sentiment === "Cautious"
+                      ? "Breadth is softer, so use this page to check resilience and fit gaps before reacting."
+                      : "The tape is mixed, which makes comparison and context more useful than conviction."}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  topSuggestedSector
+                    ? focusSectorFromSuggestion(topSuggestedSector.id, "suggested")
+                    : openMarketSection("fit", "Why it fits")
+                }
+                className="rounded-md border border-border/70 bg-muted/15 p-4 text-left transition hover:bg-muted/30"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Best fit
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {topSuggestedSector?.name ?? "Suggested sectors"}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                    <Compass className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {topSuggestedSector
+                    ? `${topSuggestedSector.name} is the cleanest suggested opening read from your current market-and-fit picture.`
+                    : "Use the suggested-sector lens to find the first sector worth understanding more deeply."}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => openMarketSection("operations", "Ops")}
+                className="rounded-md border border-border/70 bg-muted/15 p-4 text-left transition hover:bg-muted/30"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Review queue
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {reviewQueueSummary.reviewNow.length > 0
+                        ? `${reviewQueueSummary.reviewNow.length} to review`
+                        : "Clear for now"}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                    <Landmark className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {reviewQueueSummary.reviewNow.length
+                    ? `${reviewQueueSummary.reviewNow.length} saved sector${reviewQueueSummary.reviewNow.length === 1 ? "" : "s"} deserve fresh review before they go stale in your watchlist.`
+                    : "Your saved watchlist does not have any overdue review lanes right now."}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => openMarketSection("overview", "Overview")}
+                className="rounded-md border border-border/70 bg-muted/15 p-4 text-left transition hover:bg-muted/30"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Portfolio link
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {holdingsWatchSummary.trackedTotal > 0
+                        ? `${holdingsWatchSummary.deltaPercent >= 0 ? "+" : ""}${holdingsWatchSummary.deltaPercent.toFixed(2)}% watch`
+                        : "Add tracked holdings"}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {holdingsWatchSummary.trackedTotal > 0
+                    ? `${holdingsWatchSummary.trackedCount} tracked holding${holdingsWatchSummary.trackedCount === 1 ? "" : "s"} are already feeding the market lens.`
+                    : "Map more of the portfolio so this page can compare live market tone with your actual holdings."}
+                </p>
+              </button>
             </div>
           </div>
           <div className="flex flex-col justify-between gap-3 rounded-md border bg-muted/30 p-4 md:flex-row md:items-center">
@@ -1086,6 +1895,9 @@ export function MarketDashboard({
         </CardContent>
       </Card>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.heatmap = node;
+      }}>
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1104,6 +1916,41 @@ export function MarketDashboard({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Scan first
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Start with the strongest and weakest lanes before reading any one sector in detail.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                That tells you whether the tape is broad, concentrated, or rolling over unevenly.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Best use
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Review sectors to learn structure. Load compare when two lanes both look relevant.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                The save action is for follow-up, not for turning every move into a trade candidate.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Current cue
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                {sectorBreadth.strongest ?? "Leader pending"} is leading while {sectorBreadth.weakest ?? "laggards"} are softest.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Use that spread to decide whether you are looking at healthy breadth or a narrow move.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {sortedSectorGroups.map((sector, index) => {
               const toneClass =
@@ -1116,11 +1963,9 @@ export function MarketDashboard({
                       : "border-border bg-background";
 
               return (
-                <button
+                <div
                   key={`heat-${sector.id}`}
-                  type="button"
-                  className={`rounded-md border p-4 text-left transition-colors hover:border-primary/40 ${toneClass}`}
-                  onClick={() => setSelectedSectorId(sector.id)}
+                  className={`rounded-md border p-4 transition-colors hover:border-primary/40 ${toneClass}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -1148,24 +1993,56 @@ export function MarketDashboard({
                   <p className="mt-3 text-xs leading-5 text-muted-foreground line-clamp-3">
                     {sector.topIdea}
                   </p>
-                </button>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => setSelectedSectorId(sector.id)}
+                    >
+                      Review sector
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => loadConversationComparison(sector.id)}
+                    >
+                      Load compare
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => handleToggleSectorWatchlist(sector.id, "explorer")}
+                    >
+                      {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save lane"}
+                    </Button>
+                  </div>
+                </div>
               );
             })}
           </div>
 
           <div className="rounded-md border bg-background">
-            <div className="grid grid-cols-[auto_1.2fr_auto_auto_auto] gap-3 border-b px-4 py-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[auto_1.2fr_auto_auto_auto] gap-3 border-b px-4 py-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid-cols-[auto_1.2fr_auto_auto_auto_auto_auto]">
               <span>Rank</span>
               <span>Sector</span>
               <span>Move</span>
               <span>Suggested</span>
-              <span>Open</span>
+              <span className="hidden md:inline">View</span>
+              <span className="hidden md:inline">Compare</span>
+              <span className="hidden md:inline">Save</span>
+              <span className="md:hidden">Actions</span>
             </div>
             <div className="divide-y">
               {sortedSectorGroups.map((sector, index) => (
                 <div
                   key={`rank-${sector.id}`}
-                  className="grid grid-cols-[auto_1.2fr_auto_auto_auto] items-center gap-3 px-4 py-3 text-sm"
+                  className="grid grid-cols-[auto_1.2fr_auto_auto_auto] items-center gap-3 px-4 py-3 text-sm md:grid-cols-[auto_1.2fr_auto_auto_auto_auto_auto]"
                 >
                   <span className="font-medium text-muted-foreground">{index + 1}</span>
                   <div>
@@ -1191,7 +2068,7 @@ export function MarketDashboard({
                       <Badge variant="outline">No</Badge>
                     )}
                   </span>
-                  <span>
+                  <span className="flex flex-wrap gap-2 md:contents">
                     <Button
                       type="button"
                       size="sm"
@@ -1199,7 +2076,25 @@ export function MarketDashboard({
                       className="h-8"
                       onClick={() => setSelectedSectorId(sector.id)}
                     >
-                      View
+                      Review sector
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => loadConversationComparison(sector.id)}
+                    >
+                      Load compare
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => handleToggleSectorWatchlist(sector.id, "explorer")}
+                    >
+                      {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save lane"}
                     </Button>
                   </span>
                 </div>
@@ -1208,7 +2103,11 @@ export function MarketDashboard({
           </div>
         </CardContent>
       </Card>
+      </div>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.overview = node;
+      }}>
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1228,6 +2127,137 @@ export function MarketDashboard({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="rounded-md border bg-background p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-medium">Use this overview to pick one lane, not five</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  The point here is to turn the full market into one clean next read: a leader, a best-fit sector, or a caution lane.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {topSuggestedSector ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => focusSectorFromSuggestion(topSuggestedSector.id, "suggested")}
+                  >
+                    Review {topSuggestedSector.name}
+                  </Button>
+                ) : null}
+                {secondSuggestedSector ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => loadConversationComparison(secondSuggestedSector.id)}
+                  >
+                    Load compare
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-3 rounded-md border bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                First question
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Is the strongest lane also the most relevant lane for your portfolio, or is it just the loudest move on the screen?
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Read this with
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Pair market leaders with suggested sectors and your holdings watch before deciding what deserves real attention.
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Best move
+              </p>
+              <p className="mt-2 text-sm text-foreground">
+                Pick one leader, one best-fit lane, and one caution lane. That is enough for a useful market session.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Best momentum right now
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="font-medium">
+                  {currentLeaderSectorGroup?.name ?? sectorBreadth.strongest ?? "Market leader"}
+                </p>
+                {currentLeaderSectorGroup ? (
+                  <Badge variant="secondary">
+                    +{currentLeaderSectorGroup.change.toFixed(2)}%
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Start here when you want to understand what is actually leading the tape before
+                chasing single names.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Best fit for your plan
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="font-medium">
+                  {topSuggestedSector?.name ?? suggestedSectorSnapshot.sectors[0]?.name ?? "Suggested sectors"}
+                </p>
+                {topSuggestedSector ? (
+                  <Badge
+                    variant="outline"
+                    className={getSectorPriorityBadgeClass(
+                      getSectorPriorityLabel({
+                        fitStatus: topSuggestedSector.fitStatus,
+                        isLeader: sectorBreadth.strongest === topSuggestedSector.name,
+                        isSuggested: true,
+                      }),
+                    )}
+                  >
+                    {getSectorPriorityLabel({
+                      fitStatus: topSuggestedSector.fitStatus,
+                      isLeader: sectorBreadth.strongest === topSuggestedSector.name,
+                      isSuggested: true,
+                    })}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Use this as your first suggested-sector read when you want the market view to stay
+                connected to your current portfolio and risk posture.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Be careful around
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="font-medium">{sectorBreadth.weakest ?? "The weakest pocket"}</p>
+                {sectorLeaders.weakest[0] ? (
+                  <Badge variant="outline">
+                    {sectorLeaders.weakest[0].change >= 0 ? "+" : ""}
+                    {sectorLeaders.weakest[0].change.toFixed(2)}%
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Treat this as a review lane, not an impulse lane. Compare it before acting so you
+                can tell whether weakness is isolated or part of a broader risk-off move.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-md border bg-muted/20 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1235,11 +2265,9 @@ export function MarketDashboard({
               </p>
               <div className="mt-3 grid gap-2">
                 {sectorLeaders.strongest.map((sector) => (
-                  <button
+                  <div
                     key={`leader-${sector.id}`}
-                    type="button"
-                    className="rounded-md border bg-background px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
-                    onClick={() => setSelectedSectorId(sector.id)}
+                    className="rounded-md border bg-background px-3 py-3"
                   >
                     {(() => {
                       const compareRole = getComparisonRoleLabel({
@@ -1264,7 +2292,36 @@ export function MarketDashboard({
                     <p className="mt-2 text-xs text-muted-foreground">
                       Strongest pocket: {sector.subSectors[0]?.name ?? "Core names"}
                     </p>
-                  </button>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => setSelectedSectorId(sector.id)}
+                      >
+                        Review sector
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => loadConversationComparison(sector.id)}
+                      >
+                        Load compare
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => handleToggleSectorWatchlist(sector.id, "overview")}
+                      >
+                        {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save lane"}
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1274,11 +2331,9 @@ export function MarketDashboard({
               </p>
               <div className="mt-3 grid gap-2">
                 {sectorLeaders.weakest.map((sector) => (
-                  <button
+                  <div
                     key={`laggard-${sector.id}`}
-                    type="button"
-                    className="rounded-md border bg-background px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
-                    onClick={() => setSelectedSectorId(sector.id)}
+                    className="rounded-md border bg-background px-3 py-3"
                   >
                     {(() => {
                       const compareRole = getComparisonRoleLabel({
@@ -1306,7 +2361,36 @@ export function MarketDashboard({
                     <p className="mt-2 text-xs text-muted-foreground">
                       Watch whether weakness is isolated or part of broader risk-off behavior.
                     </p>
-                  </button>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => setSelectedSectorId(sector.id)}
+                      >
+                        Review sector
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => loadConversationComparison(sector.id)}
+                      >
+                        Load compare
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => handleToggleSectorWatchlist(sector.id, "overview")}
+                      >
+                        {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save lane"}
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1318,7 +2402,7 @@ export function MarketDashboard({
                 These sectors are the overlap between the live market read and what looks most
                 useful for your current holdings and risk posture.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 grid gap-2">
                 {suggestedSectorSnapshot.sectors.map((sector) => (
                   (() => {
                     const compareRole = getComparisonRoleLabel({
@@ -1329,17 +2413,56 @@ export function MarketDashboard({
                     });
 
                     return (
-                  <Button
-                    key={`overlay-${sector.id}`}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setSelectedSectorId(sector.id)}
-                  >
-                    {sector.name}
-                    {compareRole ? ` • ${compareLeftSectorId === sector.id ? "lead compare" : "compare"}` : ""}
-                  </Button>
+                      <div
+                        key={`overlay-${sector.id}`}
+                        className="rounded-md border bg-background px-3 py-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-medium">{sector.name}</p>
+                          {compareRole ? (
+                            <Badge
+                              variant={compareLeftSectorId === sector.id ? "secondary" : "outline"}
+                            >
+                              {compareLeftSectorId === sector.id ? "Lead compare" : compareRole}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">Suggested</Badge>
+                          )}
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Use this as a suggested-sector shortcut when the live tape and your fit
+                          table overlap.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={() => setSelectedSectorId(sector.id)}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={() => loadConversationComparison(sector.id)}
+                          >
+                            Compare
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={() => handleToggleSectorWatchlist(sector.id, "suggested-overlay")}
+                          >
+                            {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save"}
+                          </Button>
+                        </div>
+                      </div>
                     );
                   })()
                 ))}
@@ -1362,15 +2485,13 @@ export function MarketDashboard({
               });
 
               return (
-                <button
+                <div
                   key={sector.id}
-                  type="button"
-                  className={`rounded-md border p-4 text-left transition-colors ${
+                  className={`rounded-md border p-4 ${
                     isSelected
                       ? "border-primary/50 bg-primary/5"
-                      : "bg-background hover:border-primary/40 hover:bg-muted/20"
+                      : "bg-background"
                   }`}
-                  onClick={() => setSelectedSectorId(sector.id)}
                 >
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     {compareRole ? (
@@ -1406,13 +2527,46 @@ export function MarketDashboard({
                   <p className="mt-3 text-sm leading-6 text-muted-foreground line-clamp-3">
                     {sector.rationale}
                   </p>
-                </button>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => setSelectedSectorId(sector.id)}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => loadConversationComparison(sector.id)}
+                    >
+                      Compare
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => handleToggleSectorWatchlist(sector.id, "overview-grid")}
+                    >
+                      {visibleSavedSectorIds.includes(sector.id) ? "Saved" : "Save"}
+                    </Button>
+                  </div>
+                </div>
               );
             })}
           </div>
         </CardContent>
       </Card>
+      </div>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.compare = node;
+      }}>
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1458,6 +2612,41 @@ export function MarketDashboard({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Pick two lanes
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Start with the selected sector and one useful contrast lane.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                The best comparison is usually leader vs best fit, or best fit vs caution lane.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Read the difference
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Separate tape strength from portfolio usefulness.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                One sector can be stronger today while another still has the more relevant fit gap for your plan.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Decide one next move
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Review one sector, save one lane, or just learn and leave it there.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                The compare strip is here to improve judgment, not to force an allocation change.
+              </p>
+            </div>
+          </div>
           {quickCompare ? (
             <div className="rounded-md border bg-muted/30 p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -1544,10 +2733,22 @@ export function MarketDashboard({
                   size="sm"
                   variant="outline"
                   className="h-8"
-                  onClick={() => setSelectedSectorId(quickCompare.primarySector.id)}
+                  onClick={() =>
+                    focusSectorFromSuggestion(quickCompare.primarySector.id, "compare")
+                  }
                 >
                   Open {quickCompare.primarySector.name}
                 </Button>
+                <AskMentorLink
+                  label="Ask AI mentor to compare these sectors"
+                  mentorPrompt={`Compare ${quickCompare.primarySector.name} and ${quickCompare.secondarySector.name} for me. Tell me which one is stronger right now, which one fits my portfolio gap better, and what I should do next without overreacting.`}
+                  mentorQuestionId="allocation"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Market quick compare"
+                  contextLabel="Compare the current market pair"
+                  contextNote="Use the quick comparison strip from the market page."
+                  returnState={{ view: "market", target: quickCompare.primarySector.id }}
+                />
               </div>
             </div>
           ) : null}
@@ -1558,6 +2759,18 @@ export function MarketDashboard({
                   <Badge variant="secondary">{compareSummary.stronger.name} leads</Badge>
                   <Badge variant="outline">{compareSummary.moveGap.toFixed(2)} pts gap</Badge>
                   <Badge variant="outline">{compareSummary.fitLead} has the bigger fit gap</Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      compareSummary.takeawayTone === "fit-over-momentum"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                    }
+                  >
+                    {compareSummary.takeawayTone === "fit-over-momentum"
+                      ? "Fit over tape"
+                      : "Tape and fit align"}
+                  </Badge>
                 </div>
                 <div className="mt-3 rounded-md border bg-background px-3 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1573,7 +2786,9 @@ export function MarketDashboard({
                         size="sm"
                         variant="outline"
                         className="h-8"
-                        onClick={() => setSelectedSectorId(compareSummary.studySector.id)}
+                        onClick={() =>
+                          focusSectorFromSuggestion(compareSummary.studySector.id, "compare")
+                        }
                       >
                         Open study sector
                       </Button>
@@ -1582,7 +2797,9 @@ export function MarketDashboard({
                         size="sm"
                         variant="outline"
                         className="h-8"
-                        onClick={() => handleToggleSectorWatchlist(compareSummary.studySector.id)}
+                        onClick={() =>
+                          handleToggleSectorWatchlist(compareSummary.studySector.id, "compare")
+                        }
                       >
                         {visibleSavedSectorIds.includes(compareSummary.studySector.id)
                           ? "Remove saved sector"
@@ -1591,12 +2808,44 @@ export function MarketDashboard({
                     </div>
                   </div>
                 </div>
-                <p
-                  aria-live="polite"
-                  className="mt-3 text-xs text-muted-foreground"
-                >
-                  {marketActionMessage}
-                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Live leader
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.stronger.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {compareSummary.moveGap.toFixed(2)} pts stronger on the day
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Bigger fit gap
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.fitLead}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      More useful for spotting what your portfolio may still be missing
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Start with
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.studySector.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {compareSummary.studyVerdict}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Watch closely
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.trackSector.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {compareSummary.trackVerdict}
+                    </p>
+                  </div>
+                </div>
                 <p className="mt-3 text-sm font-medium">
                   {compareSummary.stronger.name} is the stronger live read right now, while{" "}
                   {compareSummary.softer.name} gives you the contrast case.
@@ -1606,6 +2855,35 @@ export function MarketDashboard({
                   be strong on tape but still be less useful for your current portfolio than a
                   slightly softer sector with a clearer fit gap.
                 </p>
+                <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Study first
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.studySector.name}</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {compareSummary.studyVerdict}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Track actively
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.trackSector.name}</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {compareSummary.trackVerdict}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Do not chase
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{compareSummary.stronger.name}</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {compareSummary.restraintVerdict}
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="grid gap-4 xl:grid-cols-2">
                 {[
@@ -1647,6 +2925,13 @@ export function MarketDashboard({
                             Trend today {sector.change >= 0 ? "+" : ""}
                             {sector.change.toFixed(2)}%
                           </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {compareSummary.stronger.id === sector.id
+                              ? "This side is winning on live momentum."
+                              : compareSummary.fitLead === sector.name
+                                ? "This side carries the bigger portfolio-fit gap."
+                                : "Use this side as the contrast lane in the decision."}
+                          </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {suggestedSectorIds.has(sector.id) ? (
@@ -1659,7 +2944,7 @@ export function MarketDashboard({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            onClick={() => setSelectedSectorId(sector.id)}
+                            onClick={() => focusSectorFromSuggestion(sector.id, "compare")}
                           >
                             Open sector
                           </Button>
@@ -1690,6 +2975,46 @@ export function MarketDashboard({
                           <p className="mt-2 font-medium">{weakestPocket?.name ?? "Core names"}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {weakestPocket ? `${weakestPocket.value >= 0 ? "+" : ""}${weakestPocket.value.toFixed(2)}%` : "No pulse yet"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-md border bg-muted/20 p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Comparison role
+                          </p>
+                          <p className="mt-2 text-sm font-medium">
+                            {compareSummary.studySector.id === sector.id
+                              ? "Study first"
+                              : compareSummary.trackSector.id === sector.id
+                                ? "Track actively"
+                                : "Contrast lane"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {compareSummary.studySector.id === sector.id
+                              ? "This is the better place to start learning before making a move."
+                              : compareSummary.trackSector.id === sector.id
+                                ? "Keep this sector visible in your compare strip and watchlist."
+                                : "Useful for judging whether strength is real or just more obvious."}
+                          </p>
+                        </div>
+                        <div className="rounded-md border bg-muted/20 p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            What stands out
+                          </p>
+                          <p className="mt-2 text-sm font-medium">
+                            {compareSummary.stronger.id === sector.id
+                              ? "Momentum advantage"
+                              : compareSummary.fitLead === sector.name
+                                ? "Fit-gap advantage"
+                                : "Reference case"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {compareSummary.stronger.id === sector.id
+                              ? "Live tape is stronger here, but that still needs context before action."
+                              : compareSummary.fitLead === sector.name
+                                ? "This one better exposes where your current allocation may be thin."
+                                : "Use this side to pressure-test the stronger headline move."}
                           </p>
                         </div>
                       </div>
@@ -1733,8 +3058,12 @@ export function MarketDashboard({
           )}
         </CardContent>
       </Card>
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_0.85fr]">
+        <div ref={(node) => {
+          marketSectionRefs.current.trends = node;
+        }}>
         <Card>
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
@@ -1760,16 +3089,16 @@ export function MarketDashboard({
             <div className="rounded-md border bg-muted/30 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">
-                  {selectedSectorId === "all-suggested"
-                    ? `${suggestedSectorSnapshot.sectors.length} suggested`
-                    : selectedSectorGroup?.name ?? "Sector"}
-                </Badge>
-                <Badge variant="outline">
-                  {selectedSectorId === "all-suggested"
-                    ? "overview"
-                    : `${selectedSectorGroup?.change.toFixed(2) ?? "0.00"}%`}
-                </Badge>
+                  <Badge variant="secondary">
+                    {selectedSectorId === "all-suggested"
+                      ? `${suggestedSectorSnapshot.sectors.length} suggested`
+                      : selectedSectorGroup?.name ?? "Sector"}
+                  </Badge>
+                  <Badge variant="outline">
+                    {selectedSectorId === "all-suggested"
+                      ? "overview"
+                      : `${selectedSectorGroup?.change.toFixed(2) ?? "0.00"}%`}
+                  </Badge>
                 </div>
                 <div className="flex items-center gap-1 rounded-md border bg-background p-1">
                   {([
@@ -1790,6 +3119,48 @@ export function MarketDashboard({
                       {label}
                     </button>
                   ))}
+                </div>
+              </div>
+              <div className="mb-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Window read
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    {trendExplorerSummary.delta >= 0 ? (
+                      <TrendingUp className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                    ) : (
+                      <TrendingDown className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    )}
+                    <p className="text-sm font-medium">
+                      {trendExplorerSummary.windowLabel}: {trendExplorerSummary.directionLabel}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {trendExplorerSummary.directionDetail}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Strongest signal
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-sky-600 dark:text-sky-300" />
+                    <p className="text-sm font-medium">{trendExplorerSummary.strongestPocket}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This is the first pocket to read when you want to know what is actually
+                    carrying the move instead of just reacting to the headline sector label.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Best use of this chart
+                  </p>
+                  <p className="mt-2 text-sm font-medium">{trendExplorerSummary.actionTitle}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {trendExplorerSummary.actionDetail}
+                  </p>
                 </div>
               </div>
               <div className="h-72">
@@ -1813,9 +3184,79 @@ export function MarketDashboard({
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+              <div className="mt-4 rounded-md border bg-background px-3 py-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Chart reading note
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Use the {trendExplorerSummary.windowLabel.toLowerCase()} to judge pace, then use
+                  the comparison strip and sub-sector drilldown to decide whether the move deserves
+                  attention, study, or restraint.
+                </p>
+              </div>
+            </div>
+            <div
+              aria-live="polite"
+              className={`rounded-md border border-dashed px-3 py-2 text-xs ${marketActionBannerClassName}`}
+            >
+              {marketActionFeedback.message}
             </div>
             {selectedSectorId === "all-suggested" ? (
               <div className="grid gap-3">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border bg-background p-4">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Today&apos;s market read
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{marketData.sentiment}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {sectorBreadth.advancing} sectors are up and {sectorBreadth.declining} are down.
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {marketData.sentiment === "Constructive"
+                        ? "Breadth is supportive, so use this as a good day to learn leadership without confusing it for a buy signal."
+                        : marketData.sentiment === "Cautious"
+                          ? "Tone is softer, so read the suggested sectors as study lanes and keep reactions slow."
+                          : "The tape is mixed, which makes comparison and context more useful than quick conviction."}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-4">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Best place to start
+                    </p>
+                    <p className="mt-2 text-sm font-medium">
+                      {topSuggestedSector?.name ?? "Suggested sectors overview"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {topSuggestedSector
+                        ? `Strongest pocket: ${topSuggestedSector.strongestSubSector}`
+                        : "Review a sector below to see its leading pocket."}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {topSuggestedSector
+                        ? `${topSuggestedSector.name} is the clearest first read because it currently combines useful relevance with a stronger market signal.`
+                        : "The overview combines the suggested sectors so you can decide where to open first."}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-4">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What to do next
+                    </p>
+                    <p className="mt-2 text-sm font-medium">
+                      {marketRegime.watchlist
+                        ? `Watch ${marketRegime.watchlist} without chasing it`
+                        : "Compare the leader with your current fit"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {marketRegime.strongest
+                        ? `${marketRegime.strongest} is leading the tape right now.`
+                        : "Sector leadership will surface here once the snapshot settles."}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      Review one suggested sector first, then use the comparison strip to separate what is strong on tape from what is actually useful for your portfolio.
+                    </p>
+                  </div>
+                </div>
                 <div className="rounded-md border bg-background p-4">
                   <p className="text-sm font-medium">{suggestedSectorSnapshot.headline}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -1854,11 +3295,9 @@ export function MarketDashboard({
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {suggestedSectorSnapshot.topSuggestions.map((idea) => (
-                    <button
+                    <div
                       key={idea.id}
-                      type="button"
-                      className="rounded-md border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
-                      onClick={() => focusSectorFromSuggestion(idea.id)}
+                      className="rounded-md border bg-background p-4"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -1895,7 +3334,36 @@ export function MarketDashboard({
                       <p className="mt-3 text-sm leading-6 text-muted-foreground">
                         {idea.topIdea}
                       </p>
-                    </button>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => focusSectorFromSuggestion(idea.id)}
+                        >
+                          View
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => loadConversationComparison(idea.id)}
+                        >
+                          Compare
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => handleToggleSectorWatchlist(idea.id, "suggested-trend")}
+                        >
+                          {visibleSavedSectorIds.includes(idea.id) ? "Saved" : "Save"}
+                        </Button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1904,7 +3372,7 @@ export function MarketDashboard({
                 <div className="rounded-md border bg-background p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium">{selectedSectorGroup.name} read</p>
+                      <p className="text-sm font-medium">{selectedSectorGroup.name} decision workspace</p>
                       {selectedSuggestedSector ? (
                         <Badge variant="secondary">Suggested focus</Badge>
                       ) : null}
@@ -1962,7 +3430,65 @@ export function MarketDashboard({
                           ? compareAutoSync
                             ? "The compare strip is currently following this sector."
                             : "This sector is currently part of the pinned comparison."
-                          : "Open or pin it into the compare strip if you want a direct side-by-side read."}
+                          : "Review it or pin it into the compare strip if you want a direct side-by-side read."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-md border bg-background p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Why this matters now
+                      </p>
+                      <p className="mt-2 text-sm font-medium">
+                        {sectorBreadth.strongest === selectedSectorGroup.name
+                          ? "Leadership is live"
+                          : selectedSectorFit?.status === "missing" ||
+                              selectedSectorFit?.status === "underweight"
+                            ? "Fit gap is visible"
+                            : "Useful as context"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {sectorBreadth.strongest === selectedSectorGroup.name
+                          ? "Study the structure before mistaking market strength for an automatic buy signal."
+                          : selectedSectorFit?.status === "missing" ||
+                              selectedSectorFit?.status === "underweight"
+                            ? "The sector is relevant because your portfolio may be lighter here than your suggested posture."
+                            : "Keep it in view to compare against stronger and weaker lanes before acting."}
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-background p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Strongest pocket
+                      </p>
+                      <p className="mt-2 text-sm font-medium">
+                        {selectedSubSectorDrilldown[0]?.name ?? "Core read"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {selectedSubSectorDrilldown[0]?.guidance ??
+                          "This is the first pocket to read when you want to know what is carrying the move."}
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-background p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Best use today
+                      </p>
+                      <p className="mt-2 text-sm font-medium">
+                        {selectedSectorPriority === "Track actively"
+                          ? "Track actively"
+                          : selectedSectorPriority === "Study first"
+                            ? "Study before acting"
+                            : selectedSectorPriority === "Hold, do not chase"
+                              ? "Do not chase"
+                              : "Use as context"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {selectedSectorPriority === "Track actively"
+                          ? "Keep this sector in your compare strip and watchlist so you can follow it with intention."
+                          : selectedSectorPriority === "Study first"
+                            ? "Learn the structure and sub-sector breadth first, then decide whether it deserves a place in your plan."
+                            : selectedSectorPriority === "Hold, do not chase"
+                              ? "Read it, compare it, and resist turning short-term tape into a rushed allocation."
+                              : "Let this sector sharpen your market understanding even if it does not demand a move today."}
                       </p>
                     </div>
                   </div>
@@ -1970,11 +3496,11 @@ export function MarketDashboard({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Take action
+                          Suggested next move
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Use this sector as a compare lane, park it on your watchlist, or bring it
-                          into a mentor conversation.
+                          Review it in compare, save it to your watchlist, or pull AI Mentor in when
+                          you want help separating signal from noise.
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -2002,7 +3528,9 @@ export function MarketDashboard({
                           size="sm"
                           variant="outline"
                           className="h-8"
-                          onClick={() => handleToggleSectorWatchlist(selectedSectorGroup.id)}
+                          onClick={() =>
+                            handleToggleSectorWatchlist(selectedSectorGroup.id, "explorer")
+                          }
                         >
                           {visibleSavedSectorIds.includes(selectedSectorGroup.id)
                             ? "Remove watchlist"
@@ -2055,6 +3583,43 @@ export function MarketDashboard({
                     <Badge variant="outline">
                       {selectedSubSectorDrilldown[0]?.name ?? "Core read"}
                     </Badge>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Read this first
+                      </p>
+                      <p className="mt-2 text-sm font-medium">
+                        {selectedSubSectorDrilldown[0]?.name ?? "Core read"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {selectedSubSectorDrilldown[0]?.signal ??
+                          "Start with the leading pocket to see what is actually carrying the sector."}
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Breadth check
+                      </p>
+                      <p className="mt-2 text-sm font-medium">
+                        {selectedSubSectorDrilldown.filter((row) => row.tone === "leader").length} leading /{" "}
+                        {selectedSubSectorDrilldown.filter((row) => row.tone === "soft").length} soft
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        More leading pockets usually means the move is broadening. More soft pockets
+                        means strength may still be narrow.
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Read order
+                      </p>
+                      <p className="mt-2 text-sm font-medium">Leader → mixed → soft</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        That order helps you tell whether this is a durable sector move or a thin
+                        burst carried by only a few names.
+                      </p>
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-3">
                     {selectedSubSectorDrilldown.map((subSector) => (
@@ -2115,11 +3680,12 @@ export function MarketDashboard({
               <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
                 Sector breadth will appear here once the market snapshot loads.
               </div>
-            )}
-          </CardContent>
-        </Card>
+          )}
+        </CardContent>
+      </Card>
+        </div>
 
-          <Card>
+        <Card>
             <CardHeader>
               <CardTitle>Beginner sentiment</CardTitle>
               <CardDescription>
@@ -2194,20 +3760,43 @@ export function MarketDashboard({
                   </div>
                 </div>
                 <div className="flex items-start md:justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8"
-                    onClick={() => {
-                      if (item.sectorId) {
-                        focusSectorFromSuggestion(item.sectorId);
+                  <div className="flex flex-wrap gap-2 md:justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => {
+                        if (item.sectorId) {
+                          focusSectorFromSuggestion(item.sectorId);
+                        }
+                      }}
+                      disabled={!item.sectorId}
+                    >
+                      {item.title === "Do nothing impulsive" ? "Re-center" : "Open"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() =>
+                        openWatchlistLane(
+                          item.title === "Study next"
+                            ? "study-now"
+                            : item.title === "Watch, don’t chase"
+                              ? "watch"
+                              : "reviewed",
+                        )
                       }
-                    }}
-                    disabled={!item.sectorId}
-                  >
-                    {item.title === "Do nothing impulsive" ? "Re-center" : "Open"}
-                  </Button>
+                    >
+                      {item.title === "Study next"
+                        ? "Review study lane"
+                        : item.title === "Watch, don’t chase"
+                          ? "Review watch lane"
+                          : "Review saved lane"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -2233,6 +3822,34 @@ export function MarketDashboard({
           <CardContent className="grid gap-3">
             {savedSectorGroups.length && savedWatchlistSummary ? (
               <>
+                <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">This is your steady study queue</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      The watchlist is for revisiting sectors with intention. It should help you keep learning threads alive across sessions, not turn every strong move into something you feel forced to act on.
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Review pressure</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">
+                        {savedWatchlistStatusCounts.newCount + savedWatchlistStatusCounts.overdueCount} due now
+                      </p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        New and overdue lanes deserve a fresh look before they quietly go stale.
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Suggested overlap</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">
+                        {savedWatchlistSummary.aligned.length} aligned with suggested
+                      </p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        These are the saved sectors the current suggested lens is still reinforcing right now.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 <div className="rounded-md border bg-muted/20 p-4">
                   <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     <div>
@@ -2389,10 +4006,10 @@ export function MarketDashboard({
                               className="h-8"
                               onClick={() => {
                                 handleMarkSectorReviewed(item.sector.id);
-                                focusSectorFromSuggestion(item.sector.id);
+                                focusSectorFromSuggestion(item.sector.id, "review-queue");
                               }}
                             >
-                              Open
+                              Review sector
                             </Button>
                           </div>
                         </div>
@@ -2490,77 +4107,127 @@ export function MarketDashboard({
                     </div>
                   </div>
                 </div>
-                {savedSectorGroups.map((sector) => {
-                  const bestPocket =
-                    [...sector.subSectors].sort((left, right) => right.value - left.value)[0]?.name ??
-                    "Core names";
-                  const savedSectorFitStatus =
-                    suggestedSectorFit.rows.find((row) => row.id === sector.id)?.status ?? null;
-
-                  return (
+                <div className="grid gap-4">
+                  {groupedSavedWatchlistSections.map((section) => (
                     <div
-                      key={`watch-${sector.id}`}
-                      className="rounded-md border bg-background p-4"
+                      key={section.key}
+                      ref={(node) => {
+                        watchlistLaneRefs.current[section.key] = node;
+                      }}
+                      className="rounded-md border bg-muted/20 p-4"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium">{sector.name}</p>
-                            {(() => {
-                              const priorityLabel = getSectorPriorityLabel({
-                                fitStatus: savedSectorFitStatus,
-                                isLeader: sectorBreadth.strongest === sector.name,
-                                isSuggested: suggestedSectorIds.has(sector.id),
-                              });
-
-                              return (
-                                <Badge
-                                  variant="outline"
-                                  className={getSectorPriorityBadgeClass(priorityLabel)}
-                                >
-                                  {priorityLabel}
-                                </Badge>
-                              );
-                            })()}
-                            {suggestedSectorIds.has(sector.id) ? (
-                              <Badge variant="secondary">Suggested</Badge>
-                            ) : null}
+                            <p className="text-sm font-medium">{section.label}</p>
+                            <Badge variant="outline">{section.rows.length}</Badge>
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Strongest pocket: {bestPocket}
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {section.description}
                           </p>
                         </div>
-                        <Badge variant={sector.change >= 0 ? "secondary" : "outline"}>
-                          {sector.change >= 0 ? "+" : ""}
-                          {sector.change.toFixed(2)}%
-                        </Badge>
                       </div>
-                      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                        {sector.rationale}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8"
-                          onClick={() => focusSectorFromSuggestion(sector.id)}
-                        >
-                          Open sector
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8"
-                          onClick={() => handleToggleSectorWatchlist(sector.id)}
-                        >
-                          Remove
-                        </Button>
+                      <div className="mt-4 grid gap-3">
+                        {section.rows.length ? (
+                          section.rows.map((item) => {
+                            const sector = item.sector;
+                            const savedSectorFitStatus =
+                              suggestedSectorFit.rows.find((row) => row.id === sector.id)?.status ??
+                              null;
+                            const priorityLabel = getSectorPriorityLabel({
+                              fitStatus: savedSectorFitStatus,
+                              isLeader: sectorBreadth.strongest === sector.name,
+                              isSuggested: suggestedSectorIds.has(sector.id),
+                            });
+
+                            return (
+                              <div
+                                key={`watch-${section.key}-${sector.id}`}
+                                className="rounded-md border bg-background p-4"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="font-medium">{sector.name}</p>
+                                      <Badge
+                                        variant="outline"
+                                        className={getSectorPriorityBadgeClass(priorityLabel)}
+                                      >
+                                        {priorityLabel}
+                                      </Badge>
+                                      {suggestedSectorIds.has(sector.id) ? (
+                                        <Badge variant="secondary">Suggested</Badge>
+                                      ) : null}
+                                      <Badge
+                                        variant={
+                                          item.reviewStatus === "new"
+                                            ? "secondary"
+                                            : item.reviewStatus === "overdue"
+                                              ? "outline"
+                                              : "outline"
+                                        }
+                                      >
+                                        {item.reviewStatusLabel}
+                                      </Badge>
+                                    </div>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      Strongest pocket: {item.bestPocket}
+                                    </p>
+                                  </div>
+                                  <Badge variant={sector.change >= 0 ? "secondary" : "outline"}>
+                                    {sector.change >= 0 ? "+" : ""}
+                                    {sector.change.toFixed(2)}%
+                                  </Badge>
+                                </div>
+                                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                                  {item.detail}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  {item.reviewedAt
+                                    ? `Last reviewed ${new Date(item.reviewedAt).toLocaleString()}`
+                                    : "Not reviewed yet"}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => focusSectorFromSuggestion(sector.id, "watchlist")}
+                                  >
+                                    Open sector
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => handleMarkSectorReviewed(sector.id)}
+                                  >
+                                    Mark reviewed
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => handleToggleSectorWatchlist(sector.id, "watchlist")}
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
+                            {section.empty}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
                 <AskMentorLink
                   label="Ask AI mentor about my watchlist"
                   mentorPrompt={`Review my saved sector watchlist from the market page and tell me what deserves learning focus, what is just worth tracking, and what should not push me into impulsive action.`}
@@ -2588,6 +4255,34 @@ export function MarketDashboard({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div>
+                <p className="text-sm font-medium text-foreground">This is the portfolio relevance layer</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Use this after the market read, not before it. The goal is to see where the live market is reinforcing your current mix, exposing a gap, or simply adding context to what you already hold.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">Coverage read</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {suggestedSectorFit.coverageShare.toFixed(1)}% already represented
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    This tells you how much of the suggested lens your tracked portfolio already covers today.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">Gap pressure</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">
+                    {suggestedSectorFit.rows.filter((row) => row.status === "missing").length} missing lanes
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Missing or underweight lanes are a cue for learning and planning first, not for impulsive filling.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="rounded-md border bg-muted/30 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">
@@ -2605,55 +4300,78 @@ export function MarketDashboard({
               </p>
             </div>
             <div className="grid gap-3">
-              {suggestedSectorFit.rows.map((row) => (
-                <button
-                  key={`fit-${row.id}`}
-                  type="button"
-                  className="rounded-md border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
-                  onClick={() => focusSectorFromSuggestion(row.id)}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{row.name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Current {row.currentShare.toFixed(1)}% vs suggested {row.suggestedShare.toFixed(1)}%
-                      </p>
+              {suggestedSectorFit.rows.map((row) => {
+                const laneLabel =
+                  row.status === "missing" || row.status === "underweight"
+                    ? "Study now"
+                    : row.status === "ahead"
+                      ? "Hold, do not chase"
+                      : "Keep watching";
+                const deltaLabel =
+                  row.gapToSuggested === 0
+                    ? "On target"
+                    : `${row.gapToSuggested > 0 ? "+" : ""}${row.gapToSuggested.toFixed(1)} pts`;
+
+                return (
+                  <button
+                    key={`fit-${row.id}`}
+                    type="button"
+                    className="rounded-md border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
+                    onClick={() => focusSectorFromSuggestion(row.id)}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{row.name}</p>
+                          <Badge variant="outline" className="border-primary/30 bg-primary/5">
+                            {laneLabel}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Current {row.currentShare.toFixed(1)}% vs suggested {row.suggestedShare.toFixed(1)}%
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          row.status === "aligned"
+                            ? "secondary"
+                            : row.status === "ahead"
+                              ? "outline"
+                              : "destructive"
+                        }
+                      >
+                        {row.status === "missing"
+                          ? "Missing"
+                          : row.status === "underweight"
+                            ? "Underweight"
+                            : row.status === "ahead"
+                              ? "Already ahead"
+                              : "In range"}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant={
-                        row.status === "aligned"
-                          ? "secondary"
-                          : row.status === "ahead"
-                            ? "outline"
-                            : "destructive"
-                      }
-                    >
-                      {row.status === "missing"
-                        ? "Missing"
-                        : row.status === "underweight"
-                          ? "Underweight"
-                          : row.status === "ahead"
-                            ? "Already ahead"
-                            : "In range"}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-[0.8fr_1fr]">
-                    <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Tracked value
-                      </p>
-                      <p className="mt-2 font-medium">
-                        ₹{Math.round(row.currentValue).toLocaleString("en-IN")}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Gap to suggested: {row.gapToSuggested > 0 ? "+" : ""}
-                        {row.gapToSuggested.toFixed(1)} pts
-                      </p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-[0.8fr_1fr]">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Tracked value
+                          </p>
+                          <p className="mt-2 font-medium">
+                            ₹{Math.round(row.currentValue).toLocaleString("en-IN")}
+                          </p>
+                        </div>
+                        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Fit delta
+                          </p>
+                          <p className="mt-2 font-medium">{deltaLabel}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{laneLabel}</p>
+                        </div>
+                      </div>
+                      <p className="text-sm leading-6 text-muted-foreground">{row.note}</p>
                     </div>
-                    <p className="text-sm leading-6 text-muted-foreground">{row.note}</p>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
             <AskMentorLink
               label="Ask AI mentor about my sector gaps"
@@ -2673,92 +4391,307 @@ export function MarketDashboard({
         </Card>
       </div>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.conversation = node;
+      }}>
       <Card>
         <CardHeader>
           <CardTitle>Suggested sectors</CardTitle>
           <CardDescription>
-            This is a filtered view of the same live market sector set, reordered so the most useful sectors stand out first.
+            This is the same live market map, reordered to highlight the sectors that look most relevant for your next learning and allocation review.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {suggestedSectorSnapshot.sectors.map((idea) => (
-              <button
-                key={idea.id}
-                type="button"
-                className={`rounded-md border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/20 ${
-                  selectedSectorId === idea.id ? "border-primary/50 bg-muted/20" : ""
-                }`}
-                onClick={() => focusSectorFromSuggestion(idea.id)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">{idea.name}</p>
-                      <Badge variant="outline">
-                        {getSectorPriorityLabel({
-                          fitStatus:
-                            suggestedSectorFit.rows.find((row) => row.id === idea.id)?.status ?? null,
-                          isLeader: sectorBreadth.strongest === idea.name,
-                          isSuggested: true,
-                        })}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Best read: {idea.strongestSubSector}
-                    </p>
-                  </div>
-                  <Badge variant={idea.change >= 0 ? "secondary" : "outline"}>
-                    {idea.change >= 0 ? "+" : ""}
-                    {idea.change.toFixed(2)}%
-                  </Badge>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  {idea.reason}
+          <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div>
+              <p className="text-sm font-medium text-foreground">Use this as your shortlist, not your conclusion</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                The suggested view is a reordered version of the same live sector map. It helps you decide what deserves study, comparison, or simple watchlist space without pretending every strong sector needs action.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Best opening lane</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {topSuggestedSector?.name ?? "Suggested lens"}
                 </p>
-                <div className="mt-4 rounded-md border bg-muted/30 p-3 text-sm leading-6">
-                  {idea.topIdea}
-                </div>
-              </button>
-            ))}
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {topSuggestedSector
+                    ? `${topSuggestedSector.name} is the cleanest first read because it currently combines fit relevance with a stronger market signal.`
+                    : "Review the top of this list first when you want the fastest useful next read."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Decision rule</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">Review one, compare two, save a few</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Start by opening one sector, load compare only when two both look relevant, and save only the lanes you genuinely want to revisit.
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="rounded-md border bg-muted/30 p-4">
-            <p className="text-sm font-medium">Top suggestions inside the suggested sectors</p>
-            <div className="mt-3 grid gap-2 md:grid-cols-3">
-              {suggestedSectorSnapshot.topSuggestions.map((idea) => (
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Step 1
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">Shortlist one or two lanes</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Start with sectors tagged for study or active tracking instead of trying to process the whole list at once.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Step 2
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">Compare before acting</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Load a sector into compare when two ideas both look good or when the market move feels stronger than your conviction.
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Step 3
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">Save the lane if it still matters</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Use the watchlist for sectors worth revisiting, not for every strong move you notice during one session.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {suggestedSectorSnapshot.sectors.map((idea) => {
+              const fitRow = suggestedSectorFit.rows.find((row) => row.id === idea.id) ?? null;
+              const priorityLabel = getSectorPriorityLabel({
+                fitStatus: fitRow?.status ?? null,
+                isLeader: sectorBreadth.strongest === idea.name,
+                isSuggested: true,
+              });
+              const decisionLabel =
+                priorityLabel === "Study"
+                  ? "Study first"
+                  : priorityLabel === "Watch"
+                    ? "Track actively"
+                    : "Use as context";
+
+              return (
                 <button
-                  key={`top-${idea.id}`}
+                  key={idea.id}
                   type="button"
-                  className={`rounded-md border bg-background p-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/20 ${
+                  className={`rounded-md border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/20 ${
                     selectedSectorId === idea.id ? "border-primary/50 bg-muted/20" : ""
                   }`}
-                  onClick={() => focusSectorFromSuggestion(idea.id)}
+                  onClick={() => focusSectorFromSuggestion(idea.id, "suggested")}
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium">{idea.strongestSubSector}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{idea.name}</p>
+                        <Badge
+                          variant="outline"
+                          className={getSectorPriorityBadgeClass(priorityLabel)}
+                        >
+                          {priorityLabel}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Best read: {idea.strongestSubSector}
+                      </p>
+                    </div>
                     <Badge variant={idea.change >= 0 ? "secondary" : "outline"}>
                       {idea.change >= 0 ? "+" : ""}
                       {idea.change.toFixed(2)}%
                     </Badge>
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    {idea.name}
-                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Best use
+                      </p>
+                      <p className="mt-2 text-sm font-medium">{decisionLabel}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {fitRow
+                          ? `${fitRow.currentShare.toFixed(1)}% now vs ${fitRow.suggestedShare.toFixed(1)}% suggested`
+                          : "Use as a market learning lane"}
+                      </p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Why this matters
+                      </p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {idea.reason}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-md border bg-muted/30 p-3 text-sm leading-6">
+                    {idea.topIdea}
+                  </div>
                 </button>
-              ))}
+              );
+            })}
+          </div>
+          <div className="rounded-md border bg-muted/30 p-4">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium">Top suggestions inside the suggested sectors</p>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Treat this as the fast-entry shortlist when you want the clearest next sectors to open, compare, or save.
+              </p>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              {suggestedSectorSnapshot.topSuggestions.map((idea) => {
+                const fitRow = suggestedSectorFit.rows.find((row) => row.id === idea.id) ?? null;
+                const priorityLabel = getSectorPriorityLabel({
+                  fitStatus: fitRow?.status ?? null,
+                  isLeader: sectorBreadth.strongest === idea.name,
+                  isSuggested: true,
+                });
+                const shortlistLabel =
+                  priorityLabel === "Study"
+                    ? "Review this first"
+                    : priorityLabel === "Watch"
+                      ? "Track this next"
+                      : "Keep as context";
+
+                return (
+                  <div
+                    key={`top-${idea.id}`}
+                    className={`rounded-md border bg-background p-3 ${
+                      selectedSectorId === idea.id ? "border-primary/50 bg-muted/20" : ""
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{idea.name}</p>
+                          <Badge
+                            variant="outline"
+                            className={getSectorPriorityBadgeClass(priorityLabel)}
+                          >
+                            {priorityLabel}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Strongest pocket: {idea.strongestSubSector}
+                        </p>
+                      </div>
+                      <Badge variant={idea.change >= 0 ? "secondary" : "outline"}>
+                        {idea.change >= 0 ? "+" : ""}
+                        {idea.change.toFixed(2)}%
+                      </Badge>
+                    </div>
+                    <div className="mt-3 rounded-md border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Shortlist use
+                      </p>
+                      <p className="mt-2 text-sm font-medium">{shortlistLabel}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {fitRow
+                          ? `${fitRow.currentShare.toFixed(1)}% now vs ${fitRow.suggestedShare.toFixed(1)}% suggested`
+                          : "Use as a quick market-learning lane"}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => focusSectorFromSuggestion(idea.id, "suggested")}
+                      >
+                        Review sector
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => loadConversationComparison(idea.id)}
+                      >
+                        Load compare
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => handleToggleSectorWatchlist(idea.id, "suggested-shortlist")}
+                      >
+                        {visibleSavedSectorIds.includes(idea.id) ? "Saved" : "Save lane"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </CardContent>
       </Card>
+      </div>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.fit = node;
+      }}>
       <Card>
         <CardHeader>
           <CardTitle>Now vs suggested</CardTitle>
           <CardDescription>
-            A plain-English conversation between the live market read and the suggested-sector lens, so users can see what is happening now and what deserves deeper study next.
+            A plain-English conversation between what the market is doing now and what deserves deeper study next, so the user can separate signal from impulse.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
+          <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div>
+              <p className="text-sm font-medium text-foreground">This is the interpretation layer</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Use this conversation when the live tape, suggested sectors, and your portfolio fit are all saying slightly different things and you want a calmer read of what actually matters.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">What it should answer</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">Study, track, or leave alone</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Each note here should help you separate genuine follow-up from normal market noise.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {marketConversation[0]?.sectorId ? "Review the first useful lane" : "Use compare or mentor"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Start with the first note that still feels actionable, then either open the lane, load compare, or ask AI Mentor if the takeaway still feels fuzzy.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-md border bg-muted/20 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Read it as
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">A guided market discussion</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Use it for
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Understanding whether to study, track, or simply note a move.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next action
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Review the lane, load compare, or ask the mentor when the takeaway still feels fuzzy.
+                </p>
+              </div>
+            </div>
+          </div>
           {marketConversation.map((turn) => (
             <div
               key={turn.title}
@@ -2797,43 +4730,144 @@ export function MarketDashboard({
                       ? "Keep an eye"
                       : "Use as context"}
                 </Badge>
-                {turn.sectorId && turn.actionLabel ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => focusSectorFromSuggestion(turn.sectorId ?? "")}
-                  >
-                    {turn.actionLabel}
-                  </Button>
-                ) : null}
               </div>
               <p className="mt-3 text-sm leading-6 text-foreground">{turn.body}</p>
+              <div className="mt-3 rounded-md border bg-background/80 px-3 py-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Takeaway
+                </p>
+                <p className="mt-1 text-sm text-foreground">
+                  {turn.emphasis === "high"
+                    ? "This deserves an active read before you ignore or chase it."
+                    : turn.emphasis === "medium"
+                      ? "Keep this in view and use it to improve your comparison, not your impulse."
+                      : "Treat this as background context that sharpens your next decision."}
+                </p>
+              </div>
               <div className="mt-3 rounded-md border bg-background/80 px-3 py-2">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Next move
                 </p>
                 <p className="mt-1 text-sm text-foreground">{turn.nextStep}</p>
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {turn.sectorId && turn.actionLabel ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => focusSectorFromSuggestion(turn.sectorId ?? "")}
+                    >
+                      {turn.actionLabel}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => loadConversationComparison(turn.sectorId ?? "")}
+                    >
+                      Load compare
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => handleToggleSectorWatchlist(turn.sectorId ?? "", "conversation")}
+                    >
+                      {visibleSavedSectorIds.includes(turn.sectorId ?? "") ? "Saved" : "Save lane"}
+                    </Button>
+                  </>
+                ) : null}
+                <AskMentorLink
+                  label="Ask AI mentor"
+                  mentorPrompt={
+                    turn.sectorId
+                      ? `Help me understand this market note about ${turn.title}. What should I do with it, and how should I compare it with my current holdings?`
+                      : `Help me understand this market note: ${turn.title}. What should I do with it next?`
+                  }
+                  mentorQuestionId="allocation"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Market now vs suggested"
+                  contextLabel={`Review market note: ${turn.title}`}
+                  contextNote={turn.body}
+                  returnState={{ view: "market", target: turn.sectorId ?? selectedSectorId }}
+                />
+              </div>
             </div>
           ))}
         </CardContent>
       </Card>
+      </div>
 
+      <div ref={(node) => {
+        marketSectionRefs.current.operations = node;
+      }}>
       <Card>
         <CardHeader>
           <CardTitle>Why this sector is suggested for you</CardTitle>
           <CardDescription>
-            A personal read that ties the selected suggested sector back to your current holdings and risk posture.
+            A personal read that ties the selected suggested sector back to your current holdings, current gaps, and risk posture.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border bg-muted/20 p-4 md:col-span-3">
+            <div className="mb-4 rounded-md border bg-background p-4">
+              <p className="text-sm font-medium text-foreground">How to use this section</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Read this after you shortlist a sector. It explains whether the suggestion is about a real allocation gap, a learning opportunity, or simply a theme worth tracking for context.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Suggested focus
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {selectedSuggestedSector?.name ?? "Suggested sector lens"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedSuggestedSector
+                    ? `Strongest pocket: ${selectedSuggestedSector.strongestSubSector}`
+                    : "Choose a suggested sector to see the strongest pocket and fit reasons here."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Why it surfaced
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {selectedSuggestedSector
+                    ? "Market signal plus personal fit"
+                    : "Suggested sectors align live tape with portfolio relevance"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedSuggestedSector
+                    ? "This suggestion is not just about momentum. It surfaced because the live market read overlaps with your current allocation picture."
+                    : "Use this area to understand why a sector is being highlighted for your plan instead of just being strong on the day."}
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best use
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {selectedSuggestedSector ? "Learn, compare, then act" : "Use as a fit guide"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Let these reasons explain the fit first, then use the compare strip and mentor handoff if the move still feels unclear.
+                </p>
+              </div>
+            </div>
+          </div>
           {suggestedSectorReasons.map((reason) => (
             <div key={reason.title} className="rounded-md border bg-background p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {reason.caption}
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{reason.caption}</Badge>
+              </div>
               <p className="mt-2 text-sm font-medium text-foreground">{reason.title}</p>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">{reason.detail}</p>
             </div>
@@ -2843,7 +4877,7 @@ export function MarketDashboard({
               <div>
                 <p className="text-sm font-medium text-foreground">Still unsure how this fits your plan?</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Bring this sector, your current holdings, and your risk posture into one mentor conversation.
+                  Bring this sector, your current holdings, and your risk posture into one mentor conversation so the next move becomes clearer and less reactive.
                 </p>
               </div>
               <AskMentorLink
@@ -2864,6 +4898,7 @@ export function MarketDashboard({
           </div>
         </CardContent>
       </Card>
+      </div>
 
       <Card>
         <CardHeader>
@@ -2871,7 +4906,7 @@ export function MarketDashboard({
             <div>
               <CardTitle>Sync schedule</CardTitle>
               <CardDescription>
-                Keep provider checks and market polling moving on a predictable cadence.
+                Keep provider checks and market polling moving on a predictable cadence so the workspace stays trustworthy without constant manual refreshing.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2882,12 +4917,71 @@ export function MarketDashboard({
                 Next market poll {formatSyncTimeLabel(nextMarketRefreshAt)}
               </Badge>
               <Button type="button" size="sm" variant="outline" onClick={() => onRunIntegrationSync()}>
-                Run active syncs
+                Run due syncs
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-md border bg-background p-4 md:col-span-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Ops posture</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {schedulerPlan.dueCount > 0 ? `${schedulerPlan.dueCount} syncs due` : "On cadence"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Use this only to keep the data layer trustworthy. It should support the market view, not become the main thing you stare at.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Market refresh</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {marketPreferences.autoRefresh ? `Every ${marketPreferences.pollingIntervalSeconds}s` : "Manual"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Faster polling feels more live, but stable demos often benefit from slower or manual refresh.
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {schedulerPlan.dueCount > 0 ? "Run due syncs, then return to the market read" : "Leave this alone unless something is stale"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  The goal is calm reliability. If nothing is stale, spend your attention on sectors and portfolio fit instead.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-md border bg-muted/20 p-4 md:col-span-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  What this is
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  The reliability layer behind your market and import views.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  What to watch
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Due checks, warning streaks, and sources that have drifted out of rhythm.
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best move
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Run due syncs when something is stale, then return to the watchlist and compare views.
+                </p>
+              </div>
+            </div>
+          </div>
           <div className="rounded-md border bg-muted/30 p-4 md:col-span-2">
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border bg-background p-4">
@@ -3027,15 +5121,50 @@ export function MarketDashboard({
                       variant="outline"
                       onClick={() => onRunIntegrationSync(integration.id)}
                     >
-                      Sync now
+                      Run connector
                     </Button>
                   </div>
                 </div>
               );
             })
           ) : (
-            <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground md:col-span-2">
-              No active provider integrations yet. Add a broker or email source in Settings to start scheduling sync checkpoints.
+            <div className="grid gap-4 rounded-md border bg-background p-4 md:col-span-2">
+              <div>
+                <p className="text-sm font-medium text-foreground">No active market connectors yet</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  The market page still works without live connectors, but scheduled sync checkpoints and provider-aware import flow only start once a broker or inbox source is connected.
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">Start here</p>
+                  <p className="mt-1 text-sm font-medium">Connect one reliable source</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    One good broker feed or forwarded statement inbox is usually enough to make this page feel live.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">Use this page meanwhile</p>
+                  <p className="mt-1 text-sm font-medium">Study sectors and fit</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Suggested sectors, trend windows, and the now-vs-suggested view still help without a connector.
+                  </p>
+                </div>
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">Best next move</p>
+                  <p className="mt-1 text-sm font-medium">Review Settings and wire a source</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Once connected, this section turns into a proper sync board instead of a static readiness note.
+                  </p>
+                </div>
+              </div>
+              <AskMentorLink
+                label="Ask AI mentor which market source to connect first"
+                mentorPrompt="I want this market page to feel more useful. Help me decide whether I should connect a broker feed, an email statement source, or just study sectors first."
+                mentorQuestionId="allocation"
+                onOpenMentor={onOpenMentor}
+                sourceLabel="Market connector empty state"
+              />
             </div>
           )}
         </CardContent>
@@ -3049,6 +5178,12 @@ export function MarketDashboard({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border bg-muted/20 p-4 md:col-span-3">
+            <p className="text-sm font-medium text-foreground">Use this as your calm-down layer</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              If the heatmap, compare strip, or suggested sectors feel noisy, come here first. These notes are meant to translate the page back into simple investing language.
+            </p>
+          </div>
           {marketExplainers.map((item) => (
             <div key={item.headline} className="rounded-md border bg-background p-4">
               <p className="font-semibold">{item.headline}</p>
@@ -3067,9 +5202,39 @@ export function MarketDashboard({
         <Card>
           <CardHeader>
             <CardTitle>Your holdings watch</CardTitle>
-            <CardDescription>Best-effort mapping from tracked holdings to live or fallback market proxies.</CardDescription>
+            <CardDescription>
+              Best-effort mapping from tracked holdings to live or fallback market proxies, so you can see what your portfolio is feeling today without treating every proxy move as a trade call.
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="rounded-md border bg-muted/20 p-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    What this shows
+                  </p>
+                  <p className="mt-2 text-sm text-foreground">
+                    A live pulse check on what your tracked holdings are broadly experiencing.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    What it is not
+                  </p>
+                  <p className="mt-2 text-sm text-foreground">
+                    It is not a direct buy or sell signal for every fund or stock you hold.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Best move
+                  </p>
+                  <p className="mt-2 text-sm text-foreground">
+                    Use it to decide what deserves a closer look, then open the sector view or ask the mentor.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-md border bg-muted/30 p-4">
                 <p className="text-sm font-medium">Tracked watch total</p>
@@ -3137,6 +5302,16 @@ export function MarketDashboard({
               </div>
             ))}
             </div>
+            <AskMentorLink
+              label="Ask AI mentor about my holdings watch"
+              mentorPrompt="Use my holdings watch from the market page to explain what deserves attention, what is just noise, and how I should connect these moves back to my long-term plan."
+              mentorQuestionId="allocation"
+              onOpenMentor={onOpenMentor}
+              sourceLabel="Market holdings watch"
+              contextLabel="Review holdings watch against the market"
+              contextNote="Use the holdings watch to separate meaningful portfolio context from normal day-to-day market movement."
+              returnState={{ view: "market", target: selectedSectorId }}
+            />
           </CardContent>
         </Card>
       )}

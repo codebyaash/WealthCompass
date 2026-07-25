@@ -123,6 +123,8 @@ export function Academy({
     () => buildAcademyTrackPlans({ answers, profile }),
     [answers, profile],
   );
+  const primaryTrack = trackPlans[0] ?? null;
+  const secondaryTrack = trackPlans[1] ?? null;
   const academyMentorReturnState = {
     leftCategoryId: leftCategory.id,
     rightCategoryId: rightCategory.id,
@@ -132,8 +134,93 @@ export function Academy({
     normalizedQuery.length > 0
       ? "Search in progress"
       : trackPlans.length > 0
-        ? "Learning plan ready"
+      ? "Learning plan ready"
         : "Explore categories";
+  const academyCoverageStats = useMemo(
+    () => ({
+      groupCount: categoryGroups.length,
+      categoryCount: categoryGroups.reduce(
+        (total, group) => total + group.categories.length,
+        0,
+      ),
+      useCaseCount: academyUseCases.length,
+    }),
+    [],
+  );
+  const searchResultCount = useMemo(
+    () => filteredGroups.reduce((total, group) => total + group.categories.length, 0),
+    [filteredGroups],
+  );
+  const academyOperatingLenses = [
+    {
+      label: "Current lane",
+      value: primaryTrack?.title ?? "Explore categories",
+      detail: primaryTrack
+        ? "This is the cleanest next learning lane from your current profile and goal posture."
+        : "Use the category finder or shortlists to create a first learning lane.",
+    },
+    {
+      label: "Search pressure",
+      value: normalizedQuery ? `${searchResultCount} matches` : "Browse mode",
+      detail: normalizedQuery
+        ? `${filteredUseCases.length} shortlists also match the current search.`
+        : "Use search only when you already know the job or the category clue.",
+    },
+    {
+      label: "Best close call",
+      value: `${leftCategory.name} vs ${rightCategory.name}`,
+      detail: "The comparator should settle the final close call, not start the session.",
+    },
+  ];
+  const academyWorkingOrder = [
+    "Start with the guided lane so you reduce the choice set first.",
+    "Open one shortlist when the money job is clearer than the product category.",
+    "Use the comparator only after the decision is down to two realistic options.",
+  ];
+  type AcademyPriorityAction =
+    | "track-plans"
+    | "use-cases"
+    | "comparator"
+    | "search-reset";
+  const academyPriorityQueue = [
+    {
+      title: primaryTrack ? "Start with your guided lane" : "Open guided learning lanes",
+      detail: primaryTrack
+        ? `${primaryTrack.title} is the cleanest first pass from your current answers and profile.`
+        : "Let the app narrow the next study lane before you browse the full category library.",
+      action: "track-plans" as AcademyPriorityAction,
+    },
+    {
+      title: normalizedQuery
+        ? `Review ${filteredUseCases.length} matching shortlists`
+        : "Use shortlists by money job",
+      detail: normalizedQuery
+        ? "Your current search already maps to shortlists. Use them to turn a fuzzy search into a smaller study set."
+        : "Shortlists work best when you know the goal or money job but not the right product family yet.",
+      action: "use-cases" as AcademyPriorityAction,
+    },
+    {
+      title:
+        leftCategory.id === rightCategory.id
+          ? "Pick two categories to compare"
+          : `Pressure-test ${leftCategory.name} vs ${rightCategory.name}`,
+      detail:
+        leftCategory.id === rightCategory.id
+          ? "Use the comparator after you have narrowed the field to two realistic options."
+          : "Use the final close-call lens only after you understand the role each option is supposed to play.",
+      action: "comparator" as AcademyPriorityAction,
+    },
+    ...(normalizedQuery
+      ? [
+          {
+            title: "Clear search and return to browse mode",
+            detail:
+              "If results feel too narrow, reset the finder and use the guided lane or shortlists instead.",
+            action: "search-reset" as AcademyPriorityAction,
+          },
+        ]
+      : []),
+  ];
   const academyMentorPrompt = [
     `I am comparing ${leftCategory.name} versus ${rightCategory.name}${searchQuery.trim() ? ` while searching for "${searchQuery.trim()}"` : ""}.`,
     `My current learning posture is ${academyReadinessLabel}.`,
@@ -149,6 +236,34 @@ export function Academy({
   const trackPlansRef = useRef<HTMLDivElement | null>(null);
   const useCasesRef = useRef<HTMLDivElement | null>(null);
   const comparatorRef = useRef<HTMLDivElement | null>(null);
+  const scrollToAcademySection = (target: AcademyFocusTarget) => {
+    (
+      {
+        comparator: comparatorRef,
+        "track-plans": trackPlansRef,
+        "use-cases": useCasesRef,
+      } satisfies Record<AcademyFocusTarget, typeof comparatorRef>
+    )[target]?.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+  const openTrackComparator = (categoryIds: string[]) => {
+    if (categoryIds.length >= 2) {
+      setLeftCategoryId(categoryIds[0]);
+      setRightCategoryId(categoryIds[1]);
+    } else if (categoryIds[0]) {
+      setLeftCategoryId(categoryIds[0]);
+    }
+    scrollToAcademySection("comparator");
+  };
+  const handleAcademyPriorityAction = (action: AcademyPriorityAction) => {
+    if (action === "search-reset") {
+      setSearchQuery("");
+      return;
+    }
+    scrollToAcademySection(action);
+  };
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -241,9 +356,67 @@ export function Academy({
                 </p>
               </div>
             </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Main goal
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {answers.primaryGoal}
+                </p>
+              </div>
+              <div className="rounded-md border border-sky-500/20 bg-sky-500/5 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Experience level
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {answers.experience}
+                </p>
+              </div>
+              <div className="rounded-md border border-violet-500/20 bg-violet-500/5 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Confidence band
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {profile.confidence}
+                </p>
+              </div>
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Suggested first lane
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {primaryTrack?.title ?? "Explore category finder"}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {academyOperatingLenses.map((lens) => (
+                <div
+                  key={lens.label}
+                  className="rounded-md border border-border/70 bg-background/80 p-4"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {lens.label}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-foreground">{lens.value}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{lens.detail}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid gap-3 content-start">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Session map
+              </p>
+              <div className="mt-3 grid gap-2 text-sm text-foreground">
+                <p>1. Start with your guided learning lane.</p>
+                <p>2. Narrow the job using shortlists.</p>
+                <p>3. Use the comparator only for the final close call.</p>
+              </div>
+            </div>
             <div className="rounded-md border border-border/70 bg-muted/20 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Current learning posture
@@ -264,7 +437,131 @@ export function Academy({
                   "Use the category finder or use-case shortlists to narrow the next topic worth learning."}
               </p>
             </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Today&apos;s learning route
+              </p>
+              <div className="mt-3 grid gap-2 text-sm text-foreground">
+                <p>1. Review the first lane and understand the job it solves.</p>
+                <p>2. Shortlist only one money decision to study next.</p>
+                <p>3. Use the comparator for the last close call, not the first pass.</p>
+              </div>
+            </div>
+            <div className="rounded-md border border-border/70 bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Working order
+              </p>
+              <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
+                {academyWorkingOrder.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Page coverage
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {academyCoverageStats.groupCount}
+                  </p>
+                  <p className="text-muted-foreground">groups</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {academyCoverageStats.categoryCount}
+                  </p>
+                  <p className="text-muted-foreground">categories</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {academyCoverageStats.useCaseCount}
+                  </p>
+                  <p className="text-muted-foreground">use cases</p>
+                </div>
+              </div>
+            </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 bg-card/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">Priority queue</Badge>
+            <Badge variant="outline">{academyReadinessLabel}</Badge>
+          </div>
+          <CardTitle>What to do next on this page</CardTitle>
+          <CardDescription>
+            Enter the academy from the smallest useful next move, not from the full category list.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {academyPriorityQueue.map((item) => (
+            <button
+              key={item.title}
+              type="button"
+              onClick={() => handleAcademyPriorityAction(item.action)}
+              className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+            >
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Next move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.detail}</p>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70 bg-card/95 shadow-sm">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => scrollToAcademySection("track-plans")}
+            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+          >
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Start here
+            </p>
+            <p className="mt-2 text-sm font-semibold text-foreground">
+              Guided learning lanes
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Best when you want the cleanest next step based on your current profile.
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => scrollToAcademySection("use-cases")}
+            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+          >
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Narrow the job
+            </p>
+            <p className="mt-2 text-sm font-semibold text-foreground">
+              Use-case shortlists
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Best when you already know the money decision but not the category.
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => scrollToAcademySection("comparator")}
+            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+          >
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Final choice
+            </p>
+            <p className="mt-2 text-sm font-semibold text-foreground">
+              Comparator desk
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Best when two categories still feel similar and you need the deciding lens.
+            </p>
+          </button>
         </CardContent>
       </Card>
 
@@ -281,7 +578,34 @@ export function Academy({
             library below when you want deeper category context.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 xl:grid-cols-3">
+        <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Use this first
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                When you want the app to reduce overload and point to the smallest useful next study lane.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Watch closely
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Do not study five lanes at once. One lane is enough until the next real money decision changes.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best move
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Finish one lane, compare only the categories inside it, then come back if your goal or confidence shifts.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-3">
           {trackPlans.map((plan) => (
             <div key={plan.id} className="rounded-md border border-border/70 bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -297,6 +621,32 @@ export function Academy({
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Move from broad category confusion to a smaller set of products that fit your current stage, goal pressure, and learning confidence.
                 </p>
+              </div>
+              <div className="mt-4 grid gap-2 md:grid-cols-3">
+                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Best for now
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-foreground">
+                    Focused learning with fewer choices and clearer category roles.
+                  </p>
+                </div>
+                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Avoid doing
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-foreground">
+                    Jumping into a product before you understand what job this lane is solving.
+                  </p>
+                </div>
+                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Exit signal
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-foreground">
+                    You can explain in plain words when each category in this lane fits and when it does not.
+                  </p>
+                </div>
               </div>
               <div className="mt-4 grid gap-2">
                 {plan.useCaseIds.map((useCaseId) => {
@@ -324,8 +674,26 @@ export function Academy({
                   );
                 })}
               </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => scrollToAcademySection("use-cases")}
+                >
+                  Open shortlists
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => openTrackComparator(plan.categoryIds)}
+                >
+                  Compare this lane
+                </Button>
+              </div>
             </div>
           ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -360,7 +728,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card ref={comparatorRef} className="border-border/70 bg-card/95 shadow-sm">
+      <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Beginner Navigation Map</CardTitle>
           <CardDescription>
@@ -389,9 +757,37 @@ export function Academy({
       <Card className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <CardTitle>Category Finder</CardTitle>
-          <CardDescription>Search by product name, role, or beginner use case.</CardDescription>
+          <CardDescription>
+            Search by product name, role, or beginner use case.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Good searches
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Try phrases like retirement, short-term money, gold hedge, diversification, or core growth.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                What this avoids
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Random scrolling through every category when the real question is still fuzzy.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Results now
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                {searchResultCount} categories and {filteredUseCases.length} use cases match your current search.
+              </p>
+            </div>
+          </div>
           <label className="grid gap-2 text-sm">
             <span className="font-medium">Search categories</span>
             <div className="flex items-center gap-2 rounded-md border bg-background px-3">
@@ -414,7 +810,70 @@ export function Academy({
             Start from the job you need done, then narrow the categories worth studying.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <CardContent className="grid gap-4">
+          {primaryTrack ? (
+            <div className="grid gap-3 rounded-md border border-primary/20 bg-primary/5 p-4 md:grid-cols-[1.15fr_0.85fr]">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Suggested from your current profile
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {primaryTrack.title}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {primaryTrack.description}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Shortlists worth opening first
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {primaryTrack.useCaseIds.map((useCaseId) => {
+                    const useCase = academyUseCases.find((item) => item.id === useCaseId);
+                    if (!useCase) return null;
+                    return (
+                      <Badge key={useCase.id} variant="outline">
+                        {useCase.title}
+                      </Badge>
+                    );
+                  })}
+                </div>
+                {secondaryTrack ? (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Backup lane: {secondaryTrack.title}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Use this when
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                You know the decision, like short-term parking or retirement planning, but not the right category family.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Common mistake
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Picking a product because it sounds familiar before checking whether it matches the time horizon.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best move
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Pick one shortlist, then compare only the categories it recommends.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredUseCases.map((useCase) => (
             <div key={useCase.id} className="rounded-md border border-border/70 bg-background p-4">
               <p className="text-sm font-semibold">{useCase.title}</p>
@@ -432,6 +891,7 @@ export function Academy({
               </div>
             </div>
           ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -446,20 +906,74 @@ export function Academy({
 
       {!filteredGroups.length ? (
         <Card className="border-border/70 bg-card/95 shadow-sm">
-          <CardContent className="p-6 text-sm leading-6 text-muted-foreground">
-            No academy categories matched that search yet. Try a product name, a goal type, or a role like growth, safety, or liquidity.
+          <CardContent className="grid gap-4 p-6">
+            <div>
+              <p className="text-sm font-medium text-foreground">Nothing matched that search yet</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Try a product name, a goal type, or a role like growth, safety, liquidity, diversification, or tax saving.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Good first retry</p>
+                <p className="mt-1 text-sm font-medium">Search by goal</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Terms like retirement, emergency, short-term money, or income usually work better than product jargon.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Then narrow</p>
+                <p className="mt-1 text-sm font-medium">Use one role word</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Try one clean lens such as safety, growth, or liquidity before comparing categories.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Best next move</p>
+                <p className="mt-1 text-sm font-medium">Review a shortlist instead</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  If search still feels fuzzy, the use-case shortlists usually give a better starting point.
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card ref={comparatorRef} className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
-          <CardTitle>Investment Comparator</CardTitle>
+          <CardTitle>Category comparator</CardTitle>
           <CardDescription>
             Choose any two categories and compare them directly. You are no longer limited to only prebuilt pairs.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5">
+          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Use comparator when
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Two categories feel similar, but the money role, risk path, or effort level may still be meaningfully different.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Avoid using it for
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                Broad exploration before you know the goal job. Use tracks or shortlists first if the choice set is still too wide.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best outcome
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                You leave with a default pick, a watchout, and a plain reason for why the other option is not first.
+              </p>
+            </div>
+          </div>
           <div className="grid gap-4 rounded-md border border-border/70 bg-muted/20 p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <SplitSquareVertical className="h-4 w-4 text-primary" />
@@ -550,6 +1064,45 @@ export function Academy({
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
               {comparisonSummary.recommendation}
             </p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Default pick
+                </p>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {comparisonSummary.defaultPick}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Start here if you need the simpler first choice rather than the more exciting label.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  What decides it
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Focus on the money role, effort level, and watchout that matter most for your current goal.
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Best next move
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  Take the default pick forward, and keep the other option as a later comparison note instead of forcing both into the plan.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <AskMentorLink
+                label="Ask AI mentor to explain this comparison"
+                returnState={academyMentorReturnState}
+                mentorPrompt={academyMentorPrompt}
+                mentorQuestionId="etf"
+                onOpenMentor={onOpenMentor}
+                sourceLabel="Academy comparator"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

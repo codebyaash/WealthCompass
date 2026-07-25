@@ -1054,7 +1054,9 @@ export function WealthCompassApp() {
 
         <section className="min-w-0 flex-1 pb-8">
           <AppHeader
+            activeView={activeView}
             connectorAttention={connectorAttention}
+            onNavigate={setActiveView}
             onSaveRiskHistory={handleSaveRiskHistory}
             onSignOut={handleSignOut}
             profile={profile}
@@ -1065,9 +1067,9 @@ export function WealthCompassApp() {
           />
           {isCloudWorkspaceInitializing ? (
             <div className="rounded-xl border border-white/70 bg-card/90 p-6 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.28)] backdrop-blur-sm">
-              <p className="text-sm font-medium">Preparing your workspace</p>
+              <p className="text-sm font-medium">Preparing your investment desk</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                We are loading your signed-in data before the app becomes editable.
+                We are loading your signed-in portfolio, goals, connectors, and saved coaching context before the workspace becomes editable.
               </p>
             </div>
           ) : activeView === "dashboard" ? (
@@ -1132,6 +1134,7 @@ export function WealthCompassApp() {
                   : null
               }
               focusRequestKey={workspaceFocusRequestKey}
+              importJobs={importJobs}
               returnState={
                 workspaceFocusRequest?.view === "portfolio"
                   ? workspaceFocusRequest.returnState ?? null
@@ -1145,6 +1148,7 @@ export function WealthCompassApp() {
               onImportAssets={handleImportAssets}
               onLogImportJob={handleLogImportJob}
               onOpenMentor={handleOpenMentor}
+              onReprocessImportJob={handleReprocessImportJob}
               onResetAssets={handleResetPortfolio}
               onUpdateAsset={handleUpdateAsset}
               portfolioTotal={portfolioTotal}

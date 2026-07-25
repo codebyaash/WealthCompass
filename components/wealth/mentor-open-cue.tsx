@@ -291,6 +291,34 @@ export function MentorOpenCue({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Why this surfaced
+            </p>
+            <p className="mt-2 text-sm leading-6 text-foreground">
+              {primaryInsight.status === "stuck"
+                ? "This thread still looks blocked, so reopening it is likely more useful than starting a fresh question."
+                : "This thread already has context, so continuing it is usually faster than opening a new lane."}
+            </p>
+          </div>
+          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Best use
+            </p>
+            <p className="mt-2 text-sm leading-6 text-foreground">
+              Ask for one practical next move that fits the page you were already using.
+            </p>
+          </div>
+          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Best outcome
+            </p>
+            <p className="mt-2 text-sm leading-6 text-foreground">
+              Re-enter the workspace with one clearer action instead of carrying the doubt forward.
+            </p>
+          </div>
+        </div>
         <div className="rounded-md border border-border/70 bg-muted/20 p-3">
           {openReason ? (
             <>

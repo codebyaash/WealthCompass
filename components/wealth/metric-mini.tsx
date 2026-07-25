@@ -12,7 +12,7 @@ export function MetricMini({
       <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
-      <p className="mt-2 text-lg font-semibold tracking-normal">{value}</p>
+      <p className="mt-2 text-lg font-semibold tracking-normal text-foreground">{value}</p>
       {caption ? (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">{caption}</p>
       ) : null}

@@ -37,7 +37,7 @@ export function AskMentorLink({
           contextNote:
             contextNote ??
             (sourceLabel
-              ? `Opened from ${sourceLabel}. Carry this page context into the conversation.`
+              ? `Opened from ${sourceLabel}. Keep this page context active so the mentor can answer with the right decision frame.`
               : undefined),
           prompt: mentorPrompt,
           questionId: mentorQuestionId,
@@ -47,7 +47,7 @@ export function AskMentorLink({
       }
     >
       <MessageCircleQuestion className="h-3.5 w-3.5" />
-      {label}
+      <span>{label}</span>
     </Button>
   );
 }
