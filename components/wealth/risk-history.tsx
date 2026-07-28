@@ -58,6 +58,34 @@ export function RiskHistory({
       value: latestSaved ? "Review with context" : "Create first save",
     },
   ];
+  const historyVerdictLabel =
+    history.length === 0
+      ? "This page is still a setup lane until the first honest checkpoint is saved."
+      : history.length === 1
+        ? "You have a useful anchor now, but one more checkpoint is what turns history into trend."
+        : scoreChange > 0
+          ? "The timeline is showing a more confident posture, so the important question is whether behavior is keeping up."
+          : scoreChange < 0
+            ? "The timeline is showing a more cautious posture, which is healthy if it reflects reality and not noise."
+            : "The timeline is stable, so the richer read now comes from context and confidence rather than raw score movement.";
+  const historyVerdictToneClass =
+    history.length === 0
+      ? "border-border/70 bg-muted/20"
+      : history.length === 1
+        ? "border-sky-500/30 bg-sky-500/10"
+        : "border-emerald-500/30 bg-emerald-500/10";
+  const historyVerdictBadgeVariant =
+    history.length > 1 ? "secondary" : "outline";
+  const historyVerdictDetail =
+    history.length === 0
+      ? "Save after a real onboarding, goals, or portfolio shift so the page starts from a truthful baseline instead of a rushed placeholder."
+      : history.length === 1
+        ? "The next strong save usually comes after a meaningful goal, market, or portfolio decision, not just after time passes."
+        : scoreChange > 0
+          ? "A stronger risk score only matters if the surrounding plan, funding rhythm, and portfolio discipline grew with it."
+          : scoreChange < 0
+            ? "A more careful posture can be wisdom, not weakness, if it matches your actual comfort and current responsibilities."
+            : "When the score is steady, use the history as reassurance that your process is stabilizing rather than as proof that nothing changed.";
   const historyWorkingOrder = [
     history.length === 0
       ? "Save the first honest version of your profile once onboarding and intent answers feel real."
@@ -70,7 +98,7 @@ export function RiskHistory({
 
   return (
     <div className="grid gap-5">
-      <Card>
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Risk journey</CardTitle>
           <CardDescription>
@@ -78,7 +106,7 @@ export function RiskHistory({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-4 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="wealth-chart-frame grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="grid gap-4">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">{profile.band}</Badge>
@@ -98,21 +126,21 @@ export function RiskHistory({
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">1. Save the moment</p>
                   <p className="mt-1 text-sm font-semibold">Store meaningful changes</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Save after a real shift in goals, confidence, savings base, or market behavior.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">2. Compare direction</p>
                   <p className="mt-1 text-sm font-semibold">Look for score and band drift</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     The timeline is most useful when you read change across multiple saves, not one number alone.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">3. Adjust the plan</p>
                   <p className="mt-1 text-sm font-semibold">Use history as coaching context</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -122,7 +150,7 @@ export function RiskHistory({
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 {historyOperatingLenses.map((lens) => (
-                  <div key={lens.label} className="rounded-md border bg-background p-3">
+                  <div key={lens.label} className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       {lens.label}
                     </p>
@@ -131,15 +159,25 @@ export function RiskHistory({
                   </div>
                 ))}
               </div>
+              <div className={`rounded-md border p-4 ${historyVerdictToneClass}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground">History verdict</p>
+                  <Badge variant={historyVerdictBadgeVariant}>
+                    {history.length > 1 ? "Trend readable" : history.length === 1 ? "First anchor" : "Not started"}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-foreground">{historyVerdictLabel}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{historyVerdictDetail}</p>
+              </div>
             </div>
 
             <div className="grid gap-3">
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-sm font-medium">Current read</p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">{profile.score}/100</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{profile.summary}</p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-sm font-medium">Saved trend</p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
                   {history.length > 1
@@ -154,8 +192,8 @@ export function RiskHistory({
                     : "Save your current profile after a meaningful change to start turning this page into a real investing timeline."}
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
-                <p className="text-sm font-medium">Working order</p>
+              <div className="wealth-muted-block p-4">
+                <p className="text-sm font-medium">Reading order</p>
                 <div className="mt-3 grid gap-3">
                   {historyWorkingOrder.map((step, index) => (
                     <div key={step} className="flex items-start gap-3">
@@ -196,7 +234,7 @@ export function RiskHistory({
           </div>
 
           {history.length === 0 ? (
-            <div className="rounded-md border bg-background p-5">
+            <div className="wealth-empty-state p-5">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">{profile.band}</Badge>
                 <Badge variant="outline">{profile.confidence}</Badge>
@@ -206,21 +244,21 @@ export function RiskHistory({
                 Save the current profile from the header after a meaningful change. Once you have a few checkpoints, this page becomes a real progress timeline instead of a single score.
               </p>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Good first save</p>
                   <p className="mt-1 text-sm font-medium">After onboarding feels honest</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Capture the first version of your profile once the assessment reflects your real starting point.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Good second save</p>
                   <p className="mt-1 text-sm font-medium">After goals and portfolio tighten up</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     That helps you separate knowledge growth from changes caused by actual money decisions.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Best use</p>
                   <p className="mt-1 text-sm font-medium">Track direction, not perfection</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -232,7 +270,7 @@ export function RiskHistory({
           ) : (
             <div className="grid gap-3">
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     What this shows
                   </p>
@@ -240,7 +278,7 @@ export function RiskHistory({
                     A timeline of saved investing posture, not just a scoreboard of risk numbers.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Read this with
                   </p>
@@ -248,9 +286,9 @@ export function RiskHistory({
                     Goal changes, portfolio behavior, and confidence shifts together, so one temporary emotion does not dominate the read.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Best move
+                    Best next move
                   </p>
                   <p className="mt-2 text-sm leading-6 text-foreground">
                     Use visible drift to trigger one concrete planning update, not a full reinvention of the strategy.
@@ -264,9 +302,9 @@ export function RiskHistory({
                 return (
                   <div
                     key={item.id}
-                    className="grid gap-4 rounded-md border bg-background p-4 md:grid-cols-[132px_1fr_220px]"
+                    className="wealth-inset grid gap-4 p-4 md:grid-cols-[132px_1fr_220px]"
                   >
-                    <div className="rounded-md border bg-muted/30 p-3">
+                    <div className="wealth-muted-block p-3">
                       <p className="text-2xl font-semibold text-foreground">{item.score}</p>
                       <p className="text-xs text-muted-foreground">Saved score</p>
                       {delta !== null ? (
@@ -300,7 +338,7 @@ export function RiskHistory({
                       </p>
                     </div>
 
-                    <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+                    <div className="wealth-muted-block grid gap-3 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-medium text-foreground">Checkpoint context</p>
                         <p className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</p>
@@ -347,7 +385,7 @@ function HistoryMetric({
   value: string;
 }) {
   return (
-    <div className="rounded-md border bg-background p-3">
+    <div className="wealth-stat-tile">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{caption}</p>

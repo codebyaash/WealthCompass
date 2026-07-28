@@ -64,6 +64,10 @@ export function Academy({
   const [searchQuery, setSearchQuery] = useState("");
   const [leftCategoryId, setLeftCategoryId] = useState("index-funds");
   const [rightCategoryId, setRightCategoryId] = useState("equity-mutual-funds");
+  const [sectionNavigatorValue, setSectionNavigatorValue] = useState("academy-overview");
+  const [trackNavigatorValue, setTrackNavigatorValue] = useState("academy-track-placeholder");
+  const [useCaseNavigatorValue, setUseCaseNavigatorValue] = useState("academy-use-case-placeholder");
+  const [categoryNavigatorValue, setCategoryNavigatorValue] = useState("academy-category-placeholder");
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredGroups = useMemo(() => {
@@ -221,6 +225,87 @@ export function Academy({
         ]
       : []),
   ];
+  const academyWorkspaceVerdict =
+    normalizedQuery.length > 0
+      ? {
+          badge: "Search is narrowing the field",
+          badgeVariant: "outline" as const,
+          detail:
+            "You are no longer in broad browse mode. The best use of the page now is turning this narrower set into one realistic learning lane, not reopening the whole category universe.",
+          move: "Use the filtered tracks, shortlists, or categories to settle one next topic before widening the search again.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : primaryTrack
+        ? {
+            badge: "Learning desk is ready",
+            badgeVariant: "secondary" as const,
+            detail:
+              "The academy already has enough context from your profile to give you a strong first lane, which means you do not need to start from the full library.",
+            move: "Start with the guided lane first, then use shortlists or comparison only when the decision tightens.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          }
+        : {
+            badge: "Browse mode",
+            badgeVariant: "outline" as const,
+            detail:
+              "The page can still help, but it is waiting on either a clearer search or a cleaner learning lane to reduce the choice set.",
+            move: "Use the finder or one shortlist to turn the page from browsing into a focused study session.",
+            toneClass: "border-sky-500/30 bg-sky-500/10",
+          };
+  const trackVerdict =
+    primaryTrack
+      ? {
+          badge: "Best starting lane is visible",
+          badgeVariant: "secondary" as const,
+          detail:
+            "The guided tracks are already doing the most valuable work on this page: shrinking a huge category set into one next lane that fits your profile and current goal posture.",
+          move: `Start with ${primaryTrack.title} before you open the larger library.`,
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        }
+      : {
+          badge: "Tracks need a clearer base",
+          badgeVariant: "outline" as const,
+          detail:
+            "Without a stronger profile signal, the guided lane area is more suggestion than sequence.",
+          move: "Use search or a shortlist first, then come back when the category job is clearer.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        };
+  const useCaseVerdict =
+    filteredUseCases.length > 0
+      ? {
+          badge: "Money-job view is usable",
+          badgeVariant: "secondary" as const,
+          detail:
+            "The shortlist lane is strong because it starts from the problem to solve, which usually leads to better beginner decisions than starting from product labels.",
+          move: "Open one shortlist, then compare only the categories it keeps alive.",
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        }
+      : {
+          badge: "No shortlist matches yet",
+          badgeVariant: "outline" as const,
+          detail:
+            "The shortlist lane cannot reduce the field until the search or learning job becomes clearer.",
+          move: "Search by goal or role words like retirement, safety, liquidity, or growth.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        };
+  const comparatorVerdict =
+    leftCategory.id === rightCategory.id
+      ? {
+          badge: "Comparator is not active yet",
+          badgeVariant: "outline" as const,
+          detail:
+            "The comparator is most useful only when two realistic options are still alive. Right now it still needs a real close call.",
+          move: "Pick two categories that feel genuinely adjacent, then use this to settle the final choice.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : {
+          badge: "Close-call desk is live",
+          badgeVariant: "secondary" as const,
+          detail:
+            "This is now the right place to separate similar-looking categories by role, effort, and watchouts instead of relying on surface labels.",
+          move: `Use ${comparisonSummary.defaultPick} as the default unless the other option solves a meaningfully different job for you.`,
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        };
   const academyMentorPrompt = [
     `I am comparing ${leftCategory.name} versus ${rightCategory.name}${searchQuery.trim() ? ` while searching for "${searchQuery.trim()}"` : ""}.`,
     `My current learning posture is ${academyReadinessLabel}.`,
@@ -236,6 +321,9 @@ export function Academy({
   const trackPlansRef = useRef<HTMLDivElement | null>(null);
   const useCasesRef = useRef<HTMLDivElement | null>(null);
   const comparatorRef = useRef<HTMLDivElement | null>(null);
+  const introRef = useRef<HTMLDivElement | null>(null);
+  const navigationMapRef = useRef<HTMLDivElement | null>(null);
+  const finderRef = useRef<HTMLDivElement | null>(null);
   const scrollToAcademySection = (target: AcademyFocusTarget) => {
     (
       {
@@ -244,6 +332,12 @@ export function Academy({
         "use-cases": useCasesRef,
       } satisfies Record<AcademyFocusTarget, typeof comparatorRef>
     )[target]?.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+  const scrollToAcademyElement = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
@@ -263,6 +357,92 @@ export function Academy({
       return;
     }
     scrollToAcademySection(action);
+  };
+  const sectionNavigatorOptions = [
+    ["academy-overview", "Overview: learning desk"],
+    ["academy-priority-queue", "Queue: next best lane"],
+    ["academy-track-plans", "Lanes: guided tracks"],
+    ["academy-intro", "Start: academy intro"],
+    ["academy-navigation-map", "Map: beginner route"],
+    ["academy-category-finder", "Finder: category search"],
+    ["academy-use-cases", "Shortlists: money jobs"],
+    ["academy-comparator", "Compare: category close call"],
+  ] as Array<[string, string]>;
+  const trackNavigatorOptions = [
+    ["academy-track-placeholder", "Choose a guided lane"],
+    ...trackPlans.map((plan) => [`academy-track-${plan.id}`, `Lane: ${plan.title}`] as [string, string]),
+  ];
+  const useCaseNavigatorOptions = [
+    ["academy-use-case-placeholder", "Choose a shortlist"],
+    ...academyUseCases.map((useCase) => [`academy-use-case-${useCase.id}`, `Shortlist: ${useCase.title}`] as [string, string]),
+  ];
+  const categoryNavigatorOptions = [
+    ["academy-category-placeholder", "Choose a category card"],
+    ...categoryGroups.flatMap((group) =>
+      group.categories.map(
+        (category) =>
+          [
+            `academy-category-${category.id}`,
+            `${group.title}: ${category.name}`,
+          ] as [string, string],
+      ),
+    ),
+  ];
+
+  const handleSectionNavigate = (value: string) => {
+    setSectionNavigatorValue(value);
+    if (value === "academy-overview") {
+      scrollToAcademyElement(value);
+      return;
+    }
+    if (value === "academy-track-plans") {
+      scrollToAcademySection("track-plans");
+      return;
+    }
+    if (value === "academy-use-cases") {
+      scrollToAcademySection("use-cases");
+      return;
+    }
+    if (value === "academy-comparator") {
+      scrollToAcademySection("comparator");
+      return;
+    }
+    if (value === "academy-intro") {
+      introRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (value === "academy-navigation-map") {
+      navigationMapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (value === "academy-category-finder") {
+      finderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    scrollToAcademyElement(value);
+  };
+
+  const handleTrackNavigate = (value: string) => {
+    setTrackNavigatorValue(value);
+    if (value === "academy-track-placeholder") return;
+    scrollToAcademySection("track-plans");
+    window.requestAnimationFrame(() => scrollToAcademyElement(value));
+  };
+
+  const handleUseCaseNavigate = (value: string) => {
+    setUseCaseNavigatorValue(value);
+    if (value === "academy-use-case-placeholder") return;
+    scrollToAcademySection("use-cases");
+    window.requestAnimationFrame(() => scrollToAcademyElement(value));
+  };
+
+  const handleCategoryNavigate = (value: string) => {
+    setCategoryNavigatorValue(value);
+    if (value === "academy-category-placeholder") return;
+    const categoryId = value.replace("academy-category-", "");
+    const category = getCategoryById(categoryId);
+    setSearchQuery(category.name);
+    window.requestAnimationFrame(() => scrollToAcademyElement(value));
   };
 
   useEffect(() => {
@@ -290,8 +470,8 @@ export function Academy({
   }, [returnState, focusRequestKey]);
 
   return (
-    <div className="grid gap-5">
-      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+    <div className="academy-page grid gap-5">
+      <Card id="academy-overview" className="wealth-panel-strong overflow-hidden">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap gap-2">
@@ -331,7 +511,7 @@ export function Academy({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Guided tracks
                 </p>
@@ -339,7 +519,7 @@ export function Academy({
                   {trackPlans.length} personalized lane{trackPlans.length === 1 ? "" : "s"} built from your current profile and answers.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Compare on purpose
                 </p>
@@ -347,7 +527,7 @@ export function Academy({
                   Put two categories side by side before you mistake similar labels for similar roles.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Start from the job
                 </p>
@@ -390,12 +570,28 @@ export function Academy({
                 </p>
               </div>
             </div>
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${academyWorkspaceVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Academy verdict</p>
+                  <Badge variant={academyWorkspaceVerdict.badgeVariant}>{academyWorkspaceVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {academyWorkspaceVerdict.detail}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {academyWorkspaceVerdict.move}
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
               {academyOperatingLenses.map((lens) => (
-                <div
-                  key={lens.label}
-                  className="rounded-md border border-border/70 bg-background/80 p-4"
-                >
+                <div key={lens.label} className="wealth-data-card p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {lens.label}
                   </p>
@@ -407,7 +603,7 @@ export function Academy({
           </div>
 
           <div className="grid gap-3 content-start">
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Session map
               </p>
@@ -417,7 +613,7 @@ export function Academy({
                 <p>3. Use the comparator only for the final close call.</p>
               </div>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Current learning posture
               </p>
@@ -428,7 +624,7 @@ export function Academy({
                 Start with the learning lane that matches your current confidence and risk posture, then go deeper only where the next real decision needs it.
               </p>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Best next move
               </p>
@@ -437,7 +633,7 @@ export function Academy({
                   "Use the category finder or use-case shortlists to narrow the next topic worth learning."}
               </p>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Today&apos;s learning route
               </p>
@@ -447,9 +643,9 @@ export function Academy({
                 <p>3. Use the comparator for the last close call, not the first pass.</p>
               </div>
             </div>
-            <div className="rounded-md border border-border/70 bg-background p-4">
+            <div className="wealth-data-card p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Working order
+                Reading order
               </p>
               <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
                 {academyWorkingOrder.map((item) => (
@@ -457,7 +653,7 @@ export function Academy({
                 ))}
               </ul>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Page coverage
               </p>
@@ -486,7 +682,65 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <div className="sticky top-3 z-20">
+        <div className="wealth-panel-strong rounded-lg border border-border/80 bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85">
+          <div className="grid grid-cols-[auto_repeat(4,minmax(0,1fr))] items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Badge variant="secondary">Academy navigator</Badge>
+            </div>
+            <select
+              aria-label="Browse Academy sections"
+              className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              value={sectionNavigatorValue}
+              onChange={(event) => handleSectionNavigate(event.target.value)}
+            >
+              {sectionNavigatorOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Browse Academy guided lanes"
+              className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              value={trackNavigatorValue}
+              onChange={(event) => handleTrackNavigate(event.target.value)}
+            >
+              {trackNavigatorOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Browse Academy shortlists"
+              className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              value={useCaseNavigatorValue}
+              onChange={(event) => handleUseCaseNavigate(event.target.value)}
+            >
+              {useCaseNavigatorOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Browse Academy categories"
+              className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              value={categoryNavigatorValue}
+              onChange={(event) => handleCategoryNavigate(event.target.value)}
+            >
+              {categoryNavigatorOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <Card id="academy-priority-queue" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Priority queue</Badge>
@@ -503,7 +757,7 @@ export function Academy({
               key={item.title}
               type="button"
               onClick={() => handleAcademyPriorityAction(item.action)}
-              className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+              className="wealth-data-card text-left transition hover:bg-muted/40"
             >
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Next move
@@ -515,12 +769,12 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardContent className="grid gap-3 p-4 md:grid-cols-3">
           <button
             type="button"
             onClick={() => scrollToAcademySection("track-plans")}
-            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+            className="wealth-data-card text-left transition hover:bg-muted/40"
           >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Start here
@@ -535,7 +789,7 @@ export function Academy({
           <button
             type="button"
             onClick={() => scrollToAcademySection("use-cases")}
-            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+            className="wealth-data-card text-left transition hover:bg-muted/40"
           >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Narrow the job
@@ -550,7 +804,7 @@ export function Academy({
           <button
             type="button"
             onClick={() => scrollToAcademySection("comparator")}
-            className="rounded-md border border-border/70 bg-background p-4 text-left transition hover:bg-muted/40"
+            className="wealth-data-card text-left transition hover:bg-muted/40"
           >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Final choice
@@ -565,7 +819,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card ref={trackPlansRef} className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-track-plans" ref={trackPlansRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.personality}</Badge>
@@ -579,7 +833,7 @@ export function Academy({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+          <div className="wealth-chart-frame grid gap-3 md:grid-cols-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Use this first
@@ -598,22 +852,22 @@ export function Academy({
             </div>
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best move
+                Best next move
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">
                 Finish one lane, compare only the categories inside it, then come back if your goal or confidence shifts.
               </p>
             </div>
           </div>
-          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="grid gap-4 xl:grid-cols-3">
           {trackPlans.map((plan) => (
-            <div key={plan.id} className="rounded-md border border-border/70 bg-background p-4">
+            <div id={`academy-track-${plan.id}`} key={plan.id} className="wealth-data-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold">{plan.title}</p>
                 <Badge variant="outline">{plan.categoryIds.length} categories</Badge>
               </div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{plan.description}</p>
-              <div className="mt-4 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="mt-4 rounded-lg border border-border/75 bg-muted/30 p-3">
                 <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   <Sparkles className="h-3.5 w-3.5" />
                   What this track helps with
@@ -623,7 +877,7 @@ export function Academy({
                 </p>
               </div>
               <div className="mt-4 grid gap-2 md:grid-cols-3">
-                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <div className="wealth-stat-tile p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Best for now
                   </p>
@@ -631,7 +885,7 @@ export function Academy({
                     Focused learning with fewer choices and clearer category roles.
                   </p>
                 </div>
-                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <div className="wealth-stat-tile p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Avoid doing
                   </p>
@@ -639,7 +893,7 @@ export function Academy({
                     Jumping into a product before you understand what job this lane is solving.
                   </p>
                 </div>
-                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <div className="wealth-stat-tile p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Exit signal
                   </p>
@@ -654,7 +908,7 @@ export function Academy({
                   if (!useCase) return null;
 
                   return (
-                    <div key={useCase.id} className="rounded-md border border-border/70 bg-muted/20 p-3">
+                    <div key={useCase.id} className="wealth-stat-tile p-3">
                       <p className="text-sm font-medium">{useCase.title}</p>
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         {useCase.description}
@@ -677,7 +931,7 @@ export function Academy({
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => scrollToAcademySection("use-cases")}
                 >
@@ -697,7 +951,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card ref={useCasesRef} className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-intro" ref={introRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Investment Academy</CardTitle>
           <CardDescription>
@@ -728,7 +982,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-navigation-map" ref={navigationMapRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Beginner Navigation Map</CardTitle>
           <CardDescription>
@@ -754,7 +1008,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-category-finder" ref={finderRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Category Finder</CardTitle>
           <CardDescription>
@@ -762,7 +1016,22 @@ export function Academy({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${trackVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Guided-lane verdict</p>
+                <Badge variant={trackVerdict.badgeVariant}>{trackVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{trackVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{trackVerdict.move}</p>
+            </div>
+          </div>
+          <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Good searches
@@ -790,7 +1059,7 @@ export function Academy({
           </div>
           <label className="grid gap-2 text-sm">
             <span className="font-medium">Search categories</span>
-            <div className="flex items-center gap-2 rounded-md border bg-background px-3">
+            <div className="wealth-data-card flex items-center gap-2 px-3">
               <Search className="h-4 w-4 text-muted-foreground" />
               <input
                 value={searchQuery}
@@ -803,7 +1072,7 @@ export function Academy({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-use-cases" ref={useCasesRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Use-Case Shortlists</CardTitle>
           <CardDescription>
@@ -811,6 +1080,21 @@ export function Academy({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${useCaseVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Shortlist verdict</p>
+                <Badge variant={useCaseVerdict.badgeVariant}>{useCaseVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{useCaseVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{useCaseVerdict.move}</p>
+            </div>
+          </div>
           {primaryTrack ? (
             <div className="grid gap-3 rounded-md border border-primary/20 bg-primary/5 p-4 md:grid-cols-[1.15fr_0.85fr]">
               <div>
@@ -847,7 +1131,7 @@ export function Academy({
               </div>
             </div>
           ) : null}
-          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+          <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Use this when
@@ -875,7 +1159,7 @@ export function Academy({
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredUseCases.map((useCase) => (
-            <div key={useCase.id} className="rounded-md border border-border/70 bg-background p-4">
+            <div id={`academy-use-case-${useCase.id}`} key={useCase.id} className="wealth-data-card p-4">
               <p className="text-sm font-semibold">{useCase.title}</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{useCase.description}</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -905,7 +1189,7 @@ export function Academy({
       ))}
 
       {!filteredGroups.length ? (
-        <Card className="border-border/70 bg-card/95 shadow-sm">
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardContent className="grid gap-4 p-6">
             <div>
               <p className="text-sm font-medium text-foreground">Nothing matched that search yet</p>
@@ -914,21 +1198,21 @@ export function Academy({
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-xs text-muted-foreground">Good first retry</p>
                 <p className="mt-1 text-sm font-medium">Search by goal</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Terms like retirement, emergency, short-term money, or income usually work better than product jargon.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-xs text-muted-foreground">Then narrow</p>
                 <p className="mt-1 text-sm font-medium">Use one role word</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Try one clean lens such as safety, growth, or liquidity before comparing categories.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-xs text-muted-foreground">Best next move</p>
                 <p className="mt-1 text-sm font-medium">Review a shortlist instead</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -940,7 +1224,7 @@ export function Academy({
         </Card>
       ) : null}
 
-      <Card ref={comparatorRef} className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="academy-comparator" ref={comparatorRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Category comparator</CardTitle>
           <CardDescription>
@@ -948,7 +1232,22 @@ export function Academy({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5">
-          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-4 md:grid-cols-3">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${comparatorVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Comparator verdict</p>
+                <Badge variant={comparatorVerdict.badgeVariant}>{comparatorVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{comparatorVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{comparatorVerdict.move}</p>
+            </div>
+          </div>
+          <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Use comparator when
@@ -974,7 +1273,7 @@ export function Academy({
               </p>
             </div>
           </div>
-          <div className="grid gap-4 rounded-md border border-border/70 bg-muted/20 p-4">
+          <div className="wealth-inset grid gap-4 p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <SplitSquareVertical className="h-4 w-4 text-primary" />
               Compare what vs what
@@ -997,7 +1296,7 @@ export function Academy({
               <div className="flex items-center justify-center">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   className="h-11 w-11"
                   aria-label="Swap comparison sides"
@@ -1033,7 +1332,7 @@ export function Academy({
                   <button
                     key={`${leftId}-${rightId}`}
                     type="button"
-                    className="rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                    className="wealth-data-card px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-primary/5"
                     onClick={() => {
                       setLeftCategoryId(left.id);
                       setRightCategoryId(right.id);
@@ -1056,7 +1355,7 @@ export function Academy({
             <ComparisonOption option={rightCategory} emphasis={comparisonSummary.rightEdge} />
           </div>
 
-          <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+          <div className="wealth-muted-block p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">Beginner read</Badge>
               <span className="text-sm font-medium">{comparisonSummary.defaultPick}</span>
@@ -1065,7 +1364,7 @@ export function Academy({
               {comparisonSummary.recommendation}
             </p>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border border-border/70 bg-background p-3">
+              <div className="wealth-data-card p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Default pick
                 </p>
@@ -1076,7 +1375,7 @@ export function Academy({
                   Start here if you need the simpler first choice rather than the more exciting label.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-background p-3">
+              <div className="wealth-data-card p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   What decides it
                 </p>
@@ -1084,7 +1383,7 @@ export function Academy({
                   Focus on the money role, effort level, and watchout that matter most for your current goal.
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-background p-3">
+              <div className="wealth-data-card p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -1120,7 +1419,7 @@ function AcademyIntroCard({
   title: string;
 }) {
   return (
-    <div className="rounded-md border bg-background p-4">
+    <div className="wealth-inset p-4">
       <div className="flex items-center gap-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted/50">
           {icon}
@@ -1142,14 +1441,14 @@ function CategorySection({
   title: string;
 }) {
   return (
-    <Card>
+    <Card className="wealth-panel-strong overflow-hidden">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 md:grid-cols-2">
         {categories.map((category) => (
-          <div key={category.id} className="rounded-md border bg-background p-4">
+          <div id={`academy-category-${category.id}`} key={category.id} className="wealth-inset p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="font-semibold">{category.name}</h3>
               <div className="flex flex-wrap gap-2">
@@ -1167,7 +1466,7 @@ function CategorySection({
               <span className="md:col-span-2">Tax note: {category.taxHint}</span>
               <span className="md:col-span-2">Not ideal when: {category.notFor}</span>
             </div>
-            <div className="mt-4 grid gap-2 rounded-md border bg-muted/30 p-3">
+            <div className="wealth-muted-block mt-4 grid gap-2 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-foreground">Key watchouts</p>
               {category.keyWatchouts.map((watchout) => (
                 <p key={watchout} className="text-xs text-muted-foreground">
@@ -1190,7 +1489,7 @@ function ComparisonOption({
   emphasis: string;
 }) {
   return (
-    <div className="rounded-md border bg-background p-4">
+    <div className="wealth-inset p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="font-semibold">{option.name}</p>
@@ -1206,7 +1505,7 @@ function ComparisonOption({
         <span>Tax note: {option.taxHint}</span>
         <span>Watchout: {option.keyWatchouts[0]}</span>
       </div>
-      <div className="mt-4 rounded-md border bg-muted/30 p-3">
+      <div className="wealth-muted-block mt-4 p-3">
         <p className="text-xs font-medium uppercase tracking-wide text-foreground">Beginner edge</p>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">{emphasis}</p>
       </div>

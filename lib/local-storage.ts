@@ -94,6 +94,7 @@ export type MarketPreferences = {
   includeHoldingsWatch: boolean;
   pollingIntervalSeconds: number;
   preferredSource: "alpha-vantage" | "fallback";
+  watchlist: string[];
 };
 
 export type ImportJobStatus = "received" | "reviewed" | "completed" | "failed";
@@ -799,6 +800,9 @@ function normalizeMarketPreferences(value: unknown): MarketPreferences | null {
       ["alpha-vantage", "fallback"],
       defaultSnapshot.marketPreferences.preferredSource,
     ) as MarketPreferences["preferredSource"],
+    watchlist: Array.isArray(value.watchlist)
+      ? value.watchlist.filter((item): item is string => typeof item === "string")
+      : defaultSnapshot.marketPreferences.watchlist,
   };
 }
 

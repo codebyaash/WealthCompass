@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MetricMini } from "@/components/wealth/metric-mini";
+import { PageNavigatorBar } from "@/components/wealth/page-navigator-bar";
 import type { ActiveView } from "@/components/wealth/app-sidebar";
 import type { WealthGoal } from "@/lib/local-storage";
 import {
@@ -105,6 +106,7 @@ export function MentorPanel({
   const [activeLaunchContextNote, setActiveLaunchContextNote] = useState<string | null>(null);
   const [activeLaunchReturnState, setActiveLaunchReturnState] = useState<Record<string, unknown> | null>(null);
   const [activeLaunchSourceLabel, setActiveLaunchSourceLabel] = useState<string | null>(null);
+  const [navigatorValue, setNavigatorValue] = useState("mentor-overview");
   const chatMessageIdRef = useRef(0);
   const appliedLaunchNonceRef = useRef<number | null>(null);
   const activeThreadLaunchSource =
@@ -515,33 +517,6 @@ export function MentorPanel({
     () => savedInsights.filter((insight) => insight.status === "stuck"),
     [savedInsights],
   );
-  const mentorSessionStats = useMemo(
-    () => ({
-      activeLanes: topicThreadSummary.filter((topic) => topic.hasHistory).length,
-      liveFocusCount: groupedSavedInsights["do-now"].length,
-      savedCount: savedInsights.length,
-      stuckCount: stuckInsights.length,
-    }),
-    [groupedSavedInsights, savedInsights.length, stuckInsights.length, topicThreadSummary],
-  );
-  const pinnedInsight =
-    savedInsights.find((insight) => insight.isPinned) ??
-    groupedSavedInsights["do-now"][0] ??
-    null;
-  const pinnedInsightWhyNow = pinnedInsight
-    ? getMentorInsightWhyNow({
-        answers,
-        profile,
-        questionId: pinnedInsight.questionId,
-      })
-    : null;
-  const pinnedInsightRecovery = pinnedInsight
-    ? getMentorInsightRecovery({
-        answers,
-        profile,
-        questionId: pinnedInsight.questionId,
-      })
-    : null;
   const topicThreadSummary = useMemo(
     () =>
       mentorQuestions.map((question) => {
@@ -616,6 +591,105 @@ export function MentorPanel({
       }),
     [activeQuestionId, conversationThreads, savedInsights],
   );
+  const mentorSessionStats = useMemo(
+    () => ({
+      activeLanes: topicThreadSummary.filter((topic) => topic.hasHistory).length,
+      liveFocusCount: groupedSavedInsights["do-now"].length,
+      savedCount: savedInsights.length,
+      stuckCount: stuckInsights.length,
+    }),
+    [groupedSavedInsights, savedInsights.length, stuckInsights.length, topicThreadSummary],
+  );
+  const mentorVerdictLabel =
+    mentorSessionStats.stuckCount > 0
+      ? "The best use of this session is to unblock one stuck decision."
+      : mentorSessionStats.liveFocusCount > 0
+        ? "You already have a live focus, so this session should help you act, not reopen everything."
+        : mentorSessionStats.activeLanes > 2
+          ? "You have enough open context now that narrowing to one lane matters more than opening another."
+          : "The setup is clean enough to use the mentor for one focused decision and leave with a real next move.";
+  const mentorVerdictToneClass =
+    mentorSessionStats.stuckCount > 0
+      ? "border-amber-500/30 bg-amber-500/10"
+      : mentorSessionStats.liveFocusCount > 0
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : "border-border/70 bg-muted/20";
+  const mentorVerdictBadgeVariant =
+    mentorSessionStats.stuckCount > 0 ? "outline" : "secondary";
+  const mentorVerdictDetail =
+    mentorSessionStats.stuckCount > 0
+      ? "A stuck takeaway is the highest-leverage thing to resolve because it turns saved thinking back into movement."
+      : mentorSessionStats.liveFocusCount > 0
+        ? "You already have enough guidance saved, so the mentor is most useful when it helps you commit to the next action."
+        : mentorSessionStats.activeLanes > 2
+          ? "Too many open lanes can make the mentor feel smart but unhelpful. One lane at a time keeps the coaching practical."
+          : "This is a good moment to use the mentor as a decision desk rather than a study archive.";
+  const laneVerdictLabel =
+    mentorSessionStats.activeLanes === 0
+      ? "Start one lane that matches this week's real decision."
+      : mentorSessionStats.activeLanes === 1
+        ? "Your lane setup is clean, so keep building depth in the open thread."
+        : mentorSessionStats.activeLanes <= 3
+          ? "A few active lanes is healthy, but today's work should still end in one chosen focus."
+          : "Your library is getting wide, so use the threads as parking lanes and commit to one active topic today.";
+  const laneVerdictToneClass =
+    mentorSessionStats.activeLanes > 3
+      ? "border-amber-500/30 bg-amber-500/10"
+      : mentorSessionStats.activeLanes === 1
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : "border-border/70 bg-muted/20";
+  const laneVerdictBadgeVariant =
+    mentorSessionStats.activeLanes === 1 ? "secondary" : "outline";
+  const laneVerdictDetail =
+    mentorSessionStats.activeLanes === 0
+      ? "A fresh lane is fine, but it should match a real decision like SIP sizing, allocation concentration, or what to review next."
+      : mentorSessionStats.activeLanes === 1
+        ? "One active lane keeps the coaching reusable because you can return without rebuilding the full context."
+        : mentorSessionStats.activeLanes <= 3
+          ? "The thread library is doing its job, but only one lane should own today's attention."
+          : "This many active lanes usually means the mentor is becoming a notebook. Use it more like an operator desk.";
+  const conversationVerdictLabel =
+    chatMessages.length === 0
+      ? "Open with one plain-language question instead of a long situation dump."
+      : isSendingChat
+        ? "Stay on the same topic while the reply lands so the thread remains coherent."
+        : pinnedInsight
+          ? "The chat is most useful now if it strengthens your pinned action instead of creating a parallel track."
+          : "You have enough conversation context to save one takeaway and turn this into a next step.";
+  const conversationVerdictToneClass =
+    chatMessages.length === 0
+      ? "border-border/70 bg-muted/20"
+      : pinnedInsight
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : "border-primary/20 bg-primary/5";
+  const conversationVerdictBadgeVariant =
+    pinnedInsight || chatMessages.length > 0 ? "secondary" : "outline";
+  const conversationVerdictDetail =
+    chatMessages.length === 0
+      ? "The first question should be narrow enough that you can tell whether the answer changed your next move."
+      : isSendingChat
+        ? "Let the thread finish one decision loop before you switch topics or ask about something unrelated."
+        : pinnedInsight
+          ? "A pinned takeaway means the conversation already produced something usable. The next turn should help you execute or pressure-test it."
+          : "Before leaving the chat, save, pin, or act on the reply that feels most useful right now.";
+  const pinnedInsight =
+    savedInsights.find((insight) => insight.isPinned) ??
+    groupedSavedInsights["do-now"][0] ??
+    null;
+  const pinnedInsightWhyNow = pinnedInsight
+    ? getMentorInsightWhyNow({
+        answers,
+        profile,
+        questionId: pinnedInsight.questionId,
+      })
+    : null;
+  const pinnedInsightRecovery = pinnedInsight
+    ? getMentorInsightRecovery({
+        answers,
+        profile,
+        questionId: pinnedInsight.questionId,
+      })
+    : null;
   const mentorOperatingLenses = useMemo(
     () => [
       {
@@ -1092,9 +1166,21 @@ export function MentorPanel({
     }
   }
 
+  const mentorNavigatorOptions = [
+    ["mentor-overview", "Overview: coaching desk"],
+    ["mentor-library", "Library: question lanes"],
+    ["mentor-answer", "Read: active answer"],
+    ["mentor-conversation", "Chat: live conversation"],
+  ] as Array<[string, string]>;
+
+  const handleMentorNavigatorChange = (value: string) => {
+    setNavigatorValue(value);
+    document.getElementById(value)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="grid gap-5">
-      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-overview" className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap gap-2">
@@ -1163,6 +1249,14 @@ export function MentorPanel({
                 </p>
               </div>
             </div>
+            <div className={`rounded-md border p-4 ${mentorVerdictToneClass}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">Mentor verdict</p>
+                <Badge variant={mentorVerdictBadgeVariant}>{mentorReadinessLabel}</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-foreground">{mentorVerdictLabel}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{mentorVerdictDetail}</p>
+            </div>
           </div>
 
           <div className="grid gap-3 content-start">
@@ -1179,7 +1273,7 @@ export function MentorPanel({
             </div>
             <div className="rounded-md border border-border/70 bg-muted/20 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best next move
+                Focus now
               </p>
               <p className="mt-3 text-sm leading-6 text-foreground">
                 {answer.actionTrack.nextMove}
@@ -1187,7 +1281,6 @@ export function MentorPanel({
               <div className="mt-3">
                 <Button
                   type="button"
-                  variant="outline"
                   size="sm"
                   onClick={() => onNavigate(currentActionTarget.view)}
                 >
@@ -1200,12 +1293,19 @@ export function MentorPanel({
         </CardContent>
       </Card>
 
+      <PageNavigatorBar
+        label="Mentor navigator"
+        options={mentorNavigatorOptions}
+        value={navigatorValue}
+        onChange={handleMentorNavigatorChange}
+      />
+
       <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-library" className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
-          <CardTitle>AI mentor</CardTitle>
+          <CardTitle>Library: question lanes</CardTitle>
           <CardDescription>
-            Guided explanations tuned to your profile, portfolio, and current setup stage.
+            Guided question lanes tuned to your profile, portfolio, and current setup stage so you can get to one clearer decision at a time.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -1408,6 +1508,16 @@ export function MentorPanel({
             </div>
           </div>
           <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className={`mb-4 rounded-md border p-4 ${laneVerdictToneClass}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">Lane verdict</p>
+                <Badge variant={laneVerdictBadgeVariant}>
+                  {mentorSessionStats.activeLanes} active lane{mentorSessionStats.activeLanes === 1 ? "" : "s"}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-foreground">{laneVerdictLabel}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{laneVerdictDetail}</p>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Topic threads</p>
               <Badge variant="outline">
@@ -1523,7 +1633,6 @@ export function MentorPanel({
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
-                            variant="secondary"
                             size="sm"
                             className="h-8"
                             onClick={(event) => {
@@ -1531,12 +1640,12 @@ export function MentorPanel({
                               handleResumeTopicTakeaway(topic.id, topic.lastTakeaway ?? "");
                             }}
                           >
-                            Resume from takeaway
+                            Resume this takeaway
                           </Button>
                           {topic.openInsightId ? (
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="ghost"
                               size="sm"
                               className="h-8"
                               onClick={(event) => {
@@ -1632,7 +1741,7 @@ export function MentorPanel({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-answer" className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.personality}</Badge>
@@ -1640,7 +1749,7 @@ export function MentorPanel({
             <Badge variant="outline">{answer.focusLabel}</Badge>
             <Badge variant="outline">{answer.actionTrack.title}</Badge>
           </div>
-          <CardTitle>{activeQuestion.title}</CardTitle>
+          <CardTitle>{`Read: ${activeQuestion.title}`}</CardTitle>
           <CardDescription>{answer.summary}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -1679,7 +1788,7 @@ export function MentorPanel({
             </div>
             <div className="rounded-md border border-border/70 bg-background p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best next move
+                Return path
               </p>
               <p className="mt-2 text-sm leading-6">{answer.actionTrack.nextMove}</p>
               <div className="mt-3">
@@ -1721,7 +1830,7 @@ export function MentorPanel({
             </p>
             <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best next move
+                Coaching move
               </p>
               <p className="mt-2 text-sm leading-6">{answer.actionTrack.nextMove}</p>
             </div>
@@ -1781,10 +1890,10 @@ export function MentorPanel({
       </Card>
       </div>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-conversation" className="border-border/70 bg-card/95 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>AI mentor conversation</CardTitle>
+            <CardTitle>Chat: live conversation</CardTitle>
             <Badge variant="outline">{mentorReadinessLabel}</Badge>
             {activeLaunchSourceLabel ? (
               <Badge variant="secondary">Opened from {activeLaunchSourceLabel}</Badge>
@@ -1794,7 +1903,7 @@ export function MentorPanel({
             ) : null}
           </div>
           <CardDescription>
-            Ask follow-up questions in plain language. The AI mentor uses your current profile, holdings, goals, and active coaching topic to keep the conversation personal.
+            Ask follow-up questions in plain language. The AI mentor uses your profile, holdings, goals, and active topic to keep the conversation personal and practical.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -1823,6 +1932,16 @@ export function MentorPanel({
                 Save or pin the one reply you want to keep, then go back and act on it right away.
               </p>
             </div>
+          </div>
+          <div className={`rounded-md border p-4 ${conversationVerdictToneClass}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-foreground">Conversation verdict</p>
+              <Badge variant={conversationVerdictBadgeVariant}>{conversationStatusLabel}</Badge>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-foreground">{conversationVerdictLabel}</p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {conversationVerdictDetail}
+            </p>
           </div>
           <div className="grid gap-3 rounded-md border border-border/70 bg-background p-4 md:grid-cols-4">
             <div className="rounded-md border border-border/70 bg-muted/20 p-3">

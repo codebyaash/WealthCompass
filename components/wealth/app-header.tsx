@@ -9,6 +9,8 @@ const viewMeta: Record<
   ActiveView,
   {
     eyebrow: string;
+    heroTitle: string;
+    laneLabel: string;
     summary: string;
     quickActionLabel: string;
     quickActionTarget: ActiveView;
@@ -16,55 +18,73 @@ const viewMeta: Record<
 > = {
   academy: {
     eyebrow: "Academy",
-    quickActionLabel: "Review market context",
+    heroTitle: "Build product clarity before you allocate capital",
+    laneLabel: "Learning lane",
+    quickActionLabel: "Open market lane",
     quickActionTarget: "market",
     summary: "Learn the products, tradeoffs, and category roles before you put fresh capital to work.",
   },
   dashboard: {
     eyebrow: "Dashboard",
-    quickActionLabel: "Review market desk",
+    heroTitle: "Run the full investing system from one desk",
+    laneLabel: "Command lane",
+    quickActionLabel: "Open market lane",
     quickActionTarget: "market",
     summary: "Read the health of the full investing system across risk, portfolio, goals, market context, and execution.",
   },
   goals: {
     eyebrow: "Goals",
-    quickActionLabel: "Return to dashboard",
+    heroTitle: "Turn targets into monthly funding discipline",
+    laneLabel: "Planning lane",
+    quickActionLabel: "Open dashboard lane",
     quickActionTarget: "dashboard",
     summary: "Turn long-term intentions into monthly funding pressure you can actually sustain and review.",
   },
   history: {
     eyebrow: "History",
-    quickActionLabel: "Review portfolio",
+    heroTitle: "Review how your investing posture has changed",
+    laneLabel: "History lane",
+    quickActionLabel: "Open portfolio lane",
     quickActionTarget: "portfolio",
     summary: "Review how your posture, confidence, and investing actions have changed over time.",
   },
   market: {
     eyebrow: "Market",
-    quickActionLabel: "Review live controls",
+    heroTitle: "Read sector leadership with a portfolio-first lens",
+    laneLabel: "Market lane",
+    quickActionLabel: "Open settings lane",
     quickActionTarget: "settings",
     summary: "Read sectors, trends, and suggested market pockets with a steadier portfolio-first lens.",
   },
   mentor: {
     eyebrow: "AI Mentor",
-    quickActionLabel: "Return to dashboard",
+    heroTitle: "Turn confusion into one calmer next move",
+    laneLabel: "Mentor lane",
+    quickActionLabel: "Open dashboard lane",
     quickActionTarget: "dashboard",
     summary: "Ask plain-language questions and turn uncertainty into one calmer, more usable next move.",
   },
   onboarding: {
     eyebrow: "Onboarding",
-    quickActionLabel: "Ask AI Mentor",
+    heroTitle: "Set the baseline the rest of the app can trust",
+    laneLabel: "Baseline lane",
+    quickActionLabel: "Open AI Mentor",
     quickActionTarget: "mentor",
     summary: "Set your starting point so the rest of the workspace can personalize around your real intent and risk posture.",
   },
   portfolio: {
     eyebrow: "Portfolio",
-    quickActionLabel: "Check market fit",
+    heroTitle: "Track capital, imports, and allocation with cleaner context",
+    laneLabel: "Portfolio lane",
+    quickActionLabel: "Open market lane",
     quickActionTarget: "market",
     summary: "Track imports, allocation, and journal activity without losing sight of the broader plan.",
   },
   settings: {
     eyebrow: "Settings",
-    quickActionLabel: "Review market desk",
+    heroTitle: "Protect the workspace and keep every feed trustworthy",
+    laneLabel: "Control lane",
+    quickActionLabel: "Open market lane",
     quickActionTarget: "market",
     summary: "Manage connectors, backups, and live controls without breaking the operating flow of the desk.",
   },
@@ -100,7 +120,7 @@ export function AppHeader({
   const activeViewMeta = viewMeta[activeView];
 
   return (
-    <div className="mb-6 grid gap-4 rounded-xl border border-border/75 bg-card/92 p-5 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.28)] backdrop-blur-sm md:p-6">
+    <div className="wealth-panel-strong mb-6 grid gap-4 p-5 md:p-6">
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
         <div className="min-w-0">
           <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
@@ -124,7 +144,7 @@ export function AppHeader({
             )}
           </div>
           <h1 className="text-2xl font-semibold tracking-normal text-foreground md:text-3xl">
-            Your investing operating desk
+            {activeViewMeta.heroTitle}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
             {activeViewMeta.summary}
@@ -161,7 +181,7 @@ export function AppHeader({
           )}
         </div>
       </div>
-      <div className="flex flex-col justify-between gap-3 rounded-lg border border-border/75 bg-background/72 p-4 shadow-sm sm:flex-row sm:items-center">
+      <div className="wealth-inset flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
         <div className="flex items-start gap-3">
           <Cloud className="mt-0.5 h-4 w-4 text-primary" />
           <div>
@@ -175,11 +195,11 @@ export function AppHeader({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="border-border/80 bg-card/65">
-            Next lane: {activeViewMeta.quickActionLabel}
+          <Badge variant="outline" className="border-border/80 bg-card/70">
+            {activeViewMeta.laneLabel}: {activeViewMeta.quickActionLabel}
           </Badge>
           {userEmail && (
-            <Badge variant="outline" className="border-border/80 bg-card/65">
+            <Badge variant="outline" className="border-border/80 bg-card/70">
               {userEmail}
             </Badge>
           )}

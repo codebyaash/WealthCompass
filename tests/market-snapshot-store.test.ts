@@ -77,6 +77,7 @@ describe("refreshStoredMarketSnapshot", () => {
         includeHoldingsWatch: true,
         pollingIntervalSeconds: 60,
         preferredSource: "fallback",
+        watchlist: [],
       },
       supabase: supabase as never,
       userId: "user-1",

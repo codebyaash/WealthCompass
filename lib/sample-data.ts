@@ -180,6 +180,7 @@ export const defaultMarketPreferences: MarketPreferences = {
   includeHoldingsWatch: true,
   pollingIntervalSeconds: 60,
   preferredSource: "alpha-vantage",
+  watchlist: [],
 };
 
 export const defaultImportJobs: ImportJob[] = [

@@ -41,6 +41,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { PageNavigatorBar } from "@/components/wealth/page-navigator-bar";
 import { Roadmap } from "@/components/wealth/roadmap";
 import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import {
@@ -297,6 +298,45 @@ export function Dashboard({
       value: formatMoney(portfolioTotal),
     },
   ];
+  const openImportReviewCount = importJobs.filter(
+    (job) => job.status === "received" || job.status === "reviewed",
+  ).length;
+  const fundingGap = Math.max(monthlyGoal - profile.monthlyInvestment, 0);
+  const dashboardPulseCards = [
+    {
+      detail: isFreshWorkspace ? "Finish onboarding first" : profile.band,
+      icon: Gauge,
+      label: "Risk score",
+      value: isFreshWorkspace ? "--" : `${profile.score}/100`,
+    },
+    {
+      detail: isFreshWorkspace ? "Assessment still pending" : "Foundation check",
+      icon: ShieldCheck,
+      label: "Health score",
+      value: isFreshWorkspace ? "--" : `${healthScore}/100`,
+    },
+    {
+      detail:
+        openImportReviewCount > 0
+          ? "Review these before trusting downstream reads."
+          : "Nothing is waiting for import sign-off right now.",
+      icon: DatabaseZap,
+      label: "Review queue",
+      value: openImportReviewCount > 0 ? `${openImportReviewCount} open` : "Clear",
+    },
+    {
+      detail:
+        integrations.length > 0
+          ? `${connectorOperations.attentionCount} need attention · ${connectorSchedulerPlan.readyCount} first check pending`
+          : "Connect one dependable source to keep the workspace fresh.",
+      icon: PlugZap,
+      label: "Live sources",
+      value:
+        integrations.length > 0
+          ? `${connectorSchedulerPlan.activeCount} active`
+          : "Not linked",
+    },
+  ];
   const dashboardPriorityQueue = [
     isFreshWorkspace
       ? {
@@ -549,6 +589,24 @@ export function Dashboard({
             : "Snapshot-heavy",
     },
   ];
+  const [navigatorValue, setNavigatorValue] = useState("dashboard-command-lanes");
+  const dashboardNavigatorOptions = [
+    ["dashboard-command-lanes", "Start here: command lanes"],
+    ["dashboard-decision-pressure", "Read: decision pressure"],
+    ["dashboard-today-board", "Act: today board"],
+    ["dashboard-operating-lenses", "Read: operating lenses"],
+    ["dashboard-next-action", "Focus: next best action"],
+    ["dashboard-operating-flow", "Flow: working order"],
+    ["dashboard-coaching-tracks", "Learn: coaching tracks"],
+    ["dashboard-trajectory", "Portfolio: contribution path"],
+    ["dashboard-allocation", "Portfolio: allocation snapshot"],
+    ["dashboard-goal-progress", "Goals: funding pressure"],
+    ["dashboard-connectors", "Data: connector health"],
+  ] as Array<[string, string]>;
+  const handleDashboardNavigatorChange = (value: string) => {
+    setNavigatorValue(value);
+    document.getElementById(value)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const dashboardWorkingOrder = [
     isFreshWorkspace
       ? "Finish onboarding so the dashboard stops operating on assumptions."
@@ -583,7 +641,144 @@ export function Dashboard({
       : "Allocation is ready for review."
     : "Allocation becomes useful once at least one tracked holding is live.";
   const mentorCtaLabel = "Ask AI mentor";
-  const fundingGap = Math.max(monthlyGoal - profile.monthlyInvestment, 0);
+  const dashboardBoardVerdict = isFreshWorkspace
+    ? {
+        badge: "Setup first",
+        badgeVariant: "outline" as const,
+        detail:
+          "The dashboard is still in setup mode, so the best use of this page is sequencing the first few real actions instead of reading every lane deeply.",
+        move: "Finish onboarding, add one real holding or goal, and link one dependable source.",
+        toneClass: "border-sky-500/30 bg-sky-500/10",
+      }
+    : connectorAttention.count > 0
+      ? {
+          badge: "Trust is constrained",
+          badgeVariant: "outline" as const,
+          detail:
+            "The board has enough live signal to be useful, but data trust is still the main limiter on how confidently you should act.",
+          move: "Repair the first weak feed before treating downstream reads as equally reliable.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        }
+      : fundingGap > 0
+        ? {
+            badge: "Funding is the pressure point",
+            badgeVariant: "outline" as const,
+            detail:
+              "The workspace is coherent enough to read clearly, and the main strain has shifted from setup toward monthly goal pressure.",
+            move: "Work the goals lane until the monthly gap feels livable again.",
+            toneClass: "border-sky-500/30 bg-sky-500/10",
+          }
+        : {
+            badge: "Operating mode",
+            badgeVariant: "secondary" as const,
+            detail:
+              "The board is stable enough that you can use it as a real operating surface instead of a setup checklist.",
+            move: "Use the top action lane to decide where to spend attention, then act in one page at a time.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          };
+  const trajectoryVerdict = hasTrajectory
+    ? {
+        badge: "Behavior read is live",
+        badgeVariant: "secondary" as const,
+        detail:
+          "You have enough dated contribution history that this section can say something about behavior, not just static capital.",
+        move: "Use the path with allocation to judge discipline before reacting to recent market moves.",
+        toneClass: "border-emerald-500/30 bg-emerald-500/10",
+      }
+    : portfolioTotal > 0
+      ? {
+          badge: "Coverage still thin",
+          badgeVariant: "outline" as const,
+          detail:
+            "Holdings are present, but the contribution path is still incomplete, so totals can look more informative than they really are.",
+          move: "Import or add dated transactions before leaning too hard on the chart lane.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        }
+      : {
+          badge: "Path not started",
+          badgeVariant: "outline" as const,
+          detail:
+            "Without tracked holdings or dated transactions, this lane is still waiting for its first real signal.",
+          move: "Start with the first holding or statement import.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        };
+  const allocationVerdict = allocationData.length
+    ? topAllocationBucket
+      ? {
+          badge: "Snapshot is usable",
+          badgeVariant: "secondary" as const,
+          detail:
+            "Tracked money is visible enough to inspect concentration, but the goal is understanding the biggest bucket before reaching for a rebalance instinct.",
+          move: `Interrogate ${topAllocationBucket.name} first, then review the holdings behind it.`,
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        }
+      : {
+          badge: "Allocation is visible",
+          badgeVariant: "secondary" as const,
+          detail: "The allocation surface is live enough to review where capital is currently sitting.",
+          move: "Read the largest slices before making any change.",
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        }
+    : {
+        badge: "No allocation read yet",
+        badgeVariant: "outline" as const,
+        detail:
+          "There is still not enough holdings coverage for allocation to say anything useful.",
+        move: "Add the first tracked holding before using this lane.",
+        toneClass: "border-sky-500/30 bg-sky-500/10",
+      };
+  const goalsFundingVerdict = goals.length === 0
+    ? {
+        badge: "Goal map missing",
+        badgeVariant: "outline" as const,
+        detail:
+          "Monthly investing still does not have named destinations, so this lane is more blank than strained.",
+        move: "Define one real goal before optimizing the rest.",
+        toneClass: "border-sky-500/30 bg-sky-500/10",
+      }
+    : fundingGap > 0
+      ? {
+          badge: "Funding strain is visible",
+          badgeVariant: "outline" as const,
+          detail:
+            "Too many dollars are still being asked of the same monthly pool, which means sequencing and resizing matter more than ambition right now.",
+          move: "Prune, stage, or resize before assuming a bigger SIP is the answer.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        }
+      : {
+          badge: "Goal pace is in range",
+          badgeVariant: "secondary" as const,
+          detail:
+            "The current monthly investing rhythm is at least keeping up with visible goal demand, which is a good sign for plan durability.",
+          move: "Keep priorities clean and review realism rather than forcing more pace.",
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        };
+  const connectorVerdict = integrations.length === 0
+    ? {
+        badge: "Feed layer not started",
+        badgeVariant: "outline" as const,
+        detail:
+          "The dashboard is still relying heavily on manual updates, so freshness risk stays hidden until something drifts.",
+        move: "Connect one dependable source before expecting the board to stay fresh by itself.",
+        toneClass: "border-sky-500/30 bg-sky-500/10",
+      }
+    : connectorAttention.severity === "healthy"
+      ? {
+          badge: "Feed layer is healthy",
+          badgeVariant: "secondary" as const,
+          detail:
+            "Connector health is stable enough that downstream portfolio and market reads are more trustworthy right now.",
+          move: "Monitor the lane, but spend your main attention elsewhere today.",
+          toneClass: "border-emerald-500/30 bg-emerald-500/10",
+        }
+      : {
+          badge: "Trust is at risk",
+          badgeVariant: "outline" as const,
+          detail:
+            "At least one weak feed can still distort what the dashboard is telling you, even if the rest of the board looks polished.",
+          move: "Repair the first weak lane and rerun it once before acting on downstream insights.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        };
   const decisionPressureCards = [
     {
       detail: isFreshWorkspace
@@ -1120,8 +1315,8 @@ export function Dashboard({
   }, [recentRecoveryResult]);
 
   return (
-    <div className="grid gap-5">
-      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+    <div className="dashboard-page grid gap-5">
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.25fr_0.75fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -1144,7 +1339,7 @@ export function Dashboard({
               </div>
               <div className="grid gap-3 pt-1 md:grid-cols-3">
                 {dashboardFocusItems.map(({ detail, icon: Icon, label }) => (
-                  <div key={label} className="rounded-md border border-border/70 bg-muted/20 p-4">
+                  <div key={label} className="wealth-data-card">
                     <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       <Icon className="h-3.5 w-3.5" />
                       <span>{label}</span>
@@ -1155,7 +1350,7 @@ export function Dashboard({
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 {dashboardExecutiveLenses.map(({ detail, label, value }) => (
-                  <div key={label} className="rounded-md border border-border/70 bg-muted/20 p-4">
+                  <div key={label} className="wealth-data-card">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       {label}
                     </p>
@@ -1166,7 +1361,7 @@ export function Dashboard({
               </div>
               <div className="grid gap-3 md:grid-cols-4">
                 {dashboardTopStats.map(({ detail, label, value }) => (
-                  <div key={label} className="rounded-md border border-border/70 bg-background p-4">
+                  <div key={label} className="wealth-stat-tile">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       {label}
                     </p>
@@ -1175,7 +1370,7 @@ export function Dashboard({
                   </div>
                 ))}
               </div>
-              <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
+              <div className="wealth-inset grid gap-3 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-medium text-foreground">Priority queue</p>
@@ -1189,7 +1384,7 @@ export function Dashboard({
                   {dashboardPriorityQueue.map(({ detail, label, onClick, section, tone }) => (
                     <div
                       key={`${section}-${label}`}
-                      className="rounded-md border border-border/70 bg-muted/20 p-3"
+                      className="wealth-muted-block p-3"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium text-foreground">{label}</p>
@@ -1214,8 +1409,14 @@ export function Dashboard({
                         {section}
                       </p>
                       <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
-                      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onClick}>
-                        Open lane
+                      <Button
+                        type="button"
+                        variant={tone === "urgent" ? "default" : "outline"}
+                        size="sm"
+                        className="mt-3"
+                        onClick={onClick}
+                      >
+                        Open next lane
                         <ArrowRight className="h-4 w-4" />
                       </Button>
                     </div>
@@ -1262,7 +1463,7 @@ export function Dashboard({
           </div>
 
           <div className="grid gap-3 content-start">
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Today&apos;s operating note
               </p>
@@ -1274,27 +1475,32 @@ export function Dashboard({
                   ? "The dashboard becomes far more useful once onboarding, goals, and at least one tracked source are in place."
                   : action.reason}
               </p>
-            </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                MVP loop
-              </p>
-              <div className="mt-3 grid gap-2 text-sm text-foreground">
-                {dashboardMvpLoops.map((item) => (
-                  <div key={item.label} className="rounded-md border border-border/70 bg-background/80 p-3">
-                    <p className="font-medium">{item.label}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
-                  </div>
-                ))}
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  onClick={() => onNavigate(isFreshWorkspace ? "onboarding" : action.view)}
+                >
+                  {isFreshWorkspace ? "Complete onboarding" : action.cta}
+                </Button>
+                <AskMentorLink
+                  label="Ask AI mentor"
+                  mentorPrompt={dashboardMentorPrompt}
+                  mentorQuestionId="first-investment"
+                  onOpenMentor={onOpenMentor}
+                  sourceLabel="Dashboard top note"
+                />
               </div>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Working order
-              </p>
+            <div className="wealth-chart-frame">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Desk playbook
+                </p>
+                <Badge variant="outline">3-step scan</Badge>
+              </div>
               <div className="mt-3 grid gap-3">
                 {dashboardWorkingOrder.map((step, index) => (
-                  <div key={step} className="flex items-start gap-3 rounded-md border border-border/70 bg-background/80 p-3">
+                  <div key={step} className="wealth-inset flex items-start gap-3 p-3">
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-muted-foreground">
                       {index + 1}
                     </span>
@@ -1302,8 +1508,16 @@ export function Dashboard({
                   </div>
                 ))}
               </div>
+              <div className="mt-3 grid gap-2 text-sm text-foreground">
+                {dashboardMvpLoops.slice(0, 2).map((item) => (
+                  <div key={item.label} className="wealth-inset p-3">
+                    <p className="font-medium">{item.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Capital rhythm
@@ -1332,60 +1546,73 @@ export function Dashboard({
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          icon={Gauge}
-          label="Risk Score"
-          value={isFreshWorkspace ? "--" : `${profile.score}/100`}
-          detail={isFreshWorkspace ? "Complete onboarding" : profile.band}
-        />
-        <MetricCard
-          icon={ShieldCheck}
-          label="Health Score"
-          value={isFreshWorkspace ? "--" : `${healthScore}/100`}
-          detail={isFreshWorkspace ? "Complete onboarding" : "Foundation check"}
-        />
-        <MetricCard
-          icon={WalletCards}
-          label="Tracked Value"
-          value={formatMoney(portfolioTotal)}
-          detail={isFreshWorkspace ? "No holdings yet" : "Manual entries"}
-        />
-        <MetricCard
-          icon={Calculator}
-          label="Goal SIP"
-          value={formatMoney(monthlyGoal)}
-          detail={isFreshWorkspace ? "No goals yet" : "Monthly target"}
-        />
+        {dashboardPulseCards.map(({ detail, icon, label, value }) => (
+          <MetricCard
+            key={label}
+            icon={icon}
+            label={label}
+            value={value}
+            detail={detail}
+          />
+        ))}
       </div>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <PageNavigatorBar
+        label="Dashboard navigator"
+        options={dashboardNavigatorOptions}
+        value={navigatorValue}
+        onChange={handleDashboardNavigatorChange}
+      />
+
+      <Card id="dashboard-command-lanes" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
-          <CardTitle>Command lanes</CardTitle>
+          <CardTitle>Start here: command lanes</CardTitle>
           <CardDescription>
             Use the dashboard in this order so the workspace narrows your focus instead of multiplying it.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 xl:grid-cols-3">
+        <CardContent className="grid gap-3">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${dashboardBoardVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Board verdict</p>
+                <Badge variant={dashboardBoardVerdict.badgeVariant}>{dashboardBoardVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {dashboardBoardVerdict.detail}
+              </p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {dashboardBoardVerdict.move}
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-3">
           {dashboardMvpLoops.map((item) => (
-            <div key={item.label} className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div key={item.label} className="wealth-chart-frame">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {item.label}
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">{item.detail}</p>
             </div>
           ))}
+          </div>
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="dashboard-decision-pressure" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
-          <CardTitle>Decision pressure</CardTitle>
+          <CardTitle>Read: decision pressure</CardTitle>
           <CardDescription>
             Read the main constraints first, then decide whether the next move belongs in setup, funding, data quality, or execution coverage.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="rounded-md border bg-muted/20 p-4">
+          <div className="wealth-chart-frame">
             <div className="grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1415,7 +1642,7 @@ export function Dashboard({
           </div>
           <div className="grid gap-3 xl:grid-cols-4">
             {decisionPressureCards.map(({ detail, icon: Icon, label, nextStep, status, value }) => (
-              <div key={label} className="rounded-md border border-border/70 bg-background p-4">
+              <div key={label} className="wealth-data-card">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1423,7 +1650,7 @@ export function Dashboard({
                     </p>
                     <p className="mt-2 text-base font-semibold text-foreground">{value}</p>
                   </div>
-                  <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+                  <div className="wealth-inset p-2">
                     <Icon className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
@@ -1431,7 +1658,7 @@ export function Dashboard({
                   {status}
                 </Badge>
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">{detail}</p>
-                <div className="mt-3 rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block mt-3 p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Next move
                   </p>
@@ -1443,19 +1670,19 @@ export function Dashboard({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="dashboard-today-board" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
-          <CardTitle>Today board</CardTitle>
+          <CardTitle>Act: today board</CardTitle>
           <CardDescription>
             Start from the highest-leverage move, then jump straight into the part of the workspace that needs you.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="rounded-md border bg-muted/20 p-4">
+          <div className="wealth-chart-frame">
             <div className="grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Use this page for
+                  Use this lane for
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   Deciding what deserves attention right now across profile, portfolio, goals, market, and data quality.
@@ -1463,7 +1690,7 @@ export function Dashboard({
               </div>
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best rhythm
+                  Read this with
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   Start with the top board, take one next action, then review the underlying page only when you know why you are going there.
@@ -1471,7 +1698,7 @@ export function Dashboard({
               </div>
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  What to avoid
+                  Watch closely
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   Treating every card like an equal priority. This page is meant to help you narrow, not widen, your focus.
@@ -1485,7 +1712,7 @@ export function Dashboard({
                 key={label}
                 type="button"
                 onClick={onClick}
-                className="rounded-md border border-border/70 bg-muted/15 p-4 text-left transition hover:bg-muted/30"
+                className="wealth-data-card text-left transition hover:bg-[color:var(--card-hover)]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1494,12 +1721,12 @@ export function Dashboard({
                     </p>
                     <p className="mt-2 text-base font-semibold text-foreground">{value}</p>
                   </div>
-                  <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                  <div className="wealth-inset p-2">
                     <Icon className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">{description}</p>
-                <div className="mt-3 rounded-md border bg-background/70 p-3">
+                <div className="wealth-muted-block mt-3 p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Best next move
                   </p>
@@ -1510,7 +1737,7 @@ export function Dashboard({
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 p-4">
+          <div className="wealth-chart-frame flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Quick jump lane
@@ -1534,16 +1761,16 @@ export function Dashboard({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="dashboard-operating-lenses" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
-          <CardTitle>Operating lenses</CardTitle>
+          <CardTitle>Read: operating lenses</CardTitle>
           <CardDescription>
             These three reads tell you whether the next move belongs in portfolio behavior, goal realism, or data freshness.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 xl:grid-cols-3">
           {dashboardSectionLenses.map((item) => (
-            <div key={item.label} className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div key={item.label} className="wealth-data-card">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {item.label}
               </p>
@@ -1555,9 +1782,9 @@ export function Dashboard({
       </Card>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card>
+        <Card id="dashboard-next-action" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Next best action</CardTitle>
+            <CardTitle>Focus: next best action</CardTitle>
             <CardDescription>
               {isFreshWorkspace
                 ? "Start with onboarding, then add your first holding or goal."
@@ -1565,7 +1792,7 @@ export function Dashboard({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1593,7 +1820,7 @@ export function Dashboard({
                 </div>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/40 p-4">
+            <div className="wealth-chart-frame">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">{isFreshWorkspace ? "Setup" : action.badge}</Badge>
                 <Badge variant="outline">
@@ -1612,7 +1839,7 @@ export function Dashboard({
                   : action.detail}
               </p>
               {!isFreshWorkspace ? (
-                <div className="mt-3 rounded-md border bg-background/80 p-3">
+                <div className="wealth-inset mt-3 p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Best next move
                   </p>
@@ -1635,25 +1862,25 @@ export function Dashboard({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="dashboard-operating-flow" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Operating flow</CardTitle>
+            <CardTitle>Flow: working order</CardTitle>
             <CardDescription>
               Work the dashboard in order: decide, fund, then make sure the data is fresh enough to trust.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <p className="text-sm font-medium text-foreground">Think of this as the dashboard’s working order</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 First decide what matters, then make sure the money plan is realistic, then confirm the underlying data is fresh enough to trust.
               </p>
             </div>
             {operatingFlow.map(({ detail, icon: Icon, label, status, value }) => (
-              <div key={label} className="rounded-md border bg-muted/20 p-4">
+              <div key={label} className="wealth-chart-frame">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="rounded-md border border-border/70 bg-background/80 p-2">
+                    <div className="wealth-inset p-2">
                       <Icon className="h-4 w-4 text-muted-foreground" />
                     </div>
                     <div>
@@ -1699,15 +1926,15 @@ export function Dashboard({
       </div>
 
       {!isFreshWorkspace ? (
-        <Card>
+        <Card id="dashboard-coaching-tracks" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Coaching tracks</CardTitle>
+            <CardTitle>Learn: coaching tracks</CardTitle>
             <CardDescription>
               The same three tracks from onboarding, now anchored to what your portfolio and goals actually look like today.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1725,7 +1952,7 @@ export function Dashboard({
             </div>
             <div className="grid gap-3 xl:grid-cols-3">
               {profile.actionBaskets.map((basket) => (
-                <div key={basket.id} className="rounded-md border bg-background p-4">
+                <div key={basket.id} className="wealth-data-card">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-medium">{basket.title}</p>
                     <Badge variant="outline">{basket.items.length} ideas</Badge>
@@ -1733,7 +1960,7 @@ export function Dashboard({
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {basket.description}
                   </p>
-                  <div className="mt-3 rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block mt-3 p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Start here
                     </p>
@@ -1742,7 +1969,7 @@ export function Dashboard({
                   {basket.items.length > 1 ? (
                     <div className="mt-3 grid gap-2">
                       {basket.items.slice(1, 3).map((item) => (
-                        <div key={item} className="rounded-md border border-dashed bg-muted/10 p-3">
+                        <div key={item} className="wealth-empty-state p-3">
                           <p className="text-xs leading-5 text-muted-foreground">{item}</p>
                         </div>
                       ))}
@@ -1764,9 +1991,9 @@ export function Dashboard({
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Card>
+        <Card id="dashboard-trajectory" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Portfolio trajectory</CardTitle>
+            <CardTitle>Portfolio: contribution path</CardTitle>
             <CardDescription>
               {hasTrajectory
                 ? "Net invested capital built from recorded transactions."
@@ -1774,7 +2001,22 @@ export function Dashboard({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div className="grid gap-3 rounded-md border border-border/70 bg-muted/15 p-4 md:grid-cols-3">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${trajectoryVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Trajectory verdict</p>
+                  <Badge variant={trajectoryVerdict.badgeVariant}>{trajectoryVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{trajectoryVerdict.detail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{trajectoryVerdict.move}</p>
+              </div>
+            </div>
+            <div className="wealth-chart-frame grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Primary question
@@ -1793,14 +2035,14 @@ export function Dashboard({
               </div>
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
+                  Focus now
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   If the path is thin, improve statement or transaction coverage before reading too much into totals.
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1829,14 +2071,14 @@ export function Dashboard({
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Path status
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">{trajectoryHeadline}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{trajectorySupport}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Why it matters
                 </p>
@@ -1863,11 +2105,11 @@ export function Dashboard({
                   </AreaChart>
                 </ResponsiveContainer>
               ) : portfolioTotal > 0 ? (
-                <div className="flex h-full items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                <div className="wealth-empty-state flex h-full items-center justify-center p-6 text-center text-sm leading-6 text-muted-foreground">
                   Your holdings are tracked, but the trajectory needs transaction history. Add manual transactions or import a statement with dated activity to unlock the chart.
                 </div>
               ) : (
-                <div className="flex h-full items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                <div className="wealth-empty-state flex h-full items-center justify-center p-6 text-center text-sm leading-6 text-muted-foreground">
                   Add holdings or import statements to start building your portfolio history.
                 </div>
               )}
@@ -1887,13 +2129,28 @@ export function Dashboard({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="dashboard-allocation" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Current allocation</CardTitle>
-            <CardDescription>Manual holdings grouped by asset type.</CardDescription>
+            <CardTitle>Portfolio: allocation snapshot</CardTitle>
+            <CardDescription>Read where tracked money is sitting before you reach for a rebalance.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div className="grid gap-3 rounded-md border border-border/70 bg-muted/15 p-4 md:grid-cols-3">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${allocationVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Allocation verdict</p>
+                  <Badge variant={allocationVerdict.badgeVariant}>{allocationVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{allocationVerdict.detail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{allocationVerdict.move}</p>
+              </div>
+            </div>
+            <div className="wealth-chart-frame grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Primary question
@@ -1911,15 +2168,15 @@ export function Dashboard({
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
-                </p>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Decision rule
+                  </p>
                 <p className="mt-2 text-sm text-foreground">
                   Investigate the holdings behind the biggest slice before reaching for a rebalance instinct.
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1947,7 +2204,7 @@ export function Dashboard({
                 </div>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-3">
+            <div className="wealth-muted-block p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1977,7 +2234,7 @@ export function Dashboard({
                   </div>
                   <div className="grid content-center gap-3">
                     {allocationData.map((item, index) => (
-                      <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
+                      <div key={item.name} className="wealth-muted-block flex items-center justify-between gap-3 p-3">
                         <div className="flex items-center gap-2">
                           <span
                             className="h-3 w-3 rounded-sm"
@@ -1991,7 +2248,7 @@ export function Dashboard({
                   </div>
                 </>
               ) : (
-                <div className="md:col-span-2 flex min-h-64 items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+                <div className="wealth-empty-state md:col-span-2 flex min-h-64 items-center justify-center p-6 text-center text-sm leading-6 text-muted-foreground">
                   Allocation will appear after you add your first tracked holding.
                 </div>
               )}
@@ -2013,9 +2270,9 @@ export function Dashboard({
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-        <Card>
+        <Card id="dashboard-goal-progress" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Goal progress</CardTitle>
+            <CardTitle>Goals: funding pressure</CardTitle>
             <CardDescription>
               {goals.length
                 ? `${goals.length} active goal${goals.length === 1 ? "" : "s"} in the planner.`
@@ -2023,7 +2280,22 @@ export function Dashboard({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <div className="grid gap-3 rounded-md border border-border/70 bg-muted/15 p-4 md:grid-cols-3">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${goalsFundingVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Funding verdict</p>
+                  <Badge variant={goalsFundingVerdict.badgeVariant}>{goalsFundingVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{goalsFundingVerdict.detail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{goalsFundingVerdict.move}</p>
+              </div>
+            </div>
+            <div className="wealth-chart-frame grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Primary question
@@ -2041,15 +2313,15 @@ export function Dashboard({
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
-                </p>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Focus now
+                  </p>
                 <p className="mt-2 text-sm text-foreground">
                   If pressure is high, prune, stage, or resize before assuming the answer is simply a bigger SIP.
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -2080,7 +2352,7 @@ export function Dashboard({
             {goals.length ? (
               <>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-md border bg-muted/20 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Funded so far
                     </p>
@@ -2088,7 +2360,7 @@ export function Dashboard({
                       {formatMoney(totalGoalCurrent)}
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Goal target
                     </p>
@@ -2096,7 +2368,7 @@ export function Dashboard({
                       {formatMoney(totalGoalTarget)}
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Monthly pressure
                     </p>
@@ -2114,7 +2386,7 @@ export function Dashboard({
                 </div>
                 <div className="grid gap-3">
                   {goals.slice(0, 3).map((goal) => (
-                    <div key={goal.id} className="rounded-md border bg-muted/30 p-3">
+                    <div key={goal.id} className="wealth-muted-block p-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-medium">{goal.name}</p>
                         <Badge variant="outline">{goalPriorityLabels[goal.priority]}</Badge>
@@ -2125,7 +2397,7 @@ export function Dashboard({
                     </div>
                   ))}
                 </div>
-                <div className="rounded-md border bg-muted/40 p-3">
+                <div className="wealth-chart-frame p-3">
                   <p className="text-sm font-medium">{goalInsight.title}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">{goalInsight.detail}</p>
                 </div>
@@ -2143,22 +2415,37 @@ export function Dashboard({
                 </div>
               </>
             ) : (
-              <div className="flex min-h-64 items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm leading-6 text-muted-foreground">
+              <div className="wealth-empty-state flex min-h-64 items-center justify-center p-6 text-center text-sm leading-6 text-muted-foreground">
                 Add your first goal to see progress, funding targets, and planning insights here.
               </div>
             )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="dashboard-connectors" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Connector health</CardTitle>
+            <CardTitle>Data: connector health</CardTitle>
             <CardDescription>
               Keep imports reliable before stale holdings or broken syncs turn into bad decisions.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <div className="grid gap-3 rounded-md border border-border/70 bg-muted/15 p-4 md:grid-cols-3">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${connectorVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Connector verdict</p>
+                  <Badge variant={connectorVerdict.badgeVariant}>{connectorVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{connectorVerdict.detail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{connectorVerdict.move}</p>
+              </div>
+            </div>
+            <div className="wealth-chart-frame grid gap-3 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Primary question
@@ -2184,7 +2471,7 @@ export function Dashboard({
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -2213,7 +2500,7 @@ export function Dashboard({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-chart-frame">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={connectorAttention.severity === "healthy" ? "secondary" : "outline"}>
                     {connectorAttention.badge}
@@ -2243,7 +2530,7 @@ export function Dashboard({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/40 p-4 md:col-span-2">
+              <div className="wealth-chart-frame md:col-span-2">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={connectorAttention.severity === "healthy" ? "secondary" : "outline"}>
                     {connectorAttention.badge}
@@ -2254,7 +2541,7 @@ export function Dashboard({
                   {connectorAttention.detail}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/40 p-4">
+              <div className="wealth-chart-frame">
                 <p className="text-xs font-medium uppercase tracking-wide text-foreground">
                   Connector snapshot
                 </p>
@@ -2275,7 +2562,7 @@ export function Dashboard({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/40 p-4">
+              <div className="wealth-chart-frame">
                 <p className="text-xs font-medium uppercase tracking-wide text-foreground">
                   Scheduler
                 </p>
@@ -2286,7 +2573,7 @@ export function Dashboard({
                   Next connector check {formatSyncTimeLabel(connectorSchedulerPlan.nextRunAt)}.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/40 p-4 md:col-span-2">
+              <div className="wealth-chart-frame md:col-span-2">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wide text-foreground">
@@ -2341,7 +2628,7 @@ export function Dashboard({
                       return (
                         <div
                           key={`${item.providerId}-${item.syncLabel}`}
-                          className="rounded-md border bg-background p-3"
+                          className="wealth-data-card p-3"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap items-center gap-2">
@@ -2370,7 +2657,7 @@ export function Dashboard({
                             {item.syncDetail}
                           </p>
                           {recentConnectorLaunch?.key === buildConnectorLaunchKey(item) ? (
-                            <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                            <div className="wealth-inset mt-2 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-primary">
                                 Workflow opened
                               </p>
@@ -2380,7 +2667,7 @@ export function Dashboard({
                             </div>
                           ) : null}
                           {recentConnectorRun?.providerId === item.providerId ? (
-                            <div className="mt-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+                            <div className="wealth-inset mt-2 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">
                                 Sync started
                               </p>
@@ -2391,12 +2678,12 @@ export function Dashboard({
                           ) : null}
                           {recentRecoveryResult?.providerId === item.providerId ? (
                             <div
-                              className={`mt-2 rounded-md p-3 ${
+                              className={`wealth-inset mt-2 p-3 ${
                                 recentRecoveryResult.tone === "success"
-                                  ? "border border-emerald-500/30 bg-emerald-500/5"
+                                  ? "border-emerald-500/30 bg-emerald-500/5"
                                   : recentRecoveryResult.tone === "warning"
-                                    ? "border border-amber-500/30 bg-amber-500/5"
-                                    : "border border-primary/30 bg-primary/5"
+                                    ? "border-amber-500/30 bg-amber-500/5"
+                                    : "border-primary/30 bg-primary/5"
                               }`}
                             >
                               <p
@@ -2419,7 +2706,7 @@ export function Dashboard({
                               </p>
                             </div>
                           ) : null}
-                          <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                          <div className="wealth-muted-block mt-2 grid gap-2 p-3">
                             <div>
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Last good signal
@@ -2438,7 +2725,7 @@ export function Dashboard({
                             </div>
                           </div>
                           {diagnosticsOpen && integration ? (
-                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
+                            <div className="wealth-muted-block mt-2 grid gap-2 p-3">
                               {recovery ? (
                                 <div>
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
@@ -2607,7 +2894,7 @@ export function Dashboard({
                       );
                     })
                   ) : (
-                    <div className="grid gap-3 rounded-md border bg-background p-3">
+                    <div className="wealth-data-card grid gap-3 p-3">
                       <div>
                         <p className="text-sm font-medium text-foreground">
                           No connectors match this filter yet
@@ -2617,11 +2904,11 @@ export function Dashboard({
                         </p>
                       </div>
                       <div className="grid gap-2 md:grid-cols-2">
-                        <div className="rounded-md border bg-muted/20 p-3">
+                        <div className="wealth-muted-block p-3">
                           <p className="text-xs text-muted-foreground">Most common reason</p>
                           <p className="mt-1 text-sm font-medium">The filter is too narrow</p>
                         </div>
-                        <div className="rounded-md border bg-muted/20 p-3">
+                        <div className="wealth-muted-block p-3">
                           <p className="text-xs text-muted-foreground">Best next move</p>
                           <p className="mt-1 text-sm font-medium">Review data feeds</p>
                         </div>
@@ -2632,7 +2919,7 @@ export function Dashboard({
               </div>
             </div>
             {connectorActions.length ? (
-              <div className="rounded-md border bg-muted/40 p-4">
+              <div className="wealth-chart-frame">
                 <p className="text-xs font-medium uppercase tracking-wide text-foreground">
                   Provider next moves
                 </p>
@@ -2640,7 +2927,7 @@ export function Dashboard({
                   {connectorActions.map((action) => (
                     <div
                       key={`${action.providerName}-${action.label}`}
-                      className="flex flex-col justify-between gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center"
+                      className="wealth-data-card flex flex-col justify-between gap-2 p-3 sm:flex-row sm:items-center"
                     >
                       <div>
                         <p className="text-sm font-medium">
@@ -2650,7 +2937,7 @@ export function Dashboard({
                           {action.detail}
                         </p>
                         {recentConnectorLaunch?.key === buildConnectorLaunchKey(action) ? (
-                          <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                          <div className="wealth-inset mt-2 p-3">
                             <p className="text-[11px] font-medium uppercase tracking-wide text-primary">
                               Workflow opened
                             </p>
@@ -2673,7 +2960,7 @@ export function Dashboard({
                 </div>
               </div>
             ) : null}
-            <div className="rounded-md border bg-muted/40 p-4">
+            <div className="wealth-chart-frame">
               <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-foreground">
@@ -2700,7 +2987,7 @@ export function Dashboard({
                   importOutcomes.map((outcome) => (
                     <div
                       key={outcome.id}
-                      className="rounded-md border bg-background p-3"
+                      className="wealth-data-card p-3"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -2716,7 +3003,7 @@ export function Dashboard({
                         {outcome.detail}
                       </p>
                       {recentImportReview?.jobId === outcome.id ? (
-                        <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                        <div className="wealth-inset mt-2 p-3">
                           <p className="text-[11px] font-medium uppercase tracking-wide text-primary">
                             Review opened
                           </p>
@@ -2745,7 +3032,7 @@ export function Dashboard({
                     </div>
                   ))
                 ) : (
-                  <div className="grid gap-3 rounded-md border bg-background p-3">
+                  <div className="wealth-data-card grid gap-3 p-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">No import outcomes yet</p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -2753,11 +3040,11 @@ export function Dashboard({
                       </p>
                     </div>
                     <div className="grid gap-2 md:grid-cols-2">
-                      <div className="rounded-md border bg-muted/20 p-3">
+                      <div className="wealth-muted-block p-3">
                         <p className="text-xs text-muted-foreground">Best first source</p>
                         <p className="mt-1 text-sm font-medium">One statement provider</p>
                       </div>
-                      <div className="rounded-md border bg-muted/20 p-3">
+                      <div className="wealth-muted-block p-3">
                         <p className="text-xs text-muted-foreground">Why it matters</p>
                         <p className="mt-1 text-sm font-medium">History becomes teachable</p>
                       </div>
@@ -2805,7 +3092,7 @@ function QuickAction({
     <Button
       type="button"
       variant="outline"
-      className="h-auto min-h-24 max-w-[220px] items-start justify-between whitespace-normal rounded-md border-border/70 bg-muted/15 p-4 text-left hover:bg-muted/30"
+      className="wealth-data-card h-auto min-h-24 max-w-[220px] items-start justify-between whitespace-normal p-4 text-left hover:bg-[color:var(--card-hover)]"
       onClick={onClick}
     >
       <div className="grid gap-3">
@@ -2831,12 +3118,12 @@ function MetricCard({
   value: string;
 }) {
   return (
-    <Card className="border-border/70 bg-card/95 shadow-sm">
+    <Card className="wealth-panel-strong overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardDescription className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {label}
         </CardDescription>
-        <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+        <div className="wealth-inset p-2">
           <Icon className="h-4 w-4 text-muted-foreground" />
         </div>
       </CardHeader>

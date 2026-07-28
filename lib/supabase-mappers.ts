@@ -430,6 +430,7 @@ export function mapMarketPreferenceRowToSettings(
       defaultSnapshot.marketPreferences.pollingIntervalSeconds,
     preferredSource:
       row.preferred_source ?? defaultSnapshot.marketPreferences.preferredSource,
+    watchlist: defaultSnapshot.marketPreferences.watchlist,
   };
 }
 

@@ -249,7 +249,7 @@ export function MentorOpenCue({
     : undefined;
 
   return (
-    <Card className="border-border/70 bg-card/95 shadow-sm">
+    <Card className="wealth-panel-strong overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{cueLabel}</Badge>
@@ -291,6 +291,30 @@ export function MentorOpenCue({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        <div
+          className={`rounded-md border p-3 ${
+            primaryInsight.status === "stuck"
+              ? "border-amber-500/30 bg-amber-500/10"
+              : "border-primary/20 bg-primary/5"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-foreground">Mentor cue verdict</p>
+            <Badge variant={primaryInsight.status === "stuck" ? "outline" : "secondary"}>
+              {primaryInsight.status === "stuck" ? "Needs unblock" : "Resume context"}
+            </Badge>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            {primaryInsight.status === "stuck"
+              ? "This open thread is more valuable than a new question because it is already carrying a blocked decision."
+              : "This thread already holds useful context, so resuming it is usually the fastest way back to a calmer next move."}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {primaryInsight.status === "stuck"
+              ? "Use the mentor here to remove the next source of friction, then return to the page and act before the doubt spreads."
+              : "Reusing the existing lane keeps the advice personal and avoids rebuilding the same context from scratch."}
+          </p>
+        </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-md border border-border/70 bg-muted/20 p-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

@@ -24,6 +24,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { PageNavigatorBar } from "@/components/wealth/page-navigator-bar";
 import type { MentorLaunchRequest } from "@/lib/mentor-chat";
 import { calculateRiskProfile, goalLabels, type RiskAnswers } from "@/lib/wealth-rules";
 
@@ -112,6 +113,7 @@ export function Onboarding({
   const [submittedAnswers, setSubmittedAnswers] = useState<RiskAnswers>(answers);
   const [hasSubmittedAssessment, setHasSubmittedAssessment] = useState(false);
   const [step, setStep] = useState(0);
+  const [navigatorValue, setNavigatorValue] = useState("onboarding-profile");
   const onboardingCardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -347,8 +349,109 @@ export function Onboarding({
           label: "Get to first submission",
           stepIndex: 2,
           tone: "steady" as const,
-        },
+      },
   ];
+  const assessmentVerdict =
+    !hasSubmittedAssessment && completionPercent < 100
+      ? {
+          badge: "Still shaping the baseline",
+          badgeVariant: "outline" as const,
+          detail:
+            "The assessment is useful already, but it is still building the first trustworthy baseline rather than delivering a final planning read.",
+          move: "Finish the missing core inputs and get to one honest first submission.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : !hasSubmittedAssessment
+        ? {
+            badge: "Ready for first submit",
+            badgeVariant: "outline" as const,
+            detail:
+              "The draft is complete enough that the highest-value move now is unlocking the first real result instead of polishing the form indefinitely.",
+            move: "Submit this first pass, then react to the result with clearer context.",
+            toneClass: "border-amber-500/30 bg-amber-500/10",
+          }
+        : hasDraftChanges
+          ? {
+              badge: "Draft changed after submission",
+              badgeVariant: "outline" as const,
+              detail:
+                "You already have a submitted baseline, and the current draft is now diverging from it. That makes this a compare-and-decide moment, not a blind resubmit.",
+              move: "Review what changed, then update the submitted assessment only if the new draft feels more truthful.",
+              toneClass: "border-sky-500/30 bg-sky-500/10",
+            }
+          : {
+              badge: "Baseline is anchored",
+              badgeVariant: "secondary" as const,
+              detail:
+                "You have a stable submitted starting point now, so the value of this page shifts from completion into interpretation and refinement.",
+              move: "Use the result and roadmap first before re-editing the assessment again.",
+              toneClass: "border-emerald-500/30 bg-emerald-500/10",
+            };
+  const currentStepVerdict =
+    currentStep.id === "profile"
+      ? {
+          badge: "Capacity first",
+          badgeVariant: "outline" as const,
+          detail:
+            "This step is mainly about getting the economic shape honest enough that the rest of the assessment stops guessing.",
+          move: "Be directionally honest about savings, investing pace, and emergency cover rather than chasing perfect precision.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : currentStep.id === "risk"
+        ? {
+            badge: draftProfile.intentGap === "knowledge-gap" ? "Knowledge gap is visible" : "Behavior read in progress",
+            badgeVariant: draftProfile.intentGap === "knowledge-gap" ? "secondary" as const : "outline" as const,
+            detail:
+              draftProfile.intentGap === "knowledge-gap"
+                ? "The before-learning and after-learning answers already suggest that hesitation may be driven more by clarity than by true low-risk intent."
+                : "This step is trying to separate real caution from temporary uncertainty, so lived behavior matters more than idealized answers.",
+            move: "Answer from the version of you that would actually make the decision in a bad market week.",
+            toneClass:
+              draftProfile.intentGap === "knowledge-gap"
+                ? "border-emerald-500/30 bg-emerald-500/10"
+                : "border-sky-500/30 bg-sky-500/10",
+          }
+        : {
+            badge: hasSubmittedAssessment ? "Result can be updated" : "Submission gate",
+            badgeVariant: hasSubmittedAssessment ? "outline" as const : "secondary" as const,
+            detail:
+              "This last step is not really about more form filling. It is about deciding whether the current draft is honest enough to deserve a real starting plan.",
+            move: hasSubmittedAssessment
+              ? "Update only if the new draft meaningfully changes the truth of your starting point."
+              : "Use submit once the horizon, learning time, and tax awareness feel directionally true.",
+            toneClass: hasSubmittedAssessment
+              ? "border-sky-500/30 bg-sky-500/10"
+              : "border-emerald-500/30 bg-emerald-500/10",
+          };
+  const resultVerdict =
+    displayedProfile
+      ? hasDraftChanges
+        ? {
+            badge: "Result is live, draft is ahead",
+            badgeVariant: "outline" as const,
+            detail:
+              "You have a real submitted result, but the current draft has moved. Treat the right side as your anchored baseline until you deliberately update it.",
+            move: "Compare the live result with the changed draft before submitting again.",
+            toneClass: "border-sky-500/30 bg-sky-500/10",
+          }
+        : {
+            badge: "Starter plan is live",
+            badgeVariant: "secondary" as const,
+            detail:
+              "The assessment has done its job: you now have a real starting profile, a learning path, and action baskets grounded in one complete pass.",
+            move: "Read the action tracks and roadmap before touching the assessment again.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          }
+      : {
+          badge: "Waiting for first submit",
+          badgeVariant: "outline" as const,
+          detail:
+            "The preview is directionally useful, but the final recommendation set stays intentionally locked until the first full pass is submitted.",
+          move: step === onboardingSteps.length - 1
+            ? "Submit this first pass to unlock the plan."
+            : "Work through the remaining steps, then submit once.",
+          toneClass: "border-amber-500/30 bg-amber-500/10",
+        };
 
   function handleSubmitAssessment() {
     setSubmittedAnswers(draftAnswers);
@@ -356,16 +459,44 @@ export function Onboarding({
     onChange(() => draftAnswers);
   }
 
+  const onboardingNavigatorOptions = [
+    ["onboarding-profile", "Step 1: money base"],
+    ["onboarding-risk", "Step 2: risk behavior"],
+    ["onboarding-plan", "Step 3: submit plan"],
+    ["onboarding-results", "Result: profile read"],
+    ["onboarding-roadmap", "Result: roadmap preview"],
+  ] as Array<[string, string]>;
+
+  function handleNavigatorChange(value: string) {
+    setNavigatorValue(value);
+    if (value === "onboarding-profile") {
+      setStep(0);
+      onboardingCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (value === "onboarding-risk") {
+      setStep(1);
+      onboardingCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (value === "onboarding-plan") {
+      setStep(2);
+      onboardingCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    document.getElementById(value)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
-      <Card ref={onboardingCardRef}>
+    <div className="onboarding-page grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+      <Card id="onboarding-assessment" ref={onboardingCardRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Assessment</Badge>
             <Badge variant="outline">4 focus areas</Badge>
             <Badge variant="outline">{completionPercent}% complete</Badge>
           </div>
-          <CardTitle>Build your investing starting point</CardTitle>
+          <CardTitle>Step 1: build your investing starting point</CardTitle>
           <CardDescription>
             Finish the assessment first, submit it once, and then review your starter
             plan with clearer context behind it.
@@ -392,12 +523,24 @@ export function Onboarding({
           />
         </CardHeader>
         <CardContent className="grid gap-5">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${assessmentVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Assessment verdict</p>
+                <Badge variant={assessmentVerdict.badgeVariant}>{assessmentVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{assessmentVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{assessmentVerdict.move}</p>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {onboardingTopStats.map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-lg border border-border/75 bg-background/72 p-4"
-              >
+              <div key={stat.label} className="wealth-stat-tile">
                 <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                   {stat.label}
                 </p>
@@ -406,7 +549,7 @@ export function Onboarding({
               </div>
             ))}
           </div>
-          <div className="grid gap-3 rounded-lg border border-border/75 bg-background/72 p-4">
+          <div className="wealth-inset grid gap-3 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">Priority queue</p>
@@ -420,7 +563,7 @@ export function Onboarding({
               {onboardingPriorityQueue.map(({ detail, label, stepIndex, tone }) => (
                 <div
                   key={`${stepIndex}-${label}`}
-                  className="rounded-lg border border-border/75 bg-muted/30 p-4"
+                  className="wealth-muted-block p-4"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium text-foreground">{label}</p>
@@ -461,27 +604,27 @@ export function Onboarding({
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Use this step for
+                Use this lane for
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">{currentStepGuide.useFor}</p>
             </div>
-            <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Watch closely
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">{currentStepGuide.watch}</p>
             </div>
-            <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Best move
+                Best next move
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">{currentStepGuide.bestMove}</p>
             </div>
           </div>
 
-          <div className="rounded-lg border border-border/75 bg-background/70 p-4">
+          <div className="wealth-inset p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">{currentStep.title}</p>
@@ -510,6 +653,21 @@ export function Onboarding({
               />
             </div>
           </div>
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${currentStepVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Current step verdict</p>
+                <Badge variant={currentStepVerdict.badgeVariant}>{currentStepVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{currentStepVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{currentStepVerdict.move}</p>
+            </div>
+          </div>
 
           <div className="grid gap-2 lg:grid-cols-3">
             {onboardingSteps.map((stepItem, index) => (
@@ -517,7 +675,11 @@ export function Onboarding({
                 key={stepItem.id}
                 type="button"
                 variant={step === index ? "default" : "outline"}
-                className="h-auto min-h-16 justify-start px-4 py-3 text-left"
+                className={`h-auto min-h-16 justify-start px-4 py-3 text-left ${
+                  step === index
+                    ? "wealth-data-card border-primary/40 bg-primary/10"
+                    : "wealth-data-card hover:bg-[color:var(--card-hover)]"
+                }`}
                 onClick={() => setStep(index)}
               >
                 <span className="flex items-start gap-3">
@@ -537,12 +699,12 @@ export function Onboarding({
 
           {step === 0 && (
             <div className="grid gap-5">
-              <div className="rounded-lg border border-border/75 bg-muted/45 px-4 py-3 text-sm leading-6 text-muted-foreground">
+            <div className="wealth-muted-block px-4 py-3 text-sm leading-6 text-muted-foreground">
                 Use approximate numbers if needed. The goal is to understand your shape,
                 constraints, and starting capacity, not perfect accounting.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     This step changes
                   </p>
@@ -550,7 +712,7 @@ export function Onboarding({
                     Your emergency runway, investing capacity, and goal pressure all start here.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Good enough input
                   </p>
@@ -558,7 +720,7 @@ export function Onboarding({
                     Rounded monthly and annual figures are fine. We need planning signal, not tax-filing precision.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     What to avoid
                   </p>
@@ -629,12 +791,12 @@ export function Onboarding({
 
           {step === 1 && (
             <div className="grid gap-5">
-              <div className="rounded-lg border border-border/75 bg-muted/45 px-4 py-3 text-sm leading-6 text-muted-foreground">
+            <div className="wealth-muted-block px-4 py-3 text-sm leading-6 text-muted-foreground">
                 These answers help us understand your emotional response to drawdowns
                 and how much complexity fits your investing style.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     What we are measuring
                   </p>
@@ -642,7 +804,7 @@ export function Onboarding({
                     Not just risk tolerance, but whether uncertainty, liquidity needs, or low familiarity are driving the hesitation.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Most useful answer style
                   </p>
@@ -650,7 +812,7 @@ export function Onboarding({
                     Answer from lived behavior. The app can work with cautious honesty much better than optimistic roleplay.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Why two drop questions
                   </p>
@@ -740,12 +902,12 @@ export function Onboarding({
 
           {step === 2 && (
             <div className="grid gap-5">
-              <div className="rounded-lg border border-border/75 bg-muted/45 px-4 py-3 text-sm leading-6 text-muted-foreground">
+            <div className="wealth-muted-block px-4 py-3 text-sm leading-6 text-muted-foreground">
                 This final step converts your situation into a starting playbook. When
                 you submit, WealthCompass saves the assessment and reveals your results.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     This step decides
                   </p>
@@ -753,7 +915,7 @@ export function Onboarding({
                     How fast you can responsibly ramp up, how deep the roadmap should go, and how much complexity fits right now.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Submission is not permanent
                   </p>
@@ -761,7 +923,7 @@ export function Onboarding({
                     Submit to unlock the plan, then update later once you see the result and learn what feels off.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Best move
                   </p>
@@ -799,7 +961,7 @@ export function Onboarding({
                   update("taxAwareness", value as RiskAnswers["taxAwareness"])
                 }
               />
-                <div className="rounded-lg border border-primary/20 bg-primary/8 p-4">
+              <div className="wealth-muted-block border-primary/20 bg-primary/8 p-4">
                 <p className="text-sm font-medium text-foreground">What submission unlocks</p>
                 <ul className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
                   <li>Risk band and personality summary</li>
@@ -808,7 +970,7 @@ export function Onboarding({
                   <li>A short roadmap to keep moving</li>
                 </ul>
               </div>
-              <div className="grid gap-3 rounded-lg border border-border/75 bg-background/72 p-4 md:grid-cols-3">
+              <div className="wealth-inset grid gap-3 p-4 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Review before submit
@@ -835,7 +997,7 @@ export function Onboarding({
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Draft band
                   </p>
@@ -844,7 +1006,7 @@ export function Onboarding({
                     This is still a preview until you submit.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Intent read
                   </p>
@@ -861,7 +1023,7 @@ export function Onboarding({
                     Helps separate real caution from lack of clarity.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-muted/30 p-4">
+                <div className="wealth-muted-block p-4">
                   <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Learning upside
                   </p>
@@ -911,7 +1073,16 @@ export function Onboarding({
         </CardContent>
       </Card>
 
-      <Card>
+      <div className="xl:col-span-2">
+        <PageNavigatorBar
+          label="Onboarding navigator"
+          options={onboardingNavigatorOptions}
+          value={navigatorValue}
+          onChange={handleNavigatorChange}
+        />
+      </div>
+
+      <Card id="onboarding-results" className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">
@@ -923,7 +1094,7 @@ export function Onboarding({
             <Badge variant="outline">{goalLabels[draftAnswers.primaryGoal]}</Badge>
           </div>
           <CardTitle>
-            {displayedProfile ? displayedProfile.personality : "Submit the assessment to reveal your plan"}
+            {displayedProfile ? `Result: ${displayedProfile.personality}` : "Result: submit the assessment to reveal your plan"}
           </CardTitle>
           <CardDescription>
             {displayedProfile
@@ -932,8 +1103,23 @@ export function Onboarding({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${resultVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Result verdict</p>
+                <Badge variant={resultVerdict.badgeVariant}>{resultVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{resultVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{resultVerdict.move}</p>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Status
               </p>
@@ -946,7 +1132,7 @@ export function Onboarding({
                   : "Finish the last step and use submit once to unlock your first planning view."}
               </p>
             </div>
-            <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Current signal
               </p>
@@ -959,7 +1145,7 @@ export function Onboarding({
                   : "Preview only. This can still change before you submit."}
               </p>
             </div>
-            <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Best next move
               </p>
@@ -979,7 +1165,7 @@ export function Onboarding({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Goal focus
               </p>
@@ -988,7 +1174,7 @@ export function Onboarding({
                 Horizon {draftAnswers.horizonYears} years
               </p>
             </div>
-            <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Cash flexibility
               </p>
@@ -1010,7 +1196,7 @@ export function Onboarding({
                 </div>
                 <Progress value={displayedProfile.score} />
                 {displayedProfile.potentialScore !== null ? (
-                  <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/8 p-3">
+                  <div className="wealth-muted-block border-emerald-500/25 bg-emerald-500/8 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                       <span className="font-medium">Potential fit after learning</span>
                       <Badge variant="outline">
@@ -1037,7 +1223,7 @@ export function Onboarding({
                   </Badge>
                 </div>
               </div>
-              <div className="h-60">
+              <div className="wealth-chart-frame h-60">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -1059,7 +1245,7 @@ export function Onboarding({
                 {displayedProfile.allocation.map((entry, index) => (
                   <div
                     key={entry.name}
-                    className="flex items-center justify-between rounded-lg border border-border/75 bg-background/72 px-3 py-2 text-sm"
+                    className="wealth-muted-block flex items-center justify-between px-3 py-2 text-sm"
                   >
                     <span className="flex items-center gap-2">
                       <span
@@ -1077,7 +1263,7 @@ export function Onboarding({
                 {displayedProfile.actionBaskets.map((basket) => (
                   <div
                     key={basket.id}
-                    className="rounded-lg border border-border/75 bg-background/72 p-4"
+                    className="wealth-muted-block p-4"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-medium">{basket.title}</p>
@@ -1090,7 +1276,7 @@ export function Onboarding({
                       {basket.items.map((item) => (
                         <div
                           key={item}
-                          className="flex gap-3 rounded-lg border border-border/75 bg-muted/35 p-3 text-sm"
+                          className="wealth-muted-block flex gap-3 p-3 text-sm"
                         >
                           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                           <span>{item}</span>
@@ -1103,12 +1289,12 @@ export function Onboarding({
             </>
           ) : (
             <div className="grid gap-3">
-              <div className="rounded-lg border border-dashed border-border bg-muted/25 p-5 text-sm leading-6 text-muted-foreground">
+              <div className="wealth-empty-state p-5">
                 Finish the assessment and use the submit button on the final step to
                 unlock your full result set.
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-data-card">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Waiting for submit
                   </p>
@@ -1116,7 +1302,7 @@ export function Onboarding({
                     We keep the final plan hidden until the first full pass is submitted, so the result is anchored to a complete assessment.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-data-card">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     What you can trust now
                   </p>
@@ -1124,7 +1310,7 @@ export function Onboarding({
                     The preview band is directionally useful, but the recommendations should wait for the full submitted result.
                   </p>
                 </div>
-                <div className="rounded-lg border border-border/75 bg-background/72 p-4">
+                <div className="wealth-data-card">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Best next move
                   </p>
@@ -1138,9 +1324,9 @@ export function Onboarding({
                 return (
                   <div
                     key={feature.title}
-                    className="flex gap-3 rounded-lg border border-border/75 bg-background/72 p-3"
+                    className="wealth-muted-block flex gap-3 p-3"
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-primary">
+                    <div className="wealth-inset flex h-9 w-9 shrink-0 items-center justify-center text-primary">
                       <Icon className="h-4 w-4" />
                     </div>
                     <div>
@@ -1155,16 +1341,16 @@ export function Onboarding({
             </div>
           )}
 
-          <div className="grid gap-2">
+          <div id="onboarding-roadmap" className="grid gap-2">
             <p className="text-sm font-medium">
               {displayedProfile ? "Roadmap preview" : "What the roadmap will cover"}
             </p>
             {roadmapPreview.map((item) => (
               <div
                 key={item.week}
-                className="flex items-start gap-3 rounded-lg border border-border/75 bg-muted/35 p-3"
+                className="wealth-muted-block flex items-start gap-3 p-3"
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
+                <div className="wealth-inset flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground">
                   {item.week.replace("Week ", "")}
                 </div>
                 <div>

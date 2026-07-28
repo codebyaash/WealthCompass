@@ -36,15 +36,15 @@ export function AppSidebar({
   onNavigate: (view: ActiveView) => void;
 }) {
   return (
-    <aside className="lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:w-[17rem] xl:w-[18rem]">
-      <nav className="flex h-full flex-col rounded-xl border border-border/75 bg-card/88 p-4 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.28)] backdrop-blur-md">
+    <aside className="lg:sticky lg:top-4 lg:self-start lg:w-[15.5rem] xl:w-[16.5rem] 2xl:w-[17.5rem]">
+      <nav className="wealth-panel-strong flex h-auto flex-col p-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden">
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="px-1 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Investor Operating System
+            WealthCompass Investment Desk
           </p>
           <ThemeToggle className="hidden h-9 w-9 lg:inline-flex" />
         </div>
-        <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-background/72 px-3 py-3 shadow-sm">
+        <div className="wealth-inset flex items-center gap-3 px-3 py-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_12px_28px_-18px_rgba(13,148,136,0.95)]">
             <Compass className="h-5 w-5" />
           </div>
@@ -56,43 +56,45 @@ export function AppSidebar({
           </div>
         </div>
         <Separator className="my-4 bg-border/70" />
-        <div className="mb-3 px-2">
-          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Command lanes
-          </p>
-        </div>
-        <div className="grid gap-1.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Button
-                key={item.id}
-                variant={activeView === item.id ? "secondary" : "ghost"}
-                className={
-                  activeView === item.id
-                    ? "h-auto justify-start rounded-lg border border-white/80 bg-secondary/95 px-3 py-3 shadow-sm"
-                    : "h-auto justify-start rounded-lg px-3 py-3"
-                }
-                onClick={() => onNavigate(item.id)}
-              >
-                <div className="flex items-start gap-3 text-left">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium leading-5">{item.label}</p>
-                    <p className="text-[11px] leading-4 text-muted-foreground">{item.detail}</p>
+        <div className="min-h-0 flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="mb-3 px-2">
+            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Command lanes
+            </p>
+          </div>
+          <div className="grid gap-1.5">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Button
+                  key={item.id}
+                  variant={activeView === item.id ? "secondary" : "ghost"}
+                  className={
+                    activeView === item.id
+                      ? "h-auto justify-start rounded-lg border border-white/80 bg-secondary/95 px-3 py-3 shadow-[0_14px_30px_-22px_rgba(15,23,42,0.32)]"
+                      : "h-auto justify-start rounded-lg px-3 py-3 hover:bg-background/68"
+                  }
+                  onClick={() => onNavigate(item.id)}
+                >
+                  <div className="flex items-start gap-3 text-left">
+                    <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium leading-5">{item.label}</p>
+                      <p className="text-[11px] leading-4 text-muted-foreground">{item.detail}</p>
+                    </div>
                   </div>
-                </div>
-              </Button>
-            );
-          })}
+                </Button>
+              );
+            })}
+          </div>
         </div>
-        <div className="mt-auto rounded-lg border border-primary/20 bg-linear-to-br from-primary/10 via-background/88 to-secondary/75 p-4">
+        <div className="mt-4 rounded-lg border border-primary/20 bg-linear-to-br from-primary/10 via-background/88 to-secondary/75 p-4 shadow-[0_14px_32px_-24px_rgba(13,148,136,0.35)]">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium">Desk posture</span>
+            <span className="text-sm font-medium">Operating posture</span>
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Use the shell in this order: understand your baseline, track real money, then widen into markets, learning, and guidance.
+            Move in a steady order: baseline first, portfolio second, then widen into goals, markets, learning, and guidance.
           </p>
         </div>
       </nav>

@@ -29,6 +29,7 @@ import { Roadmap } from "@/components/wealth/roadmap";
 import { HealthCheck } from "@/components/wealth/health-check";
 import { MetricMini } from "@/components/wealth/metric-mini";
 import { MentorOpenCue } from "@/components/wealth/mentor-open-cue";
+import { PageNavigatorBar } from "@/components/wealth/page-navigator-bar";
 import { Badge } from "@/components/ui/badge";
 import {
   NumberField,
@@ -229,6 +230,7 @@ export function Portfolio({
   const [draftTransaction, setDraftTransaction] = useState<PortfolioTransaction>(
     createPortfolioTransaction(),
   );
+  const [navigatorValue, setNavigatorValue] = useState("portfolio-manual-entry");
   const manualEntryRef = useRef<HTMLDivElement | null>(null);
   const importReviewRef = useRef<HTMLDivElement | null>(null);
   const transactionJournalRef = useRef<HTMLDivElement | null>(null);
@@ -396,6 +398,26 @@ export function Portfolio({
       block: "start",
     });
   };
+  const portfolioNavigatorOptions = [
+    ["portfolio-manual-entry", "Holdings: manual tracker"],
+    ["portfolio-import-review", "Imports: review queue"],
+    ["portfolio-transaction-journal", "Journal: transaction log"],
+    ["portfolio-allocation", "Read: allocation snapshot"],
+    ["portfolio-health", "Checks: portfolio health"],
+    ["portfolio-alignment", "Compare: profile alignment"],
+  ] as Array<[string, string]>;
+  const handlePortfolioNavigatorChange = (value: string) => {
+    setNavigatorValue(value);
+    const sectionMap: Record<string, PortfolioWorkspaceSection> = {
+      "portfolio-manual-entry": "manual-entry",
+      "portfolio-import-review": "import-review",
+      "portfolio-transaction-journal": "transaction-journal",
+      "portfolio-allocation": "allocation",
+      "portfolio-health": "health",
+      "portfolio-alignment": "alignment",
+    };
+    scrollToSection(sectionMap[value] ?? "manual-entry");
+  };
   const investedValue = useMemo(
     () => calculatePortfolioInvestedValue(safeAssets),
     [safeAssets],
@@ -407,6 +429,57 @@ export function Portfolio({
   const diversificationScore = useMemo(
     () => getPortfolioDiversificationScore({ assets: safeAssets, portfolioTotal }),
     [portfolioTotal, safeAssets],
+  );
+  const reconciliationRows = useMemo(
+    () => {
+      const usedPreviewIndexes = new Set<number>();
+
+      return importPreview.duplicates
+        .map(({ existingAsset, importedAsset }) => {
+          const importedIndex = importPreview.assets.findIndex((asset, index) => {
+            if (usedPreviewIndexes.has(index)) return false;
+
+            return createImportAssetKey(asset) === createImportAssetKey(importedAsset);
+          });
+          if (importedIndex >= 0) {
+            usedPreviewIndexes.add(importedIndex);
+          }
+          const currentValueDelta = importedAsset.value - existingAsset.value;
+          const investedValueDelta = importedAsset.investedValue - existingAsset.investedValue;
+          const quantityDelta = importedAsset.quantity - existingAsset.quantity;
+          const priceDelta = importedAsset.price - existingAsset.price;
+          const hasMeaningfulDelta =
+            Math.abs(currentValueDelta) >= 1 ||
+            Math.abs(investedValueDelta) >= 1 ||
+            Math.abs(quantityDelta) >= 0.01 ||
+            Math.abs(priceDelta) >= 0.01;
+
+          return {
+            currentValueDelta,
+            existingAsset,
+            hasMeaningfulDelta,
+            importedAsset,
+            importedRowKey:
+              importedIndex >= 0
+                ? createImportSelectionKey(importPreview.assets[importedIndex], importedIndex)
+                : createImportAssetKey(importedAsset),
+            investedValueDelta,
+            priceDelta,
+            quantityDelta,
+          };
+        })
+        .filter((row) => row.hasMeaningfulDelta);
+    },
+    [importPreview.assets, importPreview.duplicates],
+  );
+  const reconciliationSelectedCount = useMemo(
+    () =>
+      reconciliationRows.filter((row) => selectedImportKeys.includes(row.importedRowKey)).length,
+    [reconciliationRows, selectedImportKeys],
+  );
+  const reconciliationHeldBackCount = useMemo(
+    () => reconciliationRows.length - reconciliationSelectedCount,
+    [reconciliationRows.length, reconciliationSelectedCount],
   );
   const allocationInsights = useMemo(
     () => getAllocationInsights({ assets: safeAssets, portfolioTotal, profile }),
@@ -475,6 +548,30 @@ export function Portfolio({
         : duplicateTransactionCount > 0
           ? "The journal dedupe is protecting you from replaying the same cash-flow row twice."
           : "The current selection reads like a focused import rather than a broad overwrite.";
+  const importVerdictToneClass =
+    importPreview.errors.length > 0
+      ? "border-rose-500/30 bg-rose-500/10"
+      : reconciliationHeldBackCount > 0 || duplicateTransactionCount > 0
+        ? "border-amber-500/30 bg-amber-500/10"
+        : importReadyHoldingCount > 0 || importReadyTransactionCount > 0
+          ? "border-emerald-500/30 bg-emerald-500/10"
+          : "border-border bg-muted/30";
+  const importVerdictBadgeVariant =
+    importPreview.errors.length > 0
+      ? "outline"
+      : importReadyHoldingCount > 0 || importReadyTransactionCount > 0
+        ? "secondary"
+        : "outline";
+  const importVerdictLabel =
+    importPreview.errors.length > 0
+      ? "Blocked until fixed"
+      : reconciliationHeldBackCount > 0
+        ? "Selective import recommended"
+        : duplicateTransactionCount > 0
+          ? "Journal dedupe active"
+          : importReadyHoldingCount > 0 || importReadyTransactionCount > 0
+            ? "Ready for controlled import"
+            : "Waiting for reviewed selection";
   const importButtonLabel =
     importReadyHoldingCount === 0 && importReadyTransactionCount === 0
       ? "Import selected"
@@ -483,6 +580,39 @@ export function Portfolio({
         : importReadyHoldingCount > 0
         ? `Import ${importReadyHoldingCount} holding${importReadyHoldingCount === 1 ? "" : "s"}`
         : `Import ${importReadyTransactionCount} journal row${importReadyTransactionCount === 1 ? "" : "s"}`;
+  const recentImportJobs = useMemo(
+    () =>
+      importJobs
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 4),
+    [importJobs],
+  );
+  const latestImportJob = recentImportJobs[0] ?? null;
+  const latestImportFlowMeta = latestImportJob ? getImportJobFlowMeta(latestImportJob) : null;
+  const latestImportStats = latestImportJob ? getImportJobOutcomeStats(latestImportJob) : null;
+  const latestImportSourceText = latestImportJob
+    ? latestImportJob.normalizedText.trim() || latestImportJob.rawText.trim()
+    : "";
+  const latestImportPreview = useMemo(
+    () =>
+      latestImportSourceText
+        ? previewPortfolioImport(latestImportSourceText, safeAssets)
+        : null,
+    [latestImportSourceText, safeAssets],
+  );
+  const latestImportReplayResult = useMemo(
+    () =>
+      latestImportJob
+        ? applyImportJobToPortfolio({
+            existingAssets: safeAssets,
+            existingTransactions: transactions,
+            job: latestImportJob,
+            mode: importMode,
+          })
+        : null,
+    [importMode, latestImportJob, safeAssets, transactions],
+  );
   const historyReplayReadyCount = recentImportJobs.filter((job) => {
     const actions = getImportJobHistoryActions(job);
 
@@ -506,6 +636,24 @@ export function Portfolio({
       : historyReplayReadyCount > 0
         ? "Replay is best when the current tracker still has a meaningful gap. Reopen is better when you want to inspect the saved review again."
         : "The safest move is usually reopen or reprocess, because the tracker already reflects most of the older payloads.";
+  const historyVerdictLabel =
+    recentImportJobs.length === 0
+      ? "History waiting for first reviewed import"
+      : historyReplayReadyCount > 0
+        ? "Reusable import memory available"
+        : historyReprocessReadyCount > 0
+          ? "Reference lane with parser retry value"
+          : "Reference and audit lane";
+  const historyVerdictToneClass =
+    recentImportJobs.length === 0
+      ? "border-border bg-muted/30"
+      : historyReplayReadyCount > 0
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : historyReprocessReadyCount > 0
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-border bg-muted/30";
+  const historyVerdictBadgeVariant =
+    historyReplayReadyCount > 0 ? "secondary" : "outline";
   const replayImpactLabel =
     !latestImportJob || !latestImportPreview
       ? "Replay check pending"
@@ -534,61 +682,46 @@ export function Portfolio({
       : latestImportPreview.newAssets.length > 0
         ? "These are the holdings from the saved payload that still do not map cleanly into the current tracker."
         : "Most of the latest payload now overlaps with holdings you already track.";
+  const replayVerdictLabel =
+    !latestImportJob || !latestImportPreview
+      ? "Replay decision waiting on saved comparison"
+      : latestImportReplayResult &&
+          (latestImportReplayResult.appliedAssetCount > 0 ||
+            latestImportReplayResult.appliedTransactionCount > 0)
+        ? "Replay can still change the tracker"
+        : latestImportPreview.newAssets.length > 0
+          ? "Gap exists, but replay may not be the best tool"
+          : "Replay is mostly exhausted";
+  const replayVerdictToneClass =
+    !latestImportJob || !latestImportPreview
+      ? "border-border bg-muted/30"
+      : latestImportReplayResult &&
+          (latestImportReplayResult.appliedAssetCount > 0 ||
+            latestImportReplayResult.appliedTransactionCount > 0)
+        ? "border-amber-500/30 bg-amber-500/10"
+        : latestImportPreview.newAssets.length > 0
+          ? "border-sky-500/30 bg-sky-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10";
+  const replayVerdictBadgeVariant =
+    latestImportReplayResult &&
+    (latestImportReplayResult.appliedAssetCount > 0 ||
+      latestImportReplayResult.appliedTransactionCount > 0)
+      ? "outline"
+      : "secondary";
+  const replayVerdictDetail =
+    !latestImportJob || !latestImportPreview
+      ? "This section becomes useful after a reviewed import is saved and can be compared with the tracker you have now."
+      : latestImportReplayResult &&
+          (latestImportReplayResult.appliedAssetCount > 0 ||
+            latestImportReplayResult.appliedTransactionCount > 0)
+        ? "A replay would still make live changes, so treat it like an intentional operating action rather than a convenience click."
+        : latestImportPreview.newAssets.length > 0
+          ? "The saved payload still teaches you something, but replay alone may not be the cleanest way to close the remaining gap."
+          : "The current tracker already mirrors this saved import closely enough that replay is now mostly reference, not action.";
   const healthLeadCheck = portfolioChecks[0];
   const detailCoverageCheck = portfolioChecks.find((check) => check.label === "Detail coverage");
   const diversificationCheck = portfolioChecks.find(
     (check) => check.label === "Diversification score",
-  );
-  const reconciliationRows = useMemo(
-    () => {
-      const usedPreviewIndexes = new Set<number>();
-
-      return importPreview.duplicates
-        .map(({ existingAsset, importedAsset }) => {
-          const importedIndex = importPreview.assets.findIndex((asset, index) => {
-            if (usedPreviewIndexes.has(index)) return false;
-
-            return createImportAssetKey(asset) === createImportAssetKey(importedAsset);
-          });
-          if (importedIndex >= 0) {
-            usedPreviewIndexes.add(importedIndex);
-          }
-          const currentValueDelta = importedAsset.value - existingAsset.value;
-          const investedValueDelta = importedAsset.investedValue - existingAsset.investedValue;
-          const quantityDelta = importedAsset.quantity - existingAsset.quantity;
-          const priceDelta = importedAsset.price - existingAsset.price;
-          const hasMeaningfulDelta =
-            Math.abs(currentValueDelta) >= 1 ||
-            Math.abs(investedValueDelta) >= 1 ||
-            Math.abs(quantityDelta) >= 0.01 ||
-            Math.abs(priceDelta) >= 0.01;
-
-          return {
-            currentValueDelta,
-            existingAsset,
-            hasMeaningfulDelta,
-            importedAsset,
-            importedRowKey:
-              importedIndex >= 0
-                ? createImportSelectionKey(importPreview.assets[importedIndex], importedIndex)
-                : createImportAssetKey(importedAsset),
-            investedValueDelta,
-            priceDelta,
-            quantityDelta,
-          };
-        })
-        .filter((row) => row.hasMeaningfulDelta);
-    },
-    [importPreview.assets, importPreview.duplicates],
-  );
-  const reconciliationSelectedCount = useMemo(
-    () =>
-      reconciliationRows.filter((row) => selectedImportKeys.includes(row.importedRowKey)).length,
-    [reconciliationRows, selectedImportKeys],
-  );
-  const reconciliationHeldBackCount = useMemo(
-    () => reconciliationRows.length - reconciliationSelectedCount,
-    [reconciliationRows.length, reconciliationSelectedCount],
   );
   const allocationLeadInsight = allocationInsights[0];
   const allocationActionSummary = allocationLeadInsight
@@ -611,6 +744,9 @@ export function Portfolio({
       text.includes("under")
     );
   });
+  const leadHealthAttentionCheck = healthAttentionChecks[0] ?? null;
+  const leadHealthAttentionLabel = leadHealthAttentionCheck?.label ?? "";
+  const leadHealthAttentionStatus = leadHealthAttentionCheck?.status ?? "";
   const healthActionSummary = healthAttentionChecks[0]
     ? `${healthAttentionChecks[0].label}: ${healthAttentionChecks[0].status}`
     : portfolioChecks[0]?.status ??
@@ -632,6 +768,32 @@ export function Portfolio({
       ? "The latest review came through with strong provider confidence, so these checks are reading off relatively trustworthy data."
       : `The latest review is only ${latestImportJob.providerConfidence} confidence, so use the checks as prompts to verify details rather than as a final verdict.`
     : "No recent reviewed import is supporting the health layer yet.";
+  const healthVerdictLabel =
+    portfolioChecks.length === 0
+      ? "Health checks are still forming"
+      : healthAttentionChecks.length === 0
+        ? "Health layer is broadly stable"
+        : latestImportJob?.providerConfidence === "low"
+          ? "Checks show risk, but data trust comes first"
+          : "One weak check should lead the next fix";
+  const healthVerdictToneClass =
+    portfolioChecks.length === 0
+      ? "border-border bg-muted/30"
+      : healthAttentionChecks.length === 0
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : latestImportJob?.providerConfidence === "low"
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-sky-500/30 bg-sky-500/10";
+  const healthVerdictBadgeVariant =
+    portfolioChecks.length > 0 && healthAttentionChecks.length === 0 ? "secondary" : "outline";
+  const healthVerdictDetail =
+    portfolioChecks.length === 0
+      ? "Once more holdings and imported detail are available, this section turns from placeholder guidance into a real operating read."
+      : healthAttentionChecks.length === 0
+        ? "The main use of this section right now is confirmation: keep the clean checks clean while the rest of the portfolio evolves."
+        : latestImportJob?.providerConfidence === "low"
+          ? "The checks are pointing to something real, but low-confidence source quality means the first move may be verifying the data before acting on the conclusion."
+          : "There is enough signal here to fix one weak point deliberately instead of spreading attention across every warning at once.";
   const alignmentMissingInsights = allocationInsights.filter(
     (insight) => insight.currentShare < insight.suggestedShare,
   );
@@ -662,6 +824,68 @@ export function Portfolio({
         : alignmentOverweightInsights.length > 0
           ? `${alignmentOverweightInsights[0].bucket} is the loudest overweight bucket right now, so inspect the holdings inside it before making smaller tweaks elsewhere.`
           : "The captured portfolio is not showing a major suggested-vs-current mismatch right now.";
+  const alignmentVerdictLabel =
+    allocationInsights.length === 0
+      ? "Alignment read is still forming"
+      : alignmentMissingInsights.length > 0
+        ? "One bucket is missing core support"
+        : alignmentOverweightInsights.length > 0
+          ? "One bucket is carrying too much weight"
+          : "Current mix is broadly aligned";
+  const alignmentVerdictToneClass =
+    allocationInsights.length === 0
+      ? "border-border bg-muted/30"
+      : alignmentMissingInsights.length > 0
+        ? "border-sky-500/30 bg-sky-500/10"
+        : alignmentOverweightInsights.length > 0
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10";
+  const alignmentVerdictBadgeVariant =
+    allocationInsights.length > 0 &&
+    alignmentMissingInsights.length === 0 &&
+    alignmentOverweightInsights.length === 0
+      ? "secondary"
+      : "outline";
+  const filteredHoldings = useMemo(() => {
+    const query = holdingsSearch.trim().toLowerCase();
+    const base = query
+      ? safeAssets.filter((asset) => {
+          const haystack = `${asset.name} ${asset.type} ${asset.source}`.toLowerCase();
+          return haystack.includes(query);
+        })
+      : safeAssets;
+
+    return [...base].sort((left, right) => {
+      switch (holdingsSort) {
+        case "gain-desc":
+          return right.gain - left.gain;
+        case "gain-asc":
+          return left.gain - right.gain;
+        case "name-asc":
+          return left.name.localeCompare(right.name);
+        case "manual-first": {
+          const leftManual = left.source.toLowerCase() === "manual" ? 0 : 1;
+          const rightManual = right.source.toLowerCase() === "manual" ? 0 : 1;
+          if (leftManual !== rightManual) return leftManual - rightManual;
+          return right.value - left.value;
+        }
+        case "value-desc":
+        default:
+          return right.value - left.value;
+      }
+    });
+  }, [holdingsSearch, holdingsSort, safeAssets]);
+  const visibleHoldingsValue = useMemo(
+    () => filteredHoldings.reduce((sum, asset) => sum + asset.value, 0),
+    [filteredHoldings],
+  );
+  const manualHoldingsCount = filteredHoldings.filter(
+    (asset) => asset.source.toLowerCase() === "manual",
+  ).length;
+  const topAllocationBucket = (() => {
+    if (chartData.length === 0) return null;
+    return [...chartData].sort((left, right) => right.value - left.value)[0] ?? null;
+  })();
   useEffect(() => {
     if (allocationInsights.length === 0) {
       if (activeAlignmentBucket) {
@@ -702,7 +926,29 @@ export function Portfolio({
   const alignmentFocusedReadDetail = activeAlignmentInsight
     ? `${activeAlignmentInsight.currentShare}% current vs ${activeAlignmentInsight.suggestedShare}% suggested, with ${activeAlignmentAssets.length} holding${activeAlignmentAssets.length === 1 ? "" : "s"} currently mapping into this bucket.`
     : "Choose a suggested bucket to inspect the holdings that are currently supporting or missing it.";
-  const priorityQueue = useMemo(() => {
+  const alignmentFocusedVerdictLabel =
+    !activeAlignmentInsight
+      ? "Choose one bucket to inspect"
+      : activeAlignmentAssets.length === 0
+        ? "This bucket is missing live support"
+        : activeAlignmentInsight.currentShare < activeAlignmentInsight.suggestedShare
+          ? "Support here is still too thin"
+          : activeAlignmentAssets.length === 1
+            ? "One holding is driving this bucket"
+            : "This bucket is readable through its holdings";
+  const alignmentFocusedVerdictToneClass =
+    !activeAlignmentInsight
+      ? "border-border bg-muted/30"
+      : activeAlignmentAssets.length === 0
+        ? "border-sky-500/30 bg-sky-500/10"
+        : activeAlignmentInsight.currentShare < activeAlignmentInsight.suggestedShare
+          ? "border-amber-500/30 bg-amber-500/10"
+          : activeAlignmentAssets.length === 1
+            ? "border-sky-500/30 bg-sky-500/10"
+            : "border-emerald-500/30 bg-emerald-500/10";
+  const alignmentFocusedVerdictBadgeVariant =
+    activeAlignmentInsight && activeAlignmentAssets.length > 1 ? "secondary" : "outline";
+  const priorityQueue = (() => {
     const items: Array<{
       detail: string;
       label: string;
@@ -743,10 +989,10 @@ export function Portfolio({
       });
     }
 
-    if (healthAttentionChecks[0]) {
+    if (leadHealthAttentionLabel && leadHealthAttentionStatus) {
       items.push({
-        detail: healthAttentionChecks[0].status,
-        label: `Clear ${healthAttentionChecks[0].label.toLowerCase()}`,
+        detail: leadHealthAttentionStatus,
+        label: `Clear ${leadHealthAttentionLabel.toLowerCase()}`,
         section: "health",
         tone: "watch",
       });
@@ -814,59 +1060,6 @@ export function Portfolio({
     );
 
     return deduped.slice(0, 3);
-  }, [
-    alignmentMissingInsights,
-    alignmentOverweightInsights,
-    healthAttentionChecks,
-    importPreview.assets.length,
-    manualHoldingsCount,
-    newTransactionImportPreview.length,
-    safeAssets.length,
-    transactionImportPreview.transactions.length,
-    transactions.length,
-    uploadedImportStatus,
-  ]);
-  const filteredHoldings = useMemo(() => {
-    const query = holdingsSearch.trim().toLowerCase();
-    const base = query
-      ? safeAssets.filter((asset) => {
-          const haystack = `${asset.name} ${asset.type} ${asset.source}`.toLowerCase();
-          return haystack.includes(query);
-        })
-      : safeAssets;
-
-    return [...base].sort((left, right) => {
-      switch (holdingsSort) {
-        case "gain-desc":
-          return right.gain - left.gain;
-        case "gain-asc":
-          return left.gain - right.gain;
-        case "name-asc":
-          return left.name.localeCompare(right.name);
-        case "manual-first": {
-          const leftManual = left.source.toLowerCase() === "manual" ? 0 : 1;
-          const rightManual = right.source.toLowerCase() === "manual" ? 0 : 1;
-          if (leftManual !== rightManual) return leftManual - rightManual;
-          return right.value - left.value;
-        }
-        case "value-desc":
-        default:
-          return right.value - left.value;
-      }
-    });
-  }, [holdingsSearch, holdingsSort, safeAssets]);
-  const visibleHoldingsValue = useMemo(
-    () => filteredHoldings.reduce((sum, asset) => sum + asset.value, 0),
-    [filteredHoldings],
-  );
-  const manualHoldingsCount = useMemo(
-    () =>
-      filteredHoldings.filter((asset) => asset.source.toLowerCase() === "manual").length,
-    [filteredHoldings],
-  );
-  const topAllocationBucket = (() => {
-    if (chartData.length === 0) return null;
-    return [...chartData].sort((left, right) => right.value - left.value)[0] ?? null;
   })();
   const holdingsBoardReadLabel =
     filteredHoldings.length === 0
@@ -884,6 +1077,24 @@ export function Portfolio({
         : topAllocationBucket
           ? `${formatMoney(topAllocationBucket.value)} of the visible value is currently concentrated in ${topAllocationBucket.name}, so start there if you are prioritizing attention.`
           : "The visible list is broad enough to review by value, gain, or source.";
+  const holdingsBoardVerdictLabel =
+    filteredHoldings.length === 0
+      ? "Board waiting on a visible working set"
+      : manualHoldingsCount > 0
+        ? "Manual detail risk is the first thing to clear"
+        : topAllocationBucket
+          ? "Concentration review should lead this pass"
+          : "Board is ready for structured review";
+  const holdingsBoardVerdictToneClass =
+    filteredHoldings.length === 0
+      ? "border-border bg-muted/30"
+      : manualHoldingsCount > 0
+        ? "border-amber-500/30 bg-amber-500/10"
+        : topAllocationBucket
+          ? "border-sky-500/30 bg-sky-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10";
+  const holdingsBoardVerdictBadgeVariant =
+    filteredHoldings.length > 0 && manualHoldingsCount === 0 ? "secondary" : "outline";
   useEffect(() => {
     if (chartData.length === 0) {
       if (activeAllocationBucket) {
@@ -898,13 +1109,11 @@ export function Portfolio({
     }
   }, [activeAllocationBucket, chartData, topAllocationBucket]);
   const activeAllocationBucketName = activeAllocationBucket || topAllocationBucket?.name || "";
-  const activeAllocationAssets = useMemo(() => {
-    if (!activeAllocationBucketName) return [];
-
-    return safeAssets
-      .filter((asset) => asset.type === activeAllocationBucketName)
-      .sort((left, right) => right.value - left.value);
-  }, [activeAllocationBucketName, safeAssets]);
+  const activeAllocationAssets = !activeAllocationBucketName
+    ? []
+    : safeAssets
+        .filter((asset) => asset.type === activeAllocationBucketName)
+        .sort((left, right) => right.value - left.value);
   const activeAllocationBucketValue = activeAllocationAssets.reduce(
     (sum, asset) => sum + asset.value,
     0,
@@ -933,11 +1142,51 @@ export function Portfolio({
         : topAllocationBucket
           ? `${formatMoney(topAllocationBucket.value)} is currently concentrated in ${topAllocationBucket.name}, so that bucket deserves the first scan.`
           : "The chart is visible, but a clearer suggested-vs-current read still needs more holdings detail.";
+  const allocationVerdictLabel =
+    chartData.length === 0
+      ? "Allocation read is still forming"
+      : allocationLeadInsight
+        ? allocationLeadInsight.currentShare > allocationLeadInsight.suggestedShare
+          ? "One bucket is visibly overweight"
+          : "One bucket is visibly underweight"
+        : topAllocationBucket
+          ? "Concentration read is stronger than profile alignment"
+          : "Allocation mix is readable";
+  const allocationVerdictToneClass =
+    chartData.length === 0
+      ? "border-border bg-muted/30"
+      : allocationLeadInsight
+        ? "border-sky-500/30 bg-sky-500/10"
+        : topAllocationBucket
+          ? "border-amber-500/30 bg-amber-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10";
+  const allocationVerdictBadgeVariant =
+    chartData.length > 0 && allocationInsights.length > 0 ? "secondary" : "outline";
   const focusedBucketReadLabel = activeAllocationBucketName || "No bucket selected";
   const focusedBucketReadDetail =
     activeAllocationBucketName
       ? `${activeAllocationAssets.length} holding${activeAllocationAssets.length === 1 ? "" : "s"} are currently driving ${activeAllocationBucketName}, which represents ${activeAllocationBucketShare.toFixed(1)}% of tracked value.`
       : "Choose a bucket to inspect the holdings behind that slice of the portfolio.";
+  const focusedBucketVerdictLabel =
+    !activeAllocationBucketName
+      ? "Choose one bucket to inspect"
+      : activeAllocationAssets.length === 0
+        ? "Bucket is selected but not populated"
+        : activeAllocationBucketShare >= 40
+          ? "Bucket concentration is material"
+          : activeAllocationAssets.length === 1
+            ? "Single holding is driving this bucket"
+            : "Bucket composition is inspectable";
+  const focusedBucketVerdictToneClass =
+    !activeAllocationBucketName
+      ? "border-border bg-muted/30"
+      : activeAllocationBucketShare >= 40
+        ? "border-amber-500/30 bg-amber-500/10"
+        : activeAllocationAssets.length === 1
+          ? "border-sky-500/30 bg-sky-500/10"
+          : "border-emerald-500/30 bg-emerald-500/10";
+  const focusedBucketVerdictBadgeVariant =
+    activeAllocationBucketName && activeAllocationAssets.length > 1 ? "secondary" : "outline";
   const workspaceSections: Array<{
     id: PortfolioWorkspaceSection;
     label: string;
@@ -983,39 +1232,6 @@ export function Portfolio({
           : "Suggested-vs-current alignment appears once real holdings are in place.",
     },
   ];
-  const recentImportJobs = useMemo(
-    () =>
-      importJobs
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 4),
-    [importJobs],
-  );
-  const latestImportJob = recentImportJobs[0] ?? null;
-  const latestImportFlowMeta = latestImportJob ? getImportJobFlowMeta(latestImportJob) : null;
-  const latestImportStats = latestImportJob ? getImportJobOutcomeStats(latestImportJob) : null;
-  const latestImportSourceText = latestImportJob
-    ? latestImportJob.normalizedText.trim() || latestImportJob.rawText.trim()
-    : "";
-  const latestImportPreview = useMemo(
-    () =>
-      latestImportSourceText
-        ? previewPortfolioImport(latestImportSourceText, safeAssets)
-        : null,
-    [latestImportSourceText, safeAssets],
-  );
-  const latestImportReplayResult = useMemo(
-    () =>
-      latestImportJob
-        ? applyImportJobToPortfolio({
-            existingAssets: safeAssets,
-            existingTransactions: transactions,
-            job: latestImportJob,
-            mode: importMode,
-          })
-        : null,
-    [importMode, latestImportJob, safeAssets, transactions],
-  );
   const importTrack =
     profile.actionBaskets.find((basket) => basket.id === "activate") ??
     profile.actionBaskets[0];
@@ -1147,6 +1363,87 @@ export function Portfolio({
         : "Capture more holdings before reading concentration too hard.",
     },
   ];
+  const portfolioWorkspaceVerdict =
+    safeAssets.length === 0
+      ? {
+          badge: "Coverage first",
+          badgeVariant: "outline" as const,
+          detail:
+            "This workspace is still waiting on the first real coverage layer, so the best use of the page is getting honest holdings or a statement into the tracker.",
+          move: "Start with one import or a few real holdings before reading the lower diagnostics too hard.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : importPreview.errors.length > 0 || transactionImportPreview.errors.length > 0
+        ? {
+            badge: "Review lane is constraining trust",
+            badgeVariant: "outline" as const,
+            detail:
+              "The page has enough real data to be useful, but parser or staging issues still limit how confidently you should merge and read everything downstream.",
+            move: "Clear the current import review first, then trust the rest of the portfolio page more deeply.",
+            toneClass: "border-amber-500/30 bg-amber-500/10",
+          }
+        : {
+            badge: "Tracker is usable",
+            badgeVariant: "secondary" as const,
+            detail:
+              "Coverage is good enough that allocation, health, and alignment can now act more like decision tools than placeholders.",
+            move: "Use the priority queue to decide which lane deserves attention before editing the portfolio itself.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          };
+  const manualTrackerVerdict =
+    safeAssets.length === 0
+      ? {
+          badge: "Manual tracker is still empty",
+          badgeVariant: "outline" as const,
+          detail:
+            "This section is not asking for optimization yet. It is asking for the first honest holding coverage so the rest of the page can wake up.",
+          move: "Add the first holding or import a statement instead of polishing empty structure.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : investedValue <= 0
+        ? {
+            badge: "Coverage exists, detail is still thin",
+            badgeVariant: "outline" as const,
+            detail:
+              "Holdings are present, but missing invested basis means gains and health checks can still be directionally useful without being fully trustworthy.",
+            move: "Fill invested value and units before making bigger judgment calls from the tracker.",
+            toneClass: "border-amber-500/30 bg-amber-500/10",
+          }
+        : {
+            badge: "Tracker detail is usable",
+            badgeVariant: "secondary" as const,
+            detail:
+              "The manual tracker has enough shape now that it can support cleaner allocation and health reads.",
+            move: "Use this section mainly to patch gaps and keep the captured holdings honest.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          };
+  const journalVerdict =
+    transactions.length === 0
+      ? {
+          badge: "Journal is still thin",
+          badgeVariant: "outline" as const,
+          detail:
+            "Without transaction history, the portfolio can show positions but not much about contribution behavior or realized outcomes.",
+          move: "Log the first dated buys, sells, or dividends so trajectory and realized P&L stop relying on guesses.",
+          toneClass: "border-sky-500/30 bg-sky-500/10",
+        }
+      : filteredTransactions.length < transactions.length
+        ? {
+            badge: "Filtered working view",
+            badgeVariant: "outline" as const,
+            detail:
+              "You are looking at a narrowed journal slice right now, which is good for review as long as you remember it is not the whole story.",
+            move: "Use the filter to isolate a pattern, then reset it before making broad conclusions.",
+            toneClass: "border-sky-500/30 bg-sky-500/10",
+          }
+        : {
+            badge: "Journal is supporting the story",
+            badgeVariant: "secondary" as const,
+            detail:
+              "The transaction layer is now doing real work for trajectory, realized P&L, and import validation.",
+            move: "Keep new entries clean and source-aware rather than letting the journal become an afterthought.",
+            toneClass: "border-emerald-500/30 bg-emerald-500/10",
+          };
   const operatingDeskMentorPrompt = hasUploadedImport
     ? [
         `I uploaded ${uploadedFileLabel ?? "a statement"} and the portfolio desk says "${operatingHeadline}".`,
@@ -1635,8 +1932,8 @@ export function Portfolio({
   }
 
   return (
-    <div className="grid gap-5">
-      <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+    <div className="portfolio-page grid gap-5">
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.2fr_0.8fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -1667,8 +1964,27 @@ export function Portfolio({
                 />
               </div>
             </div>
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${portfolioWorkspaceVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Workspace verdict</p>
+                  <Badge variant={portfolioWorkspaceVerdict.badgeVariant}>{portfolioWorkspaceVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {portfolioWorkspaceVerdict.detail}
+                </p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {portfolioWorkspaceVerdict.move}
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Coverage
                 </p>
@@ -1678,7 +1994,7 @@ export function Portfolio({
                     : "Holdings are not tracked yet, so allocation and health checks are still waiting on real inputs."}
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Journal depth
                 </p>
@@ -1688,7 +2004,7 @@ export function Portfolio({
                     : "Transaction history is still light, so portfolio trajectory is mostly inferred from holdings."}
                 </p>
               </div>
-              <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Import lane
                 </p>
@@ -1713,7 +2029,7 @@ export function Portfolio({
               {portfolioTopStats.map((stat) => (
                 <div
                   key={stat.label}
-                  className="rounded-md border border-border/70 bg-background/80 p-4"
+                  className="wealth-stat-tile"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     {stat.label}
@@ -1723,7 +2039,7 @@ export function Portfolio({
                 </div>
               ))}
             </div>
-            <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
+            <div className="wealth-inset grid gap-3 p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-foreground">Priority queue</p>
@@ -1737,7 +2053,7 @@ export function Portfolio({
                 {priorityQueue.map((item) => (
                   <div
                     key={`${item.section}-${item.label}`}
-                    className="rounded-md border border-border/70 bg-muted/20 p-3"
+                    className="wealth-muted-block p-3"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-foreground">{item.label}</p>
@@ -1797,10 +2113,10 @@ export function Portfolio({
                 Download CSV
               </Button>
             </div>
-            <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
+            <div className="wealth-inset grid gap-3 p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Portfolio workspace guide</p>
+                  <p className="text-sm font-medium text-foreground">How to work this page</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Move through coverage first, then review allocation and health once the portfolio has enough real detail.
                   </p>
@@ -1808,7 +2124,7 @@ export function Portfolio({
                 <Badge variant="outline">{portfolioReadinessLabel}</Badge>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Step 1
                   </p>
@@ -1817,7 +2133,7 @@ export function Portfolio({
                     Start with a statement import or add the missing holdings manually so the page has honest coverage.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Step 2
                   </p>
@@ -1826,7 +2142,7 @@ export function Portfolio({
                     Use the review lane and transaction journal to make sure the portfolio story is driven by clean rows, not rough guesses.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Step 3
                   </p>
@@ -1842,7 +2158,7 @@ export function Portfolio({
                     key={section.id}
                     type="button"
                     onClick={() => scrollToSection(section.id)}
-                    className="rounded-md border border-border/70 bg-muted/20 p-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
+                    className="wealth-data-card p-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-medium text-foreground">{section.label}</p>
@@ -1856,22 +2172,22 @@ export function Portfolio({
           </div>
 
           <div className="grid gap-3 content-start">
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Current read
               </p>
               <p className="mt-3 text-base font-semibold text-foreground">{portfolioHeadline}</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{portfolioSubcopy}</p>
             </div>
-            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+            <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Best next move
               </p>
               <p className="mt-3 text-sm leading-6 text-foreground">{importTrack.items[0]}</p>
             </div>
-            <div className="rounded-md border border-border/70 bg-background p-4">
+            <div className="wealth-inset p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Working order
+                Reading order
               </p>
               <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
                 <li>Get coverage honest before reacting to allocation drift.</li>
@@ -1883,8 +2199,15 @@ export function Portfolio({
         </CardContent>
       </Card>
 
+      <PageNavigatorBar
+        label="Portfolio navigator"
+        options={portfolioNavigatorOptions}
+        value={navigatorValue}
+        onChange={handlePortfolioNavigatorChange}
+      />
+
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.band}</Badge>
@@ -1893,8 +2216,8 @@ export function Portfolio({
           </div>
           <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle>Manual portfolio tracker</CardTitle>
-                <CardDescription>{formatMoney(portfolioTotal)} tracked across holdings and journal context</CardDescription>
+                <CardTitle>Holdings: manual tracker</CardTitle>
+                <CardDescription>{formatMoney(portfolioTotal)} tracked across holdings, imports, and journal context</CardDescription>
               </div>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={handleCopyCsv}>
@@ -1920,7 +2243,22 @@ export function Portfolio({
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${manualTrackerVerdict.toneClass}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">Manual tracker verdict</p>
+                <Badge variant={manualTrackerVerdict.badgeVariant}>{manualTrackerVerdict.badge}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{manualTrackerVerdict.detail}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/70 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Best operating move
+              </p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{manualTrackerVerdict.move}</p>
+            </div>
+          </div>
+          <div className="wealth-muted-block grid gap-3 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm font-medium">{portfolioHeadline}</p>
@@ -1928,15 +2266,15 @@ export function Portfolio({
                   {portfolioSubcopy}
                 </p>
               </div>
-              <div className="min-w-56 rounded-md border bg-background p-3">
+              <div className="wealth-inset min-w-56 p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
+                  Focus now
                 </p>
                 <p className="mt-2 text-sm leading-6">{importTrack.items[0]}</p>
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   1. Add coverage
                 </p>
@@ -1944,7 +2282,7 @@ export function Portfolio({
                   Use import when you already have a broker, registrar, or email statement.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   2. Clean the details
                 </p>
@@ -1952,7 +2290,7 @@ export function Portfolio({
                   Make sure name, current value, invested value, units, and source are filled.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   3. Compare the mix
                 </p>
@@ -1973,7 +2311,7 @@ export function Portfolio({
             />
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-md border bg-muted/20 p-3">
+            <div className="wealth-muted-block p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Best for now
               </p>
@@ -1983,7 +2321,7 @@ export function Portfolio({
                   : "Review coverage gaps before making allocation judgments."}
               </p>
             </div>
-            <div className="rounded-md border bg-muted/20 p-3">
+            <div className="wealth-muted-block p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Do not confuse
               </p>
@@ -1991,7 +2329,7 @@ export function Portfolio({
                 A neat list of holdings is not the same thing as a clean portfolio picture. Units, invested value, and transaction history matter.
               </p>
             </div>
-            <div className="rounded-md border bg-muted/20 p-3">
+            <div className="wealth-muted-block p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Next decision
               </p>
@@ -2007,8 +2345,9 @@ export function Portfolio({
             <MetricMini label="Diversification" value={`${diversificationScore}/100`} />
           </div>
           <div
+            id="portfolio-manual-entry"
             ref={manualEntryRef}
-            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+            className="wealth-muted-block grid gap-3 p-3"
           >
             <div>
               <p className="text-sm font-medium">Manual holding entry</p>
@@ -2020,12 +2359,28 @@ export function Portfolio({
           </div>
 
           <div
+            id="portfolio-transaction-journal"
             ref={transactionJournalRef}
-            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+            className="wealth-muted-block grid gap-3 p-3"
             data-testid="transaction-journal"
             aria-label="Transaction journal"
             role="group"
           >
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${journalVerdict.toneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Journal verdict</p>
+                  <Badge variant={journalVerdict.badgeVariant}>{journalVerdict.badge}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{journalVerdict.detail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{journalVerdict.move}</p>
+              </div>
+            </div>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Transaction journal</p>
@@ -2048,7 +2403,7 @@ export function Portfolio({
               <span>Dividends {formatMoney(transactionSummary.dividends)}</span>
               <span>Realized P&L {formatMoney(realizedGain)}</span>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-[1.3fr_0.9fr_0.9fr] xl:grid-cols-[1.3fr_0.8fr_0.8fr_0.9fr]">
+            <div className="wealth-inset grid gap-3 p-3 md:grid-cols-[1.3fr_0.9fr_0.9fr] xl:grid-cols-[1.3fr_0.8fr_0.8fr_0.9fr]">
               <TextField
                 inputTestId="transaction-search"
                 label="Search journal"
@@ -2069,7 +2424,7 @@ export function Portfolio({
                 value={transactionSort}
                 onChange={setTransactionSort}
               />
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   View summary
                 </p>
@@ -2081,6 +2436,33 @@ export function Portfolio({
                 </p>
               </div>
             </div>
+            {(transactionSearch.trim() || transactionActionFilter !== "all" || transactionSort !== "recent") && (
+              <div className="wealth-stat-tile flex flex-wrap items-center justify-between gap-2 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Showing{" "}
+                  <span className="font-medium text-foreground">{filteredTransactions.length}</span>{" "}
+                  journal entr{filteredTransactions.length === 1 ? "y" : "ies"}
+                  {transactionSearch.trim() ? (
+                    <>
+                      {" "}matching <span className="font-medium text-foreground">{transactionSearch.trim()}</span>
+                    </>
+                  ) : null}
+                  .
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setTransactionSearch("");
+                    setTransactionActionFilter("all");
+                    setTransactionSort("recent");
+                  }}
+                >
+                  Reset view
+                </Button>
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-3">
               <MetricMini
                 label="Visible flow"
@@ -2100,14 +2482,14 @@ export function Portfolio({
             </div>
             <div className="grid gap-2">
               {filteredTransactions.length === 0 ? (
-                <div className="rounded-md border bg-background px-3 py-4 text-sm leading-6 text-muted-foreground">
-                  No journal entries match this view yet. Clear the search or switch the action filter to bring transactions back into scope.
+                <div className="wealth-empty-state px-3 py-4">
+                  No journal entries match this view yet. Reset the view or widen the filter to bring your transactions back into scope.
                 </div>
               ) : null}
               {filteredTransactions.map((transaction) => (
                 <div
                   key={transaction.id}
-                  className="grid gap-3 rounded-md border bg-background px-3 py-3 text-xs sm:grid-cols-[1.1fr_auto]"
+                  className="wealth-data-card grid gap-3 px-3 py-3 text-xs sm:grid-cols-[1.1fr_auto]"
                 >
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2143,7 +2525,7 @@ export function Portfolio({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3">
+          <div className="wealth-muted-block grid gap-3 p-3">
               <div>
                 <p className="text-sm font-medium">Supported intake lanes</p>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -2154,7 +2536,7 @@ export function Portfolio({
               {importSourceDescriptors.map((source) => (
                 <div
                   key={source.id}
-                  className="rounded-md border bg-background p-3"
+                  className="wealth-data-card p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2171,7 +2553,7 @@ export function Portfolio({
                 </div>
               ))}
             </div>
-            <div className="grid gap-2 rounded-md border bg-background p-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className="wealth-inset grid gap-2 p-3 text-xs text-muted-foreground md:grid-cols-2">
               <div className="flex items-start gap-2">
                 <Mail className="mt-0.5 h-4 w-4 text-primary" />
                 <span>
@@ -2188,8 +2570,9 @@ export function Portfolio({
           </div>
 
           <div
+            id="portfolio-import-review"
             ref={importReviewRef}
-            className="grid gap-3 rounded-md border bg-muted/30 p-3"
+            className="wealth-muted-block grid gap-3 p-3"
           >
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
@@ -2211,11 +2594,11 @@ export function Portfolio({
                 ) : null}
               </div>
               <div className="grid gap-2">
-                <div className="rounded-md border border-border/70 bg-background p-3 text-xs text-muted-foreground">
+                <div className="wealth-inset p-3 text-xs text-muted-foreground">
                   <p className="font-medium text-foreground">Pre-flight summary</p>
                   <p className="mt-2 text-sm font-semibold text-foreground">{importCommitLabel}</p>
                   <p className="mt-2 leading-5">{importCommitDetail}</p>
-                  <div className="mt-3 rounded-md border bg-muted/30 p-2">
+                  <div className="wealth-muted-block mt-3 p-2">
                     <p className="font-medium text-foreground">Primary risk check</p>
                     <p className="mt-1 leading-5">{importPrimaryRisk}</p>
                     <p className="mt-1 leading-5">{importPrimaryRiskDetail}</p>
@@ -2223,7 +2606,6 @@ export function Portfolio({
                 </div>
                 <Button
                   type="button"
-                  variant="outline"
                   onClick={handleCsvImport}
                   disabled={
                     !importReadyHoldingCount &&
@@ -2242,7 +2624,7 @@ export function Portfolio({
                 ) : null}
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -2270,7 +2652,24 @@ export function Portfolio({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border border-border/70 bg-background p-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${importVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Import verdict</p>
+                  <Badge variant={importVerdictBadgeVariant}>{importVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-foreground">{importCommitLabel}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{importCommitDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Risk to clear
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{importPrimaryRisk}</p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{importPrimaryRiskDetail}</p>
+              </div>
+            </div>
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="grid gap-3">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary">{importTrack.title}</Badge>
@@ -2295,7 +2694,7 @@ export function Portfolio({
                   </p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       1. Load the source
                     </p>
@@ -2303,7 +2702,7 @@ export function Portfolio({
                       Upload a statement or paste export text so the parser can read the real shape of the data.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       2. Inspect the review
                     </p>
@@ -2311,7 +2710,7 @@ export function Portfolio({
                       Check provider fit, cleanup, parsed rows, and warnings before trusting the preview.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       3. Import selectively
                     </p>
@@ -2332,8 +2731,8 @@ export function Portfolio({
                 </div>
               </div>
               <div className="grid gap-3">
-                <div className="rounded-md border border-border/70 bg-muted/20 p-4">
-                  <p className="text-sm font-medium">Best next move</p>
+                <div className="wealth-muted-block p-4">
+                  <p className="text-sm font-medium">Review move</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {uploadedImportStatus === "ready"
                       ? "Run the import review now, then decide whether the parsed output is clean enough to stage or import."
@@ -2342,8 +2741,8 @@ export function Portfolio({
                         : "Paste a real statement or upload a file first, then let the review layer tell you what the parser actually understood."}
                   </p>
                 </div>
-                <div className="rounded-md border border-border/70 bg-muted/20 p-4">
-                  <p className="text-sm font-medium">Import read</p>
+                <div className="wealth-muted-block p-4">
+                  <p className="text-sm font-medium">Current parsed read</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {importPreview.assets.length > 0 || transactionImportPreview.transactions.length > 0
                       ? `${importPreview.assets.length} holding${importPreview.assets.length === 1 ? "" : "s"} and ${transactionImportPreview.transactions.length} transaction row${transactionImportPreview.transactions.length === 1 ? "" : "s"} are currently in preview.`
@@ -2369,19 +2768,19 @@ export function Portfolio({
               onChange={(value) => setImportMode(value as PortfolioImportMode)}
             />
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Active source
                 </p>
                 <p className="mt-2 text-sm text-foreground">{importSourceLabel}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Current state
                 </p>
                 <p className="mt-2 text-sm text-foreground">{importSourceHint}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Next step
                 </p>
@@ -2466,7 +2865,7 @@ export function Portfolio({
               </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Upload status
                 </p>
@@ -2482,7 +2881,7 @@ export function Portfolio({
                           : "No upload is loaded right now."}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Parsed so far
                 </p>
@@ -2490,7 +2889,7 @@ export function Portfolio({
                   {importPreview.assets.length} holdings and {transactionImportPreview.transactions.length} transaction rows are currently visible to the parser.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="wealth-stat-tile p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Decision rule
                 </p>
@@ -2533,31 +2932,38 @@ export function Portfolio({
               preview={importPreview}
               selectedKeys={selectedImportKeys}
             />
-            <div className="grid gap-3 rounded-md border border-border/70 bg-background p-4 lg:grid-cols-[1fr_0.95fr]">
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1fr_0.95fr]">
               <div className="grid gap-2">
                 <p className="text-sm font-medium text-foreground">Before you import</p>
                 <p className="text-xs leading-5 text-muted-foreground">
                   This last step should feel boring in a good way: you know what gets added, what stays out, and whether the pass changes holdings, the journal, or both.
                 </p>
                 <div className="grid gap-2 md:grid-cols-3">
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Holdings to add</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">{importReadyHoldingCount}</p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Journal rows to add</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">{importReadyTransactionCount}</p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-muted-block p-3">
                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Held back</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">{reconciliationHeldBackCount}</p>
                   </div>
                 </div>
               </div>
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-sm font-medium text-foreground">Commit read</p>
-                <p className="mt-2 text-sm font-semibold text-foreground">{importCommitLabel}</p>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">{importCommitDetail}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground">{importCommitLabel}</p>
+                  <Badge variant={importVerdictBadgeVariant}>{importVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {importReadyHoldingCount > 0 || importReadyTransactionCount > 0
+                    ? importCommitDetail
+                    : "The import button is best treated like a final commit action. It should stay quiet until the rows you selected clearly improve the tracker."}
+                </p>
                 <p className="mt-3 text-xs leading-5 text-muted-foreground">
                   {importPrimaryRisk}. {importPrimaryRiskDetail}
                 </p>
@@ -2571,7 +2977,7 @@ export function Portfolio({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div className="wealth-muted-block grid gap-3 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-medium">What makes this tracker useful</p>
@@ -2582,7 +2988,7 @@ export function Portfolio({
               <Badge variant="outline">{learningTrack.title}</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Coverage
                 </p>
@@ -2590,7 +2996,7 @@ export function Portfolio({
                   {safeAssets.length} holding{safeAssets.length === 1 ? "" : "s"} tracked
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Transactions
                 </p>
@@ -2598,7 +3004,7 @@ export function Portfolio({
                   {transactions.length} journal entr{transactions.length === 1 ? "y" : "ies"}
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Learning edge
                 </p>
@@ -2607,7 +3013,7 @@ export function Portfolio({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div className="wealth-muted-block grid gap-3 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-medium">Recent import history</p>
@@ -2620,28 +3026,56 @@ export function Portfolio({
               </Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">History read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{historyActionSummary}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{historyActionDetail}</p>
               </div>
               <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-inset p-3">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Reopen ready</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{historyReopenReadyCount}</p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-inset p-3">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Replay ready</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{historyReplayReadyCount}</p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-inset p-3">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Reprocess ready</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{historyReprocessReadyCount}</p>
                 </div>
               </div>
             </div>
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${historyVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">History verdict</p>
+                  <Badge variant={historyVerdictBadgeVariant}>{historyVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{historyActionDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {historyReplayReadyCount > 0
+                    ? "Replay only when the delta is still intentional"
+                    : historyReprocessReadyCount > 0
+                      ? "Prefer reprocess over habit replay"
+                      : "Use history mainly as reference context"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {historyReplayReadyCount > 0
+                    ? "At least one saved import can still improve the tracker, but it should be a deliberate apply pass, not a reflex."
+                    : historyReprocessReadyCount > 0
+                      ? "The smarter move is usually to rerun parser understanding on the saved source instead of reapplying old rows unchanged."
+                      : "Most saved imports now read more like audit memory than live actions."}
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Reopen
                 </p>
@@ -2649,7 +3083,7 @@ export function Portfolio({
                   Bring an old review back into the import lane when you want to inspect the saved payload again.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Replay
                 </p>
@@ -2657,7 +3091,7 @@ export function Portfolio({
                   Apply the saved rows again only when the current tracker still has a meaningful gap.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Reprocess
                 </p>
@@ -2688,11 +3122,27 @@ export function Portfolio({
                         : job.rawText.trim() || job.normalizedText.trim()
                           ? "The rows are mostly useful for inspection and audit context rather than another apply pass."
                           : "There is not enough saved source text left here to reopen or replay meaningfully.";
+                  const historyVerdictToneClassForJob =
+                    !historyActions.applyAction.disabled
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : !historyActions.reprocessAction.disabled
+                        ? "border-amber-500/30 bg-amber-500/5"
+                        : "border-border bg-muted/30";
+                  const historyVerdictBadgeVariantForJob =
+                    !historyActions.applyAction.disabled ? "secondary" : "outline";
+                  const actionReadSummary =
+                    !historyActions.applyAction.disabled
+                      ? "Replayable delta still exists"
+                      : !historyActions.reprocessAction.disabled
+                        ? "Saved source is better than saved outcome"
+                        : job.rawText.trim() || job.normalizedText.trim()
+                          ? "Use this as reference and reopen context"
+                          : "Archive context only";
 
                   return (
                     <div
                       key={job.id}
-                      className="grid gap-3 rounded-md border bg-background p-3"
+                      className="wealth-data-card grid gap-3 p-3"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
@@ -2737,12 +3187,12 @@ export function Portfolio({
                         />
                       </div>
                       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                        <div className="rounded-md border bg-muted/20 p-3">
+                        <div className="wealth-muted-block p-3">
                           <p className="text-xs text-muted-foreground">Best use now</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">{actionRead}</p>
                           <p className="mt-2 text-xs leading-5 text-muted-foreground">{actionReadDetail}</p>
                         </div>
-                        <div className="rounded-md border bg-muted/20 p-3">
+                        <div className="wealth-muted-block p-3">
                           <p className="text-xs text-muted-foreground">Before you click</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">
                             {!historyActions.applyAction.disabled
@@ -2758,6 +3208,16 @@ export function Portfolio({
                           </p>
                         </div>
                       </div>
+                      <div
+                        className={`grid gap-2 rounded-md border p-3 text-xs ${historyVerdictToneClassForJob}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-medium text-foreground">Action verdict</p>
+                          <Badge variant={historyVerdictBadgeVariantForJob}>{actionRead}</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-foreground">{actionReadSummary}</p>
+                        <p className="leading-5 text-muted-foreground">{actionReadDetail}</p>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           type="button"
@@ -2772,7 +3232,6 @@ export function Portfolio({
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
                           onClick={() => handleReplayImportHistoryJob(job)}
                           disabled={historyActions.applyAction.disabled}
                         >
@@ -2795,13 +3254,13 @@ export function Portfolio({
                 })}
               </div>
             ) : (
-              <div className="rounded-md border bg-background p-3 text-sm leading-6 text-muted-foreground">
+              <div className="wealth-empty-state">
                 Import history will begin appearing here once you review or complete your first statement import.
               </div>
             )}
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div className="wealth-muted-block grid gap-3 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-medium">Before and after import impact</p>
@@ -2814,18 +3273,54 @@ export function Portfolio({
               ) : null}
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Replay read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{replayImpactLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{replayImpactDetail}</p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Remaining gap</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{replayGapLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{replayGapDetail}</p>
               </div>
             </div>
-            <div className="rounded-md border bg-background p-3">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${replayVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Replay verdict</p>
+                  <Badge variant={replayVerdictBadgeVariant}>{replayVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{replayVerdictDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best move now
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {!latestImportJob || !latestImportPreview
+                    ? "Save one reviewed import first"
+                    : latestImportReplayResult &&
+                        (latestImportReplayResult.appliedAssetCount > 0 ||
+                          latestImportReplayResult.appliedTransactionCount > 0)
+                      ? "Replay only if you still want that exact delta"
+                      : latestImportPreview.newAssets.length > 0
+                        ? "Inspect the gap before replaying habitually"
+                        : "Prefer reopen or reprocess over replay"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {!latestImportJob || !latestImportPreview
+                    ? "Once there is one saved review, this section starts telling you whether replay is still useful."
+                    : latestImportReplayResult &&
+                        (latestImportReplayResult.appliedAssetCount > 0 ||
+                          latestImportReplayResult.appliedTransactionCount > 0)
+                      ? "This saved payload still has live effect, so replay is justified only when you explicitly want those remaining changes."
+                      : latestImportPreview.newAssets.length > 0
+                        ? "Some mismatch still exists, but the cleaner next move may be reopen or reprocess before applying old rows again."
+                        : "The saved import has become more like audit memory than an operational update."}
+                </p>
+              </div>
+            </div>
+            <div className="wealth-inset p-3">
               <p className="text-sm font-medium text-foreground">How to read this</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 This is your “would this import still change anything?” check. Use it to avoid replaying old files that no longer improve the tracker in a meaningful way.
@@ -2856,7 +3351,7 @@ export function Portfolio({
                   />
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Before
                     </p>
@@ -2869,7 +3364,7 @@ export function Portfolio({
                       This is the baseline state the latest import had to merge into.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Payload
                     </p>
@@ -2883,7 +3378,7 @@ export function Portfolio({
                       {latestImportJob.rowWarnings.length === 1 ? "" : "s"}.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Replay now
                     </p>
@@ -2900,7 +3395,7 @@ export function Portfolio({
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs text-muted-foreground">Best move now</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">
                       {latestImportReplayResult &&
@@ -2917,7 +3412,7 @@ export function Portfolio({
                         : "If you mainly need to inspect or improve parser quality, reopening or reprocessing is cleaner than replaying the same rows again."}
                     </p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs text-muted-foreground">Decision rule</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">Replay delta, not habit</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2927,13 +3422,13 @@ export function Portfolio({
                 </div>
               </>
             ) : (
-              <div className="rounded-md border bg-background p-3 text-sm leading-6 text-muted-foreground">
+              <div className="wealth-empty-state">
                 Once an import is reviewed and saved, this section will compare that payload against the current tracker state.
               </div>
             )}
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
+          <div className="wealth-muted-block grid gap-3 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-medium">Holdings review board</p>
@@ -2946,12 +3441,12 @@ export function Portfolio({
               </Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Board read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{holdingsBoardReadLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{holdingsBoardReadDetail}</p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">What to optimize for</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Trust before tidiness</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2959,8 +3454,40 @@ export function Portfolio({
                 </p>
               </div>
             </div>
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${holdingsBoardVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Board verdict</p>
+                  <Badge variant={holdingsBoardVerdictBadgeVariant}>{holdingsBoardVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{holdingsBoardReadDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {filteredHoldings.length === 0
+                    ? "Reset or widen the current view"
+                    : manualHoldingsCount > 0
+                      ? "Clear manual data uncertainty first"
+                      : topAllocationBucket
+                        ? `Inspect ${topAllocationBucket.name} before smaller edits`
+                        : "Review by value, source, then detail quality"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {filteredHoldings.length === 0
+                    ? "Most empty states here come from a narrow filter, so recover the working set before deciding what to edit."
+                    : manualHoldingsCount > 0
+                      ? "When manually entered rows are visible, they usually deserve attention before cosmetic cleanup or low-value edits."
+                      : topAllocationBucket
+                        ? "The biggest visible bucket is usually where concentration, sizing, or stale detail will matter most."
+                        : "The visible set looks stable enough that you can review it with a predictable routine instead of reacting to noise."}
+                </p>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Scan first
                 </p>
@@ -2968,7 +3495,7 @@ export function Portfolio({
                   Start with the biggest positions and manual rows before worrying about small tidy-ups.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Edit carefully
                 </p>
@@ -2976,7 +3503,7 @@ export function Portfolio({
                   Invested value, units, and source quality usually matter more than making the list look cosmetically neat.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best move
                 </p>
@@ -3010,7 +3537,7 @@ export function Portfolio({
                 }
               />
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-[1.4fr_0.9fr_0.9fr]">
+            <div className="wealth-inset grid gap-3 p-3 md:grid-cols-[1.4fr_0.9fr_0.9fr]">
               <TextField
                 inputTestId="holdings-search"
                 label="Search holdings"
@@ -3024,7 +3551,7 @@ export function Portfolio({
                 value={holdingsSort}
                 onChange={setHoldingsSort}
               />
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   View summary
                 </p>
@@ -3036,11 +3563,37 @@ export function Portfolio({
                 </p>
               </div>
             </div>
+            {(holdingsSearch.trim() || holdingsSort !== "value-desc") && (
+              <div className="wealth-stat-tile flex flex-wrap items-center justify-between gap-2 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Showing{" "}
+                  <span className="font-medium text-foreground">{filteredHoldings.length}</span>{" "}
+                  holding{filteredHoldings.length === 1 ? "" : "s"}
+                  {holdingsSearch.trim() ? (
+                    <>
+                      {" "}matching <span className="font-medium text-foreground">{holdingsSearch.trim()}</span>
+                    </>
+                  ) : null}
+                  .
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setHoldingsSearch("");
+                    setHoldingsSort("value-desc");
+                  }}
+                >
+                  Reset view
+                </Button>
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-3">
               {portfolioOperatingLenses.map((lens) => (
                 <div
                   key={lens.label}
-                  className="rounded-md border border-border/70 bg-background p-3"
+                  className="wealth-inset p-3"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     {lens.label}
@@ -3053,7 +3606,7 @@ export function Portfolio({
           </div>
 
           {filteredHoldings.length === 0 ? (
-            <div className="grid gap-4 rounded-md border bg-background/80 p-4">
+            <div className="wealth-empty-state grid gap-4 p-4">
               <div>
                 <p className="text-sm font-medium text-foreground">Nothing matches this filter yet</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -3061,22 +3614,22 @@ export function Portfolio({
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Best first check</p>
-                  <p className="mt-1 text-sm font-medium">Clear the search</p>
+                  <p className="mt-1 text-sm font-medium">Reset the view</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Most empty states here come from a narrow query rather than missing holdings data.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Then narrow again</p>
                   <p className="mt-1 text-sm font-medium">Filter by one idea</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Use one fund family, one source, or one risk bucket at a time to make edits easier.
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <p className="text-xs text-muted-foreground">Best next move</p>
+                <div className="wealth-muted-block p-3">
+                  <p className="text-xs text-muted-foreground">Recovery path</p>
                   <p className="mt-1 text-sm font-medium">Reopen the import lane if needed</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     If the holding really should exist, review the latest import before editing manually.
@@ -3096,11 +3649,29 @@ export function Portfolio({
               asset,
               portfolioTotal,
             });
+            const holdingActionVerdictLabel =
+              holdingReview.nextStepLabel.toLowerCase().includes("verify") ||
+              holdingReview.nextStepLabel.toLowerCase().includes("check")
+                ? "Verification pass"
+                : holdingReview.nextStepLabel.toLowerCase().includes("trim") ||
+                    holdingReview.nextStepLabel.toLowerCase().includes("rebalance")
+                  ? "Position sizing review"
+                  : "Routine review";
+            const holdingActionVerdictToneClass =
+              holdingReview.badgeClassName.includes("rose")
+                ? "border-rose-500/30 bg-rose-500/5"
+                : holdingReview.badgeClassName.includes("amber")
+                  ? "border-amber-500/30 bg-amber-500/5"
+                  : holdingReview.badgeClassName.includes("sky")
+                    ? "border-sky-500/30 bg-sky-500/5"
+                    : "border-emerald-500/30 bg-emerald-500/5";
+            const holdingActionBadgeVariant =
+              holdingReview.badgeClassName.includes("emerald") ? "secondary" : "outline";
 
             return (
             <div
               key={`${asset.name}-${asset.type}-${index}`}
-              className="grid gap-3 rounded-md border bg-background/80 p-3 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.4)]"
+              className="wealth-data-card grid gap-3 p-3"
             >
               {editingIndex === index && editingAsset ? (
                 <HoldingFields asset={editingAsset} onChange={setEditingAsset} />
@@ -3129,31 +3700,39 @@ export function Portfolio({
                     </div>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                    <div className="rounded-md border bg-muted/20 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="text-muted-foreground">Why this row matters</p>
                       <p className="mt-1 font-medium text-foreground">{holdingReview.label}</p>
                       <p className="mt-2 leading-5 text-muted-foreground">{holdingReview.detail}</p>
                     </div>
-                    <div className="rounded-md border bg-muted/20 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="text-muted-foreground">Best next move</p>
                       <p className="mt-1 font-medium text-foreground">{holdingReview.nextStepLabel}</p>
                       <p className="mt-2 leading-5 text-muted-foreground">{holdingReview.nextStepDetail}</p>
                     </div>
                   </div>
+                  <div className={`grid gap-2 rounded-md border p-3 text-xs ${holdingActionVerdictToneClass}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium text-foreground">Row action verdict</p>
+                      <Badge variant={holdingActionBadgeVariant}>{holdingActionVerdictLabel}</Badge>
+                    </div>
+                    <p className="text-sm font-semibold text-foreground">{holdingReview.nextStepLabel}</p>
+                    <p className="leading-5 text-muted-foreground">{holdingReview.nextStepDetail}</p>
+                  </div>
                   <div className="grid gap-2 sm:grid-cols-4">
-                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="uppercase tracking-wide text-muted-foreground">Invested</p>
                       <p className="mt-1 font-medium text-foreground">{formatMoney(asset.investedValue)}</p>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="uppercase tracking-wide text-muted-foreground">Units</p>
                       <p className="mt-1 font-medium text-foreground">{asset.quantity.toFixed(2)}</p>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="uppercase tracking-wide text-muted-foreground">Current price</p>
                       <p className="mt-1 font-medium text-foreground">{formatMoney(asset.price)}</p>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                    <div className="wealth-muted-block p-3 text-xs">
                       <p className="uppercase tracking-wide text-muted-foreground">Unrealized P&L</p>
                       <p className="mt-1 font-medium text-foreground">
                         {formatMoney(asset.value - asset.investedValue)}
@@ -3201,24 +3780,21 @@ export function Portfolio({
       </Card>
 
       <div className="grid gap-5">
-        <Card
-          ref={allocationRef}
-          className="border-border/70 bg-card/95 shadow-sm"
-        >
+        <Card id="portfolio-allocation" ref={allocationRef} className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Current allocation</CardTitle>
+            <CardTitle>Read: allocation snapshot</CardTitle>
             <CardDescription>
               Compare your tracked mix with your suggested profile once enough holdings are captured.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-chart-frame">
                 <p className="text-xs text-muted-foreground">Allocation read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{allocationSectionReadLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{allocationSectionReadDetail}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-chart-frame">
                 <p className="text-xs text-muted-foreground">How to use this well</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Read buckets, then inspect holdings</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3226,7 +3802,39 @@ export function Portfolio({
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${allocationVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Allocation verdict</p>
+                  <Badge variant={allocationVerdictBadgeVariant}>{allocationVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{allocationSectionReadDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {chartData.length === 0
+                    ? "Capture more holdings before trusting the mix"
+                    : allocationLeadInsight
+                      ? `Inspect ${allocationLeadInsight.bucket} before smaller tweaks`
+                      : topAllocationBucket
+                        ? `Scan ${topAllocationBucket.name} for concentration drivers`
+                        : "Read the largest buckets before adjusting names"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {chartData.length === 0
+                    ? "A thin holding set can make the chart feel decisive before it is actually representative."
+                    : allocationLeadInsight
+                      ? "The clearest suggested-vs-current mismatch should lead this review pass, because it is the strongest signal on the page right now."
+                      : topAllocationBucket
+                        ? "Even without a strong profile mismatch, the largest visible bucket is still the fastest place to test for concentration risk."
+                        : "The mix is readable enough to scan methodically rather than reacting to one number in isolation."}
+                </p>
+              </div>
+            </div>
+            <div className="wealth-chart-frame">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3255,13 +3863,13 @@ export function Portfolio({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What changed
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{allocationChangeSummary}</p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What matters
                 </p>
@@ -3271,14 +3879,14 @@ export function Portfolio({
                     : "No dominant bucket can be judged yet because holdings coverage is still thin."}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What to do
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{allocationActionSummary}</p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-[1fr_0.9fr]">
               <div>
                 <p className="text-sm font-medium">What this chart is telling you</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -3289,7 +3897,7 @@ export function Portfolio({
                       : "This view is now good enough to judge whether the portfolio is leaning too hard into one part of the market."}
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -3299,7 +3907,7 @@ export function Portfolio({
                 </p>
               </div>
             </div>
-            <div className="h-72">
+            <div className="wealth-chart-frame h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -3324,7 +3932,7 @@ export function Portfolio({
             </ResponsiveContainer>
             </div>
             {chartData.length > 0 ? (
-              <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block grid gap-3 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-foreground">Bucket detail</p>
@@ -3350,12 +3958,12 @@ export function Portfolio({
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-data-card p-3">
                     <p className="text-xs text-muted-foreground">Focused bucket read</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">{focusedBucketReadLabel}</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">{focusedBucketReadDetail}</p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-data-card p-3">
                     <p className="text-xs text-muted-foreground">Best next move</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">
                       {activeAllocationBucketName ? "Inspect the top holding inside this bucket" : "Choose one bucket to inspect"}
@@ -3364,6 +3972,34 @@ export function Portfolio({
                       {activeAllocationBucketName
                         ? "Start with the largest holding in this bucket to decide whether the drift is caused by one position or by a broader pattern."
                         : "Once a bucket is selected, compare its top holdings before deciding whether the mix really needs action."}
+                    </p>
+                  </div>
+                </div>
+                <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${focusedBucketVerdictToneClass}`}>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-foreground">Focused bucket verdict</p>
+                      <Badge variant={focusedBucketVerdictBadgeVariant}>{focusedBucketVerdictLabel}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{focusedBucketReadDetail}</p>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Inspection move
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-foreground">
+                      {!activeAllocationBucketName
+                        ? "Choose one bucket first"
+                        : activeAllocationAssets.length === 1
+                          ? "Review the single name driving this bucket"
+                          : "Start with the largest holding, then compare the rest"}
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      {!activeAllocationBucketName
+                        ? "The chart becomes much more useful once you translate one bucket into the holdings sitting inside it."
+                        : activeAllocationAssets.length === 1
+                          ? "A bucket led by one holding is usually easier to reason about, but it can also hide concentration risk if left unquestioned."
+                          : "Use the top holding as the anchor, then decide whether the rest of the bucket confirms or softens the concentration read."}
                     </p>
                   </div>
                 </div>
@@ -3406,7 +4042,7 @@ export function Portfolio({
                     return (
                       <div
                         key={`${asset.name}-${asset.type}-${index}`}
-                        className="grid gap-3 rounded-md border bg-background p-3 text-xs md:grid-cols-[1.2fr_0.9fr_0.9fr_auto]"
+                        className="wealth-data-card grid gap-3 p-3 text-xs md:grid-cols-[1.2fr_0.9fr_0.9fr_auto]"
                       >
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -3416,7 +4052,7 @@ export function Portfolio({
                           <p className="mt-1 text-muted-foreground">
                             {asset.quantity.toFixed(2)} units at {formatMoney(asset.price)}
                           </p>
-                          <p className="mt-2 rounded-md border bg-muted/20 p-2 text-[11px] leading-5 text-muted-foreground">
+                          <p className="wealth-muted-block mt-2 p-2 text-[11px] leading-5 text-muted-foreground">
                             <span className="font-medium text-foreground">Bucket read</span>{" "}
                             {bucketRowRead}
                           </p>
@@ -3473,7 +4109,7 @@ export function Portfolio({
                 }
               />
             </div>
-            <div className="rounded-md border bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-foreground">Latest import impact</p>
                 {latestImportFlowMeta ? (
@@ -3491,23 +4127,24 @@ export function Portfolio({
           </CardContent>
         </Card>
         <Card
+          id="portfolio-health"
           ref={healthRef}
-          className="border-border/70 bg-card/95 shadow-sm"
+          className="wealth-panel-strong overflow-hidden"
         >
           <CardHeader>
-            <CardTitle>Portfolio health checks</CardTitle>
+            <CardTitle>Checks: portfolio health</CardTitle>
             <CardDescription>
-              Rule-based checks on concentration, detail quality, core allocation, and diversification.
+              Review concentration, detail quality, core allocation, and diversification before making changes.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs text-muted-foreground">Health read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{healthSectionReadLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{healthSectionReadDetail}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs text-muted-foreground">Best use of this section</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Fix the first issue that improves trust</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3515,7 +4152,39 @@ export function Portfolio({
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${healthVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Health verdict</p>
+                  <Badge variant={healthVerdictBadgeVariant}>{healthVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{healthVerdictDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {portfolioChecks.length === 0
+                    ? "Add more detail before trusting the health layer"
+                    : healthAttentionChecks.length === 0
+                      ? "Maintain the clean checks and review drift elsewhere"
+                      : latestImportJob?.providerConfidence === "low"
+                        ? "Verify source quality before taking bigger action"
+                        : `Clear ${healthAttentionChecks[0]?.label.toLowerCase() ?? "the first weak check"}`}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {portfolioChecks.length === 0
+                    ? "Without enough captured detail, the section is mostly telling you how to make itself more useful."
+                    : healthAttentionChecks.length === 0
+                      ? "No urgent health warning is dominating right now, so use this section more as a trust check than a call to action."
+                      : latestImportJob?.providerConfidence === "low"
+                        ? "Weak parser confidence can make a good check look stronger than the underlying data really is, so confirm the input before changing the portfolio around it."
+                        : "The highest-value move is usually fixing the first weak check that would improve allocation, gains, and planning reads everywhere else."}
+                </p>
+              </div>
+            </div>
+            <div className="wealth-muted-block p-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3544,7 +4213,7 @@ export function Portfolio({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What changed
                 </p>
@@ -3554,27 +4223,27 @@ export function Portfolio({
                     : "No major portfolio health warning is standing out from the current captured data."}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What matters
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{healthConfidenceSummary}</p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What to do
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{healthActionSummary}</p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-[1fr_0.9fr]">
               <div>
                 <p className="text-sm font-medium">How to read these checks</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   These aren’t predictions. They are operating checks that tell you whether the portfolio is detailed enough, diversified enough, and aligned enough to support better decisions.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Coaching read
                 </p>
@@ -3610,7 +4279,7 @@ export function Portfolio({
                 }
               />
             </div>
-            <div className="rounded-md border bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-foreground">Latest review quality</p>
                 {latestImportStats ? (
@@ -3624,7 +4293,7 @@ export function Portfolio({
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   First question
                 </p>
@@ -3632,7 +4301,7 @@ export function Portfolio({
                   Is the portfolio detailed enough that these checks deserve action, or are they still mostly asking for better coverage?
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Read this with
                 </p>
@@ -3640,7 +4309,7 @@ export function Portfolio({
                   Combine health checks with allocation and journal depth before treating any one warning as the full story.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -3655,21 +4324,22 @@ export function Portfolio({
           </CardContent>
         </Card>
         <Card
+          id="portfolio-alignment"
           ref={alignmentRef}
-          className="border-border/70 bg-card/95 shadow-sm"
+          className="wealth-panel-strong overflow-hidden"
         >
           <CardHeader>
-            <CardTitle>Allocation alignment</CardTitle>
-            <CardDescription>Compare your current mix with the suggested profile buckets.</CardDescription>
+            <CardTitle>Compare: profile alignment</CardTitle>
+            <CardDescription>Compare your current mix with the suggested profile buckets and spot the loudest drift first.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs text-muted-foreground">Alignment read</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{alignmentSectionReadLabel}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{alignmentSectionReadDetail}</p>
               </div>
-              <div className="rounded-md border bg-muted/20 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs text-muted-foreground">How to use this well</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Fix the loudest drift first</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3677,7 +4347,39 @@ export function Portfolio({
                 </p>
               </div>
             </div>
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${alignmentVerdictToneClass}`}>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Alignment verdict</p>
+                  <Badge variant={alignmentVerdictBadgeVariant}>{alignmentVerdictLabel}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{alignmentSectionReadDetail}</p>
+              </div>
+              <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Best operating move
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  {allocationInsights.length === 0
+                    ? "Capture more holdings before trusting the comparison"
+                    : alignmentMissingInsights.length > 0
+                      ? `Build support in ${alignmentMissingInsights[0].bucket}`
+                      : alignmentOverweightInsights.length > 0
+                        ? `Inspect ${alignmentOverweightInsights[0].bucket} before smaller tweaks`
+                        : "Maintain the current mix and review drift later"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  {allocationInsights.length === 0
+                    ? "Without enough live holdings, suggested-vs-current posture is still more hint than decision."
+                    : alignmentMissingInsights.length > 0
+                      ? "The clearest underweight bucket should lead this review, because filling missing core support usually improves the overall shape faster than trimming tiny overweights."
+                      : alignmentOverweightInsights.length > 0
+                        ? "The loudest overweight bucket deserves a holdings-level scan before you make smaller balancing decisions elsewhere."
+                        : "No single bucket is creating a loud mismatch right now, so this section is mostly confirmation rather than intervention."}
+                </p>
+              </div>
+            </div>
+            <div className="wealth-muted-block p-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3706,13 +4408,13 @@ export function Portfolio({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What changed
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{alignmentWhyNowSummary}</p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What matters
                 </p>
@@ -3724,21 +4426,21 @@ export function Portfolio({
                       : "The captured mix is not showing a loud profile mismatch right now."}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What to do
                 </p>
                 <p className="mt-2 text-sm leading-6 text-foreground">{alignmentActionSummary}</p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-[1fr_0.9fr]">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-[1fr_0.9fr]">
               <div>
                 <p className="text-sm font-medium">What alignment means here</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   Alignment is not about matching every bucket perfectly. It is about noticing where the real portfolio is underweight, overconcentrated, or missing the core shape suggested by your profile.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Suggested posture
                 </p>
@@ -3773,7 +4475,7 @@ export function Portfolio({
                 caption="Use this posture as the lens when you judge underweights and concentration."
               />
             </div>
-            <div className="rounded-md border bg-muted/30 p-4">
+            <div className="wealth-muted-block p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-foreground">Import-to-alignment bridge</p>
                 {latestImportStats ? (
@@ -3787,7 +4489,7 @@ export function Portfolio({
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   First question
                 </p>
@@ -3795,7 +4497,7 @@ export function Portfolio({
                   Which bucket is missing core support, and which one has quietly become too dominant for the current profile?
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Read this with
                 </p>
@@ -3803,7 +4505,7 @@ export function Portfolio({
                   Use this together with the holdings board so you can see which actual funds or positions are creating the drift.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -3813,7 +4515,7 @@ export function Portfolio({
               </div>
             </div>
             {allocationInsights.length ? (
-              <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block grid gap-3 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-foreground">Bucket alignment detail</p>
@@ -3839,12 +4541,12 @@ export function Portfolio({
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs text-muted-foreground">Focused bucket read</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">{alignmentFocusedReadLabel}</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">{alignmentFocusedReadDetail}</p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-inset p-3">
                     <p className="text-xs text-muted-foreground">Best next move</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">
                       {activeAlignmentInsight ? "Trace the drift to real holdings" : "Choose one bucket to inspect"}
@@ -3853,6 +4555,38 @@ export function Portfolio({
                       {activeAlignmentInsight
                         ? "Look at the holdings mapped into this bucket to decide whether the drift is caused by one oversized position, missing exposure, or incomplete coverage."
                         : "Once a bucket is selected, compare its holdings before deciding whether the posture really needs correction."}
+                    </p>
+                  </div>
+                </div>
+                <div className={`grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_0.9fr] ${alignmentFocusedVerdictToneClass}`}>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-foreground">Focused bucket verdict</p>
+                      <Badge variant={alignmentFocusedVerdictBadgeVariant}>{alignmentFocusedVerdictLabel}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{alignmentFocusedReadDetail}</p>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Inspection move
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-foreground">
+                      {!activeAlignmentInsight
+                        ? "Choose one bucket first"
+                        : activeAlignmentAssets.length === 0
+                          ? "Treat this as a missing-exposure bucket"
+                          : activeAlignmentAssets.length === 1
+                            ? "Inspect the single holding shaping this bucket"
+                            : "Compare the top holding against the rest of the bucket"}
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      {!activeAlignmentInsight
+                        ? "The comparison gets much more useful once one suggested bucket is translated into actual holdings."
+                        : activeAlignmentAssets.length === 0
+                          ? "No holdings currently map here, so the real decision is whether the profile still wants this exposure and how you would build it."
+                          : activeAlignmentAssets.length === 1
+                            ? "A single-name bucket is easy to read, but it can also hide concentration or incomplete coverage if left unquestioned."
+                            : "Use the largest mapped holding as the anchor, then decide whether the rest of the bucket confirms or softens the drift signal."}
                     </p>
                   </div>
                 </div>
@@ -3899,7 +4633,7 @@ export function Portfolio({
                           return (
                             <div
                               key={`${asset.name}-${asset.type}-${index}`}
-                              className="grid gap-3 rounded-md border bg-background p-3 text-xs md:grid-cols-[1.2fr_0.9fr_0.9fr_auto]"
+                              className="wealth-data-card grid gap-3 p-3 text-xs md:grid-cols-[1.2fr_0.9fr_0.9fr_auto]"
                             >
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -3909,7 +4643,7 @@ export function Portfolio({
                                 <p className="mt-1 text-muted-foreground">
                                   {asset.quantity.toFixed(2)} units at {formatMoney(asset.price)}
                                 </p>
-                                <p className="mt-2 rounded-md border bg-muted/20 p-2 text-[11px] leading-5 text-muted-foreground">
+                                <p className="wealth-muted-block mt-2 p-2 text-[11px] leading-5 text-muted-foreground">
                                   <span className="font-medium text-foreground">Alignment read</span>{" "}
                                   {alignmentRowRead}
                                 </p>
@@ -3935,7 +4669,7 @@ export function Portfolio({
                           );
                         })
                       ) : (
-                        <div className="rounded-md border bg-background p-3 text-sm leading-6 text-muted-foreground">
+                        <div className="wealth-empty-state">
                           No holdings currently map into this bucket, which is exactly why it is showing up as missing or underweight.
                         </div>
                       )}
@@ -3977,7 +4711,7 @@ export function Portfolio({
                 </div>
               ))
             ) : (
-              <div className="rounded-md border bg-muted/30 p-3 text-sm leading-6 text-muted-foreground">
+              <div className="wealth-empty-state">
                 Add holdings or imported transactions to compare your real mix with the suggested allocation buckets.
               </div>
             )}
@@ -4092,7 +4826,7 @@ function ImportReviewCard({
         : "The current review still needs operator attention before the imported rows should shape the live tracker.";
 
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3">
+    <div className="wealth-inset grid gap-3 p-3">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div>
           <p className="text-sm font-medium">Import review</p>
@@ -4105,7 +4839,7 @@ function ImportReviewCard({
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What we understood</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {review.detectedSource?.name ?? "Unknown provider table export"}
@@ -4114,7 +4848,7 @@ function ImportReviewCard({
             {review.documentKind} · {review.parseReadiness} · {review.providerConfidence} provider fit
           </p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What to check next</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{operatorFocus.label}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{operatorFocus.detail}</p>
@@ -4126,12 +4860,12 @@ function ImportReviewCard({
         <span>Text length {review.textLength}</span>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Import readiness</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{importReadinessLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{importReadinessDetail}</p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What looks usable</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {actionableHoldingCount} new holding{actionableHoldingCount === 1 ? "" : "s"}
@@ -4140,7 +4874,7 @@ function ImportReviewCard({
             These are the rows most likely to improve coverage instead of just restating what the tracker already knows.
           </p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Operator check</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {parserWarningCount} parser warning{parserWarningCount === 1 ? "" : "s"}
@@ -4149,6 +4883,29 @@ function ImportReviewCard({
             Fewer warnings usually means less manual cleanup before you trust the preview.
           </p>
         </div>
+      </div>
+      <div
+        className={`grid gap-2 rounded-md border p-3 text-xs ${
+          importReadinessLabel === "Ready to import"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : importReadinessLabel === "Review before import"
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-rose-500/30 bg-rose-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium text-foreground">Operator verdict</p>
+          <Badge variant={importReadinessLabel === "Ready to import" ? "secondary" : "outline"}>
+            {importReadinessLabel}
+          </Badge>
+        </div>
+        <p className="leading-5 text-muted-foreground">
+          {importReadinessLabel === "Ready to import"
+            ? "This review looks stable enough that the remaining work is mostly selective import discipline."
+            : importReadinessLabel === "Review before import"
+              ? "You are close, but a couple of warnings or duplicate signals still deserve a quick human pass."
+              : "Treat this as a cleanup pass first. The live tracker should not be shaped by this review yet."}
+        </p>
       </div>
       <div
         className={`grid gap-2 rounded-md border p-3 text-xs ${
@@ -4182,7 +4939,7 @@ function ImportReviewCard({
         </div>
       )}
       {review.normalizationApplied.length > 0 && (
-        <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <div className="wealth-muted-block grid gap-2 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Cleanup applied</p>
           {review.normalizationApplied.map((item) => (
             <p key={item}>{item}</p>
@@ -4190,23 +4947,23 @@ function ImportReviewCard({
         </div>
       )}
       {artifacts && (artifacts.beforeSnippet || artifacts.afterSnippet) && (
-        <div className="grid gap-3 rounded-md border bg-muted/30 p-3 md:grid-cols-2">
+        <div className="wealth-muted-block grid gap-3 p-3 md:grid-cols-2">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-foreground">Before cleanup</p>
-            <pre className="overflow-auto rounded-md bg-background p-2 text-[11px] leading-5 text-muted-foreground">
+            <pre className="wealth-data-card overflow-auto p-2 text-[11px] leading-5 text-muted-foreground">
               {artifacts.beforeSnippet || "No raw text saved."}
             </pre>
           </div>
           <div className="grid gap-2">
             <p className="text-xs font-medium text-foreground">After cleanup</p>
-            <pre className="overflow-auto rounded-md bg-background p-2 text-[11px] leading-5 text-muted-foreground">
+            <pre className="wealth-data-card overflow-auto p-2 text-[11px] leading-5 text-muted-foreground">
               {artifacts.afterSnippet || "No normalized text saved."}
             </pre>
           </div>
         </div>
       )}
       {artifacts?.rowWarnings.length ? (
-        <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <div className="wealth-muted-block grid gap-2 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Parser warnings</p>
           {artifacts.rowWarnings.map((warning) => (
             <p key={warning}>{warning}</p>
@@ -4217,7 +4974,7 @@ function ImportReviewCard({
         <ParsedImportRows artifacts={artifacts} />
       ) : null}
       {parserProfile && (
-        <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <div className="wealth-muted-block grid gap-2 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Provider parser profile</p>
           <p>Best inputs: {parserProfile.bestInputs.join(" · ")}</p>
           <p>Preferred headers: {parserProfile.preferredHeaders.join(", ")}</p>
@@ -4252,7 +5009,7 @@ function ImportDiagnosticsSummary({
   return (
     <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
       {items.map(([label, value]) => (
-        <div key={label} className="rounded-md border bg-muted/30 p-3">
+        <div key={label} className="wealth-stat-tile p-3">
           <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
           <p className="mt-1 text-sm font-semibold">{value}</p>
         </div>
@@ -4267,7 +5024,7 @@ function ParsedImportRows({
   artifacts: ImportDiagnostics;
 }) {
   return (
-    <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+    <div className="wealth-muted-block grid gap-2 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-foreground">Parsed holdings</p>
         <p className="text-xs text-muted-foreground">
@@ -4283,7 +5040,7 @@ function ParsedImportRows({
             return (
               <div
                 key={`${row.name}-${row.type}-${index}`}
-                className="grid gap-3 rounded-md border bg-background p-3 text-xs lg:grid-cols-[1.2fr_0.9fr_0.9fr_1fr]"
+                className="wealth-data-card grid gap-3 p-3 text-xs lg:grid-cols-[1.2fr_0.9fr_0.9fr_1fr]"
               >
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -4301,7 +5058,7 @@ function ParsedImportRows({
                     {row.type} · {row.source}
                   </p>
                   <p className="mt-2 leading-5 text-muted-foreground">{assessment.detail}</p>
-                  <div className="mt-3 rounded-md border bg-muted/30 p-2 text-[11px] leading-5 text-muted-foreground">
+                  <div className="wealth-muted-block mt-3 p-2 text-[11px] leading-5 text-muted-foreground">
                     <p className="font-medium text-foreground">Decision meaning</p>
                     <p className="mt-1">{rowDecision}</p>
                   </div>
@@ -4354,7 +5111,7 @@ function TransactionImportPreview({
         : "These parsed transaction rows look ready to strengthen the transaction timeline.";
 
   return (
-    <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+    <div className="wealth-muted-block grid gap-2 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-foreground">Parsed transactions</p>
         <p className="text-xs text-muted-foreground">
@@ -4362,7 +5119,7 @@ function TransactionImportPreview({
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-background p-3">
+        <div className="wealth-data-card p-3">
           <p className="text-xs text-muted-foreground">What this lane means</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {transactions.length > 0
@@ -4373,7 +5130,7 @@ function TransactionImportPreview({
             This is where statement activity like buys, sells, dividends, or transfers gets preserved for timeline and cash-flow review.
           </p>
         </div>
-        <div className="rounded-md border bg-background p-3">
+        <div className="wealth-data-card p-3">
           <p className="text-xs text-muted-foreground">Best next move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{transactionReadinessLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{transactionReadinessDetail}</p>
@@ -4410,14 +5167,14 @@ function TransactionImportPreview({
           return (
             <div
               key={transaction.id}
-              className="grid gap-2 rounded-md border bg-background p-3 text-xs md:grid-cols-[1.6fr_0.8fr_0.8fr_1fr]"
+              className="wealth-data-card grid gap-2 p-3 text-xs md:grid-cols-[1.6fr_0.8fr_0.8fr_1fr]"
             >
               <div>
                 <p className="font-medium text-foreground">{transaction.assetName}</p>
                 <p className="mt-1 text-muted-foreground">
                   {transaction.type} · {transaction.source}
                 </p>
-                <p className="mt-2 rounded-md border bg-muted/30 p-2 text-[11px] leading-5 text-muted-foreground">
+                <p className="wealth-muted-block mt-2 p-2 text-[11px] leading-5 text-muted-foreground">
                   <span className="font-medium text-foreground">Journal impact</span>{" "}
                   {transactionMeaning}
                 </p>
@@ -4525,7 +5282,7 @@ function ImportReconciliationCard({
         : "The imported rows mainly look like statement refreshes, so the main task is a quick spot-check rather than a full reconciliation.";
 
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3">
+    <div className="wealth-inset grid gap-3 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium">Reconciliation review</p>
@@ -4538,12 +5295,12 @@ function ImportReconciliationCard({
         </Badge>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What this lane means</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{mergeModeLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{mergeModeDetail}</p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Best next move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">Decide row by row</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4552,30 +5309,51 @@ function ImportReconciliationCard({
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-[1.2fr_repeat(3,minmax(0,1fr))]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Recommended move
           </p>
           <p className="mt-2 text-sm leading-6 text-foreground">{leadRecommendation}</p>
         </div>
-        <div className="rounded-md border bg-background p-3">
+        <div className="wealth-data-card p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Safe refresh
           </p>
           <p className="mt-2 text-lg font-semibold text-foreground">{safeRefreshCount}</p>
         </div>
-        <div className="rounded-md border bg-background p-3">
+        <div className="wealth-data-card p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Quick review
           </p>
           <p className="mt-2 text-lg font-semibold text-foreground">{quickReviewCount}</p>
         </div>
-        <div className="rounded-md border bg-background p-3">
+        <div className="wealth-data-card p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Manual review
           </p>
           <p className="mt-2 text-lg font-semibold text-foreground">{manualReviewCount}</p>
         </div>
+      </div>
+      <div
+        className={`grid gap-2 rounded-md border p-3 text-xs ${
+          manualReviewCount > 0
+            ? "border-rose-500/30 bg-rose-500/5"
+            : quickReviewCount > 0
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-emerald-500/30 bg-emerald-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium text-foreground">Duplicate verdict</p>
+          <Badge variant={manualReviewCount === 0 && quickReviewCount === 0 ? "secondary" : "outline"}>
+            {manualReviewCount > 0
+              ? "Manual review required"
+              : quickReviewCount > 0
+                ? "Quick review recommended"
+                : "Safe refresh lane"}
+          </Badge>
+        </div>
+        <p className="leading-5 text-muted-foreground">{leadRecommendation}</p>
       </div>
       <div className="grid gap-3">
         {classifiedRows.slice(0, 6).map((row) => {
@@ -4594,7 +5372,7 @@ function ImportReconciliationCard({
           return (
           <div
             key={`${row.existingAsset.name}-${row.existingAsset.type}`}
-            className="grid gap-3 rounded-md border bg-muted/30 p-3 lg:grid-cols-[1.1fr_1fr_1fr]"
+            className="wealth-muted-block grid gap-3 p-3 lg:grid-cols-[1.1fr_1fr_1fr]"
           >
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4613,7 +5391,7 @@ function ImportReconciliationCard({
                 Current tracker row vs latest import payload.
               </p>
               <p className="mt-2 text-xs leading-5 text-foreground/80">{row.note}</p>
-              <div className="mt-3 grid gap-2 rounded-md border bg-background p-2 text-[11px] leading-5 text-muted-foreground">
+              <div className="wealth-data-card mt-3 grid gap-2 p-2 text-[11px] leading-5 text-muted-foreground">
                 <div>
                   <p className="font-medium text-foreground">If you use imported row</p>
                   <p className="mt-1">{mergeOutcome}</p>
@@ -4642,7 +5420,7 @@ function ImportReconciliationCard({
                 </Button>
               </div>
             </div>
-            <div className="rounded-md border bg-background p-3 text-xs">
+            <div className="wealth-data-card p-3 text-xs">
               <p className="font-medium text-foreground">Tracked now</p>
               <div className="mt-2 grid gap-1 text-muted-foreground">
                 <span>Current {formatMoney(row.existingAsset.value)}</span>
@@ -4651,7 +5429,7 @@ function ImportReconciliationCard({
                 <span>Price {formatMoney(row.existingAsset.price)}</span>
               </div>
             </div>
-            <div className="rounded-md border bg-background p-3 text-xs">
+            <div className="wealth-data-card p-3 text-xs">
               <p className="font-medium text-foreground">Imported row</p>
               <div className="mt-2 grid gap-1 text-muted-foreground">
                 <span>
@@ -4737,18 +5515,18 @@ function CombinedImportOverviewCard({
           : "This pass is mostly about preserving transaction history instead of changing live holdings.";
 
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3">
+    <div className="wealth-inset grid gap-3 p-3">
       <div>
         <p className="text-sm font-medium">Import decision summary</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{overview.headline}</p>
       </div>
-      <div className="rounded-md border bg-muted/30 p-3">
+      <div className="wealth-stat-tile p-3">
         <p className="text-xs text-muted-foreground">Decision read</p>
         <p className="mt-1 text-sm font-semibold text-foreground">{decisionReadLabel}</p>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">{decisionReadDetail}</p>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Selected impact</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {overview.holdingsSelected} holding{overview.holdingsSelected === 1 ? "" : "s"} selected
@@ -4757,7 +5535,7 @@ function CombinedImportOverviewCard({
             {formatMoney(overview.selectedCurrentValue)} current value and {formatMoney(overview.selectedInvestedValue)} invested value are currently marked to import.
           </p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Primary action</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{primaryActionLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4766,7 +5544,7 @@ function CombinedImportOverviewCard({
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Transaction effect</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {overview.transactionsNew} new transaction{overview.transactionsNew === 1 ? "" : "s"}
@@ -4775,7 +5553,7 @@ function CombinedImportOverviewCard({
             {overview.transactionDuplicates} duplicate transaction{overview.transactionDuplicates === 1 ? "" : "s"} will be skipped if they already exist in the journal.
           </p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Why this summary matters</p>
           <p className="mt-1 text-sm font-semibold text-foreground">Import the delta, not the noise</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4785,7 +5563,7 @@ function CombinedImportOverviewCard({
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {items.map(([label, value]) => (
-          <div key={label} className="rounded-md border bg-muted/30 p-3">
+          <div key={label} className="wealth-stat-tile p-3">
             <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
             <p className="mt-1 text-sm font-semibold">{value}</p>
           </div>
@@ -5026,7 +5804,7 @@ function ImportPreview({
         : "The selected rows mostly behave like clean additions to the tracker.";
 
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3">
+    <div className="wealth-inset grid gap-3 p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">Import preview</p>
@@ -5041,7 +5819,7 @@ function ImportPreview({
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Preview meaning</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {preview.assets.length > 0
@@ -5052,7 +5830,7 @@ function ImportPreview({
             Duplicate rows are shown so you can decide whether to merge them into existing holdings or keep them separate.
           </p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Best next move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{previewActionLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -5061,18 +5839,45 @@ function ImportPreview({
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Selection read</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{selectionReadLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{selectionReadDetail}</p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What this lane controls</p>
           <p className="mt-1 text-sm font-semibold text-foreground">Live holding snapshot</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
             These selections shape the current holdings table, allocation mix, and live portfolio value after the import is applied.
           </p>
         </div>
+      </div>
+      <div
+        className={`grid gap-2 rounded-md border p-3 text-xs ${
+          preview.errors.length > 0
+            ? "border-rose-500/30 bg-rose-500/5"
+            : selectedCount === 0
+              ? "border-border bg-muted/30"
+              : preview.duplicates.length > 0
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-emerald-500/30 bg-emerald-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium text-foreground">Selection verdict</p>
+          <Badge
+            variant={
+              preview.errors.length > 0
+                ? "outline"
+                : selectedCount > 0 && preview.duplicates.length === 0
+                  ? "secondary"
+                  : "outline"
+            }
+          >
+            {previewActionLabel}
+          </Badge>
+        </div>
+        <p className="leading-5 text-muted-foreground">{previewActionDetail}</p>
       </div>
       {preview.errors.length > 0 && (
         <p className="text-xs text-destructive">{preview.errors.join(" ")}</p>
@@ -5100,7 +5905,7 @@ function ImportPreview({
           return (
           <div
             key={rowKey}
-            className="grid gap-3 rounded-md border bg-muted/20 px-3 py-2 text-xs sm:grid-cols-[auto_1fr_auto]"
+            className="wealth-data-card grid gap-3 px-3 py-2 text-xs sm:grid-cols-[auto_1fr_auto]"
           >
             <input
               aria-label={`Select ${asset.name}`}

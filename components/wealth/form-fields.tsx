@@ -18,7 +18,9 @@ export function NumberField({
 
   return (
     <div className="grid gap-2">
-      <Label htmlFor={fieldId}>{label}</Label>
+      <Label htmlFor={fieldId} className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </Label>
       <Input
         data-testid={inputTestId}
         id={fieldId}
@@ -46,7 +48,9 @@ export function TextField({
 
   return (
     <div className="grid gap-2">
-      <Label htmlFor={fieldId}>{label}</Label>
+      <Label htmlFor={fieldId} className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </Label>
       <Input
         data-testid={inputTestId}
         id={fieldId}
@@ -74,11 +78,13 @@ export function SelectField({
 
   return (
     <div className="grid gap-2">
-      <Label htmlFor={fieldId}>{label}</Label>
+      <Label htmlFor={fieldId} className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </Label>
       <select
         data-testid={selectTestId}
         id={fieldId}
-        className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="wealth-field"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -105,7 +111,9 @@ export function SegmentedControl({
 }) {
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <Label className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </Label>
       <div className="grid gap-2 sm:grid-cols-3">
         {options.map(([id, text]) => (
           <Button

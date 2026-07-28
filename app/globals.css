@@ -1,5 +1,591 @@
 @import "tailwindcss";
 
+@layer components {
+  .portfolio-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .portfolio-page > .wealth-panel,
+  .portfolio-page > .wealth-panel-strong,
+  .portfolio-page > .grid > .wealth-panel,
+  .portfolio-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .portfolio-page .wealth-chart-frame,
+  .portfolio-page .wealth-inset,
+  .portfolio-page .wealth-muted-block,
+  .portfolio-page .wealth-data-card,
+  .portfolio-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .portfolio-page [class*="rounded-md border bg-background"],
+  .portfolio-page [class*="rounded-lg border bg-background"],
+  .portfolio-page [class*="rounded-md border bg-background/80"],
+  .portfolio-page [class*="rounded-lg border bg-background/80"],
+  .portfolio-page [class*="rounded-md border bg-background/70"],
+  .portfolio-page [class*="rounded-lg border bg-background/70"],
+  .portfolio-page [class*="rounded-md border border-border/70 bg-background"],
+  .portfolio-page [class*="rounded-lg border border-border/70 bg-background"],
+  .portfolio-page [class*="rounded-md border border-border/75 bg-background"],
+  .portfolio-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .portfolio-page [class*="rounded-md border bg-muted/15"],
+  .portfolio-page [class*="rounded-lg border bg-muted/15"],
+  .portfolio-page [class*="rounded-md border bg-muted/20"],
+  .portfolio-page [class*="rounded-lg border bg-muted/20"],
+  .portfolio-page [class*="rounded-md border bg-muted/30"],
+  .portfolio-page [class*="rounded-lg border bg-muted/30"],
+  .portfolio-page [class*="rounded-md border bg-muted/40"],
+  .portfolio-page [class*="rounded-lg border bg-muted/40"],
+  .portfolio-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .portfolio-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .portfolio-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .portfolio-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .portfolio-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .portfolio-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .portfolio-page [class*="border-dashed bg-muted/20"],
+  .portfolio-page [class*="border-dashed bg-muted/25"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .onboarding-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .onboarding-page > .wealth-panel,
+  .onboarding-page > .wealth-panel-strong,
+  .onboarding-page > .grid > .wealth-panel,
+  .onboarding-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .onboarding-page .wealth-chart-frame,
+  .onboarding-page .wealth-inset,
+  .onboarding-page .wealth-muted-block,
+  .onboarding-page .wealth-data-card,
+  .onboarding-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .onboarding-page [class*="rounded-md border bg-background"],
+  .onboarding-page [class*="rounded-lg border bg-background"],
+  .onboarding-page [class*="rounded-md border bg-background/80"],
+  .onboarding-page [class*="rounded-lg border bg-background/80"],
+  .onboarding-page [class*="rounded-md border bg-background/70"],
+  .onboarding-page [class*="rounded-lg border bg-background/70"],
+  .onboarding-page [class*="rounded-md border border-border/70 bg-background"],
+  .onboarding-page [class*="rounded-lg border border-border/70 bg-background"],
+  .onboarding-page [class*="rounded-md border border-border/75 bg-background"],
+  .onboarding-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .onboarding-page [class*="rounded-md border bg-muted/15"],
+  .onboarding-page [class*="rounded-lg border bg-muted/15"],
+  .onboarding-page [class*="rounded-md border bg-muted/20"],
+  .onboarding-page [class*="rounded-lg border bg-muted/20"],
+  .onboarding-page [class*="rounded-md border bg-muted/30"],
+  .onboarding-page [class*="rounded-lg border bg-muted/30"],
+  .onboarding-page [class*="rounded-md border bg-muted/40"],
+  .onboarding-page [class*="rounded-lg border bg-muted/40"],
+  .onboarding-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .onboarding-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .onboarding-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .onboarding-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .onboarding-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .onboarding-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .onboarding-page [class*="border-dashed bg-muted/20"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .dashboard-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .dashboard-page > .wealth-panel,
+  .dashboard-page > .wealth-panel-strong,
+  .dashboard-page > .grid > .wealth-panel,
+  .dashboard-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .dashboard-page .wealth-chart-frame,
+  .dashboard-page .wealth-inset,
+  .dashboard-page .wealth-muted-block,
+  .dashboard-page .wealth-data-card,
+  .dashboard-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .dashboard-page [class*="rounded-md border bg-background"],
+  .dashboard-page [class*="rounded-lg border bg-background"],
+  .dashboard-page [class*="rounded-md border bg-background/80"],
+  .dashboard-page [class*="rounded-lg border bg-background/80"],
+  .dashboard-page [class*="rounded-md border bg-background/70"],
+  .dashboard-page [class*="rounded-lg border bg-background/70"],
+  .dashboard-page [class*="rounded-md border border-border/70 bg-background"],
+  .dashboard-page [class*="rounded-lg border border-border/70 bg-background"],
+  .dashboard-page [class*="rounded-md border border-border/75 bg-background"],
+  .dashboard-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .dashboard-page [class*="rounded-md border bg-muted/15"],
+  .dashboard-page [class*="rounded-lg border bg-muted/15"],
+  .dashboard-page [class*="rounded-md border bg-muted/20"],
+  .dashboard-page [class*="rounded-lg border bg-muted/20"],
+  .dashboard-page [class*="rounded-md border bg-muted/30"],
+  .dashboard-page [class*="rounded-lg border bg-muted/30"],
+  .dashboard-page [class*="rounded-md border bg-muted/40"],
+  .dashboard-page [class*="rounded-lg border bg-muted/40"],
+  .dashboard-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .dashboard-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .dashboard-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .dashboard-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .dashboard-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .dashboard-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .dashboard-page [class*="border-dashed bg-muted/20"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .market-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .market-page > .wealth-panel,
+  .market-page > .wealth-panel-strong,
+  .market-page > .grid > .wealth-panel,
+  .market-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .market-page .wealth-chart-frame,
+  .market-page .wealth-inset,
+  .market-page .wealth-muted-block,
+  .market-page .wealth-data-card,
+  .market-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .market-page [class*="rounded-md border bg-background"],
+  .market-page [class*="rounded-lg border bg-background"],
+  .market-page [class*="rounded-md border bg-background/80"],
+  .market-page [class*="rounded-lg border bg-background/80"],
+  .market-page [class*="rounded-md border bg-background/70"],
+  .market-page [class*="rounded-lg border bg-background/70"],
+  .market-page [class*="rounded-md border border-border/70 bg-background"],
+  .market-page [class*="rounded-lg border border-border/70 bg-background"],
+  .market-page [class*="rounded-md border border-border/75 bg-background"],
+  .market-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .market-page [class*="rounded-md border bg-muted/15"],
+  .market-page [class*="rounded-lg border bg-muted/15"],
+  .market-page [class*="rounded-md border bg-muted/20"],
+  .market-page [class*="rounded-lg border bg-muted/20"],
+  .market-page [class*="rounded-md border bg-muted/30"],
+  .market-page [class*="rounded-lg border bg-muted/30"],
+  .market-page [class*="rounded-md border bg-muted/40"],
+  .market-page [class*="rounded-lg border bg-muted/40"],
+  .market-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .market-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .market-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .market-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .market-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .market-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .market-page [class*="border-dashed bg-muted/20"],
+  .market-page [class*="border-dashed bg-muted/25"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .academy-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .academy-page > .wealth-panel,
+  .academy-page > .wealth-panel-strong,
+  .academy-page > .grid > .wealth-panel,
+  .academy-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .academy-page .wealth-chart-frame,
+  .academy-page .wealth-inset,
+  .academy-page .wealth-muted-block,
+  .academy-page .wealth-data-card,
+  .academy-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .academy-page [class*="rounded-md border bg-background"],
+  .academy-page [class*="rounded-lg border bg-background"],
+  .academy-page [class*="rounded-md border bg-background/80"],
+  .academy-page [class*="rounded-lg border bg-background/80"],
+  .academy-page [class*="rounded-md border bg-background/70"],
+  .academy-page [class*="rounded-lg border bg-background/70"],
+  .academy-page [class*="rounded-md border border-border/70 bg-background"],
+  .academy-page [class*="rounded-lg border border-border/70 bg-background"],
+  .academy-page [class*="rounded-md border border-border/75 bg-background"],
+  .academy-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .academy-page [class*="rounded-md border bg-muted/15"],
+  .academy-page [class*="rounded-lg border bg-muted/15"],
+  .academy-page [class*="rounded-md border bg-muted/20"],
+  .academy-page [class*="rounded-lg border bg-muted/20"],
+  .academy-page [class*="rounded-md border bg-muted/30"],
+  .academy-page [class*="rounded-lg border bg-muted/30"],
+  .academy-page [class*="rounded-md border bg-muted/40"],
+  .academy-page [class*="rounded-lg border bg-muted/40"],
+  .academy-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .academy-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .academy-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .academy-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .academy-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .academy-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .academy-page [class*="border-dashed bg-muted/20"],
+  .academy-page [class*="border-dashed bg-muted/25"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .settings-page {
+    @apply relative isolate text-foreground;
+    background: var(--panel-bg);
+  }
+
+  .settings-page > .wealth-panel,
+  .settings-page > .wealth-panel-strong,
+  .settings-page > .grid > .wealth-panel,
+  .settings-page > .grid > .wealth-panel-strong {
+    @apply rounded-xl overflow-hidden;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .settings-page .wealth-chart-frame,
+  .settings-page .wealth-inset,
+  .settings-page .wealth-muted-block,
+  .settings-page .wealth-data-card,
+  .settings-page .wealth-stat-tile {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .settings-page [class*="rounded-md border bg-background"],
+  .settings-page [class*="rounded-lg border bg-background"],
+  .settings-page [class*="rounded-md border bg-background/80"],
+  .settings-page [class*="rounded-lg border bg-background/80"],
+  .settings-page [class*="rounded-md border bg-background/70"],
+  .settings-page [class*="rounded-lg border bg-background/70"],
+  .settings-page [class*="rounded-md border border-border/70 bg-background"],
+  .settings-page [class*="rounded-lg border border-border/70 bg-background"],
+  .settings-page [class*="rounded-md border border-border/75 bg-background"],
+  .settings-page [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .settings-page [class*="rounded-md border bg-muted/15"],
+  .settings-page [class*="rounded-lg border bg-muted/15"],
+  .settings-page [class*="rounded-md border bg-muted/20"],
+  .settings-page [class*="rounded-lg border bg-muted/20"],
+  .settings-page [class*="rounded-md border bg-muted/30"],
+  .settings-page [class*="rounded-lg border bg-muted/30"],
+  .settings-page [class*="rounded-md border bg-muted/40"],
+  .settings-page [class*="rounded-lg border bg-muted/40"],
+  .settings-page [class*="rounded-md border border-border/70 bg-muted/15"],
+  .settings-page [class*="rounded-lg border border-border/70 bg-muted/15"],
+  .settings-page [class*="rounded-md border border-border/70 bg-muted/20"],
+  .settings-page [class*="rounded-lg border border-border/70 bg-muted/20"],
+  .settings-page [class*="rounded-md border border-border/75 bg-muted/30"],
+  .settings-page [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply rounded-lg;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .settings-page [class*="border-dashed bg-muted/20"],
+  .settings-page [class*="border-dashed bg-muted/25"] {
+    @apply rounded-lg border-dashed;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-workspace {
+    @apply text-foreground;
+  }
+
+  .wealth-panel {
+    @apply rounded-xl text-card-foreground backdrop-blur-sm;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .wealth-panel-strong {
+    @apply rounded-xl text-card-foreground backdrop-blur-sm;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .wealth-inset {
+    @apply rounded-lg p-4;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-muted-block {
+    @apply rounded-lg p-4;
+    background: var(--surface-subtle);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-stat-tile {
+    @apply rounded-lg p-4 flex min-h-[5.5rem] flex-col justify-between;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-field {
+    @apply h-10 rounded-lg border border-input bg-background/88 px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  .wealth-chart-frame {
+    @apply rounded-lg p-4;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-data-card {
+    @apply rounded-lg p-4;
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-empty-state {
+    @apply grid gap-3 rounded-lg border-dashed p-5 text-sm leading-6 text-muted-foreground;
+    background: var(--surface-muted);
+    border-color: var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-empty-state > p,
+  .wealth-empty-state > div,
+  .wealth-empty-state > ul {
+    @apply min-w-0;
+  }
+
+  .wealth-empty-state [class*="text-sm font-medium text-foreground"],
+  .wealth-empty-state [class*="font-semibold"] {
+    @apply tracking-normal;
+  }
+
+  .wealth-empty-state .wealth-data-card,
+  .wealth-empty-state .wealth-muted-block,
+  .wealth-empty-state .wealth-inset {
+    background: var(--surface-bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--surface-shadow);
+  }
+
+  .wealth-workspace [class*="rounded-md border bg-background"],
+  .wealth-workspace [class*="rounded-lg border bg-background"],
+  .wealth-workspace [class*="rounded-md border border-border/70 bg-background"],
+  .wealth-workspace [class*="rounded-lg border border-border/75 bg-background"] {
+    @apply border-border/75 bg-background/76 shadow-[0_10px_28px_-22px_rgba(15,23,42,0.28)] backdrop-blur-sm;
+  }
+
+  .wealth-workspace [class*="rounded-md border bg-muted/10"],
+  .wealth-workspace [class*="rounded-md border bg-muted/15"],
+  .wealth-workspace [class*="rounded-lg border bg-muted/15"],
+  .wealth-workspace [class*="rounded-md border bg-muted/20"],
+  .wealth-workspace [class*="rounded-lg border bg-muted/20"],
+  .wealth-workspace [class*="rounded-md border border-border/70 bg-muted/20"],
+  .wealth-workspace [class*="rounded-lg border border-border/75 bg-muted/20"],
+  .wealth-workspace [class*="rounded-md border bg-muted/30"],
+  .wealth-workspace [class*="rounded-lg border bg-muted/30"],
+  .wealth-workspace [class*="rounded-md border border-border/70 bg-muted/30"],
+  .wealth-workspace [class*="rounded-lg border border-border/75 bg-muted/30"] {
+    @apply border-border/75 bg-background/76 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.26)] backdrop-blur-sm;
+  }
+
+  .wealth-workspace [class*="rounded-md border bg-muted/40"],
+  .wealth-workspace [class*="rounded-lg border bg-muted/40"],
+  .wealth-workspace [class*="rounded-md border border-border/70 bg-muted/40"],
+  .wealth-workspace [class*="rounded-lg border border-border/75 bg-muted/40"] {
+    @apply border-border/75 bg-background/74 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.24)] backdrop-blur-sm;
+  }
+
+  .wealth-workspace [class*="bg-card/95"],
+  .wealth-workspace [class*="bg-card/94"],
+  .wealth-workspace [class*="bg-card/92"] {
+    @apply bg-card/94;
+  }
+
+  .wealth-workspace [class*="shadow-sm"] {
+    @apply shadow-[0_20px_52px_-30px_rgba(15,23,42,0.34)];
+  }
+
+  .wealth-workspace [class*="border-primary/20 bg-primary/5"],
+  .wealth-workspace [class*="border-primary/20 bg-primary/8"],
+  .wealth-workspace [class*="border-primary/30 bg-primary/5"],
+  .wealth-workspace [class*="border-primary/50 bg-primary/10"] {
+    @apply border-primary/25 bg-primary/8;
+  }
+
+  .wealth-workspace [class*="border-emerald-"],
+  .wealth-workspace [class*="border-sky-"],
+  .wealth-workspace [class*="border-violet-"],
+  .wealth-workspace [class*="border-amber-"] {
+    @apply border-primary/25;
+  }
+
+  .wealth-workspace [class*="bg-emerald-"],
+  .wealth-workspace [class*="bg-sky-"],
+  .wealth-workspace [class*="bg-violet-"],
+  .wealth-workspace [class*="bg-amber-"] {
+    @apply bg-primary/8;
+  }
+
+  .wealth-workspace [class*="text-emerald-"],
+  .wealth-workspace [class*="text-sky-"],
+  .wealth-workspace [class*="text-violet-"],
+  .wealth-workspace [class*="text-amber-"] {
+    @apply text-primary;
+  }
+
+  .wealth-workspace [class*="dark:text-emerald-"],
+  .wealth-workspace [class*="dark:text-sky-"],
+  .wealth-workspace [class*="dark:text-violet-"],
+  .wealth-workspace [class*="dark:text-amber-"] {
+    @apply text-primary;
+  }
+
+  .wealth-workspace [class*="bg-amber-50"],
+  .wealth-workspace [class*="text-amber-950"] {
+    @apply bg-primary/8 text-primary;
+  }
+
+  .wealth-workspace [class*="border-dashed bg-muted/20"],
+  .wealth-workspace [class*="border-dashed bg-muted/25"] {
+    @apply border-border/75 bg-background/66;
+  }
+}
+
 @theme inline {
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -60,33 +646,51 @@
   --chart-3: oklch(0.57 0.12 238);
   --chart-4: oklch(0.66 0.15 28);
   --chart-5: oklch(0.56 0.09 302);
+  --panel-bg: oklch(0.992 0.004 220);
+  --panel-border: color-mix(in oklab, var(--border) 88%, white);
+  --surface-bg: oklch(0.982 0.004 220);
+  --surface-subtle: oklch(0.972 0.006 220);
+  --surface-muted: oklch(0.968 0.006 220);
+  --surface-border: color-mix(in oklab, var(--border) 84%, white);
+  --panel-shadow: 0 20px 52px -30px rgba(15, 23, 42, 0.22);
+  --surface-shadow: 0 10px 28px -22px rgba(15, 23, 42, 0.14);
+  --card-hover: oklch(0.964 0.009 220);
 }
 
 .dark {
-  --background: oklch(0.15 0.014 246);
-  --foreground: oklch(0.93 0.01 220);
-  --card: oklch(0.19 0.014 246);
-  --card-foreground: oklch(0.93 0.01 220);
-  --popover: oklch(0.2 0.014 246);
-  --popover-foreground: oklch(0.93 0.01 220);
-  --primary: oklch(0.67 0.16 166);
-  --primary-foreground: oklch(0.15 0.014 246);
-  --secondary: oklch(0.24 0.015 244);
-  --secondary-foreground: oklch(0.93 0.01 220);
-  --muted: oklch(0.22 0.012 244);
-  --muted-foreground: oklch(0.72 0.012 230);
-  --accent: oklch(0.29 0.03 88);
-  --accent-foreground: oklch(0.92 0.014 90);
-  --destructive: oklch(0.64 0.2 27);
-  --destructive-foreground: oklch(0.96 0.01 220);
-  --border: oklch(0.28 0.012 242);
-  --input: oklch(0.28 0.012 242);
-  --ring: oklch(0.67 0.16 166);
-  --chart-1: oklch(0.68 0.17 166);
-  --chart-2: oklch(0.75 0.13 88);
-  --chart-3: oklch(0.71 0.1 238);
-  --chart-4: oklch(0.73 0.15 36);
-  --chart-5: oklch(0.7 0.1 302);
+  --background: #16242b;
+  --foreground: #eef5f7;
+  --card: #1d2d35;
+  --card-foreground: #eef5f7;
+  --popover: #22343d;
+  --popover-foreground: #eef5f7;
+  --primary: #4fc3a1;
+  --primary-foreground: #102126;
+  --secondary: #2b414b;
+  --secondary-foreground: #eef5f7;
+  --muted: #24363e;
+  --muted-foreground: #bfd0d6;
+  --accent: #5a7130;
+  --accent-foreground: #f1f7e2;
+  --destructive: #d96161;
+  --destructive-foreground: #fff3f3;
+  --border: #425b66;
+  --input: #425b66;
+  --ring: #4fc3a1;
+  --chart-1: #4fc3a1;
+  --chart-2: #d0b15f;
+  --chart-3: #7da4e8;
+  --chart-4: #db8f61;
+  --chart-5: #ad8ce2;
+  --panel-bg: #1d2d35;
+  --panel-border: color-mix(in oklab, var(--border) 92%, white 8%);
+  --surface-bg: #263841;
+  --surface-subtle: #2b3f49;
+  --surface-muted: #22343c;
+  --surface-border: color-mix(in oklab, var(--border) 94%, white 6%);
+  --panel-shadow: 0 18px 44px -28px rgba(0, 0, 0, 0.52);
+  --surface-shadow: 0 10px 24px -20px rgba(0, 0, 0, 0.38);
+  --card-hover: #30464f;
 }
 
 * {
@@ -96,32 +700,29 @@
 
 html {
   min-height: 100%;
-  background:
-    radial-gradient(circle at top left, color-mix(in oklab, var(--primary) 20%, transparent), transparent 34%),
-    radial-gradient(circle at top right, color-mix(in oklab, var(--chart-3) 14%, transparent), transparent 28%),
-    linear-gradient(180deg, color-mix(in oklab, var(--background) 92%, white), var(--background));
+  background: var(--background);
   scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, color-mix(in oklab, var(--primary) 16%, transparent), transparent 26%),
-    radial-gradient(circle at 85% 0%, color-mix(in oklab, var(--chart-3) 12%, transparent), transparent 24%),
-    linear-gradient(180deg, color-mix(in oklab, var(--background) 96%, white), var(--background));
-  color: var(--color-foreground);
+  background: var(--background);
+  color: var(--foreground);
   font-family: var(--font-sans);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 
-.dark html,
-.dark body {
-  background:
-    radial-gradient(circle at top left, color-mix(in oklab, var(--primary) 18%, transparent), transparent 24%),
-    radial-gradient(circle at top right, color-mix(in oklab, var(--chart-3) 14%, transparent), transparent 22%),
-    linear-gradient(180deg, oklch(0.17 0.015 246), var(--background));
+html.dark,
+body.dark {
+  background: var(--background);
+}
+
+html.dark body,
+html.dark .market-grid,
+html.dark .wealth-workspace {
+  background: var(--background);
 }
 
 button,
@@ -153,6 +754,6 @@ a {
     linear-gradient(to right, color-mix(in oklab, var(--border) 42%, transparent) 1px, transparent 1px),
     linear-gradient(to bottom, color-mix(in oklab, var(--border) 34%, transparent) 1px, transparent 1px);
   background-size: 36px 36px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.18), transparent 78%);
-  opacity: 0.24;
+  mask-image: none;
+  opacity: 0.14;
 }

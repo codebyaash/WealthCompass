@@ -649,6 +649,8 @@ function parseNumber(value: string | undefined) {
 
 function normalizeImportedText(value: string) {
   return decodeHtmlEntities(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<\/t[dh]>/gi, "\t")
     .replace(/<\/tr>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")

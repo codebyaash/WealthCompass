@@ -23,6 +23,20 @@ describe("resolveUploadedImportText", () => {
     assert.deepEqual(result.warnings, []);
   });
 
+  it("strips script tags from uploaded html before it reaches the preview flow", () => {
+    const result = resolveUploadedImportText({
+      extractedUpload: null,
+      fallbackPdfResult: null,
+      fileText:
+        '<table><tr><td>Axis Bluechip Fund</td></tr></table><script>alert("x")</script>',
+    });
+
+    assert.equal(result.text, "<table><tr><td>Axis Bluechip Fund</td></tr></table>");
+    assert.equal(result.usedOcr, false);
+    assert.equal(result.pageCount, 0);
+    assert.deepEqual(result.warnings, []);
+  });
+
   it("falls back to the pdf reader result or direct file text when the upload route is unavailable", () => {
     const pdfFallback = resolveUploadedImportText({
       extractedUpload: null,

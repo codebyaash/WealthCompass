@@ -988,6 +988,7 @@ describe("saveCloudSnapshot", () => {
           includeHoldingsWatch: false,
           pollingIntervalSeconds: 300,
           preferredSource: "fallback",
+          watchlist: [],
         },
         transactions: [
           {

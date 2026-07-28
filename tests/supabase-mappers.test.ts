@@ -351,6 +351,7 @@ describe("market preference mappers", () => {
       includeHoldingsWatch: true,
       pollingIntervalSeconds: 60,
       preferredSource: "alpha-vantage",
+      watchlist: [],
     };
 
     assert.deepEqual(
@@ -365,6 +366,7 @@ describe("market preference mappers", () => {
         includeHoldingsWatch: false,
         pollingIntervalSeconds: 300,
         preferredSource: defaultSnapshot.marketPreferences.preferredSource,
+        watchlist: [],
       },
     );
 

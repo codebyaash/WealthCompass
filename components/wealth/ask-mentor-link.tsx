@@ -30,7 +30,7 @@ export function AskMentorLink({
       type="button"
       variant="outline"
       size="sm"
-      className={className}
+      className={className ?? "gap-2"}
       onClick={() =>
         onOpenMentor({
           contextLabel: contextLabel ?? label,

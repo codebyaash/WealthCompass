@@ -32,6 +32,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageNavigatorBar } from "@/components/wealth/page-navigator-bar";
 import {
   buildCombinedImportOverview,
   type CombinedImportOverview,
@@ -76,6 +77,7 @@ import type {
   EmailIngestionResult,
 } from "@/lib/email-ingestion";
 import { normalizeImportTextForProvider } from "@/lib/provider-import-normalizers";
+import { defaultMarketPreferences } from "@/lib/sample-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { getProviderParserProfile } from "@/lib/provider-parser-profiles";
 import { parseImportedTransactions } from "@/lib/transaction-import";
@@ -166,7 +168,7 @@ export function DataSettings({
   onUpdateMarketPreferences,
   profile,
   riskHistory,
-  marketPreferences,
+  marketPreferences = defaultMarketPreferences,
   syncMessage,
   syncStatus,
   transactions,
@@ -203,6 +205,12 @@ export function DataSettings({
   transactions: PortfolioTransaction[];
   userEmail: string;
 }) {
+  const [navigatorValue, setNavigatorValue] = useState("settings-connected-sources");
+  const safeMarketPreferences = {
+    ...defaultMarketPreferences,
+    ...marketPreferences,
+    watchlist: marketPreferences?.watchlist ?? defaultMarketPreferences.watchlist,
+  };
   const [actionMessage, setActionMessage] = useState("Full workspace export is ready.");
   const [jobCorrectionDrafts, setJobCorrectionDrafts] = useState<Record<string, string>>({});
   const [draftIntegration, setDraftIntegration] = useState<IntegrationConnection>(
@@ -250,6 +258,9 @@ export function DataSettings({
   const connectedSourcesSectionRef = useRef<HTMLDivElement | null>(null);
   const importHistorySectionRef = useRef<HTMLDivElement | null>(null);
   const syncPlanSectionRef = useRef<HTMLDivElement | null>(null);
+  const safetyExportSectionRef = useRef<HTMLDivElement | null>(null);
+  const restoreSectionRef = useRef<HTMLDivElement | null>(null);
+  const resetSectionRef = useRef<HTMLDivElement | null>(null);
   const syncInboxActionRef = useRef<(provider: InboxProvider) => Promise<void>>(async () => {});
   const syncBrokerActionRef = useRef<() => Promise<void>>(async () => {});
   const integrationActionRef = useRef<
@@ -551,8 +562,8 @@ export function DataSettings({
       title: "Sync plan",
     },
     {
-      badge: marketPreferences.watchlist.length
-        ? `${marketPreferences.watchlist.length} tracked`
+      badge: safeMarketPreferences.watchlist.length
+        ? `${safeMarketPreferences.watchlist.length} tracked`
         : "set once",
       detail: "Tune market refresh behavior and saved watch preferences.",
       onClick: () => {
@@ -561,6 +572,57 @@ export function DataSettings({
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       },
       title: "Market controls",
+    },
+  ];
+  type SettingsPriorityAction =
+    | "connected-sources"
+    | "import-history"
+    | "sync-plan"
+    | "safety-export"
+    | "restore"
+    | "reset"
+    | "market-controls";
+  const settingsPriorityQueue = [
+    {
+      title:
+        operationsSummary.attentionCount > 0
+          ? `Fix ${operationsSummary.attentionCount} source issue${operationsSummary.attentionCount === 1 ? "" : "s"} first`
+          : "Review connector lanes",
+      detail:
+        operationsSummary.attentionCount > 0
+          ? "Source instability comes before growth. Clean the feed pressure before trusting deeper portfolio or market reads."
+          : "When the lanes are steady, this section is the best place to confirm what is active, healthy, and due next.",
+      action: operationsSummary.attentionCount > 0
+        ? ("import-history" as SettingsPriorityAction)
+        : ("connected-sources" as SettingsPriorityAction),
+    },
+    {
+      title:
+        importJobSummary.openCount > 0
+          ? `Clear ${importJobSummary.openCount} open review${importJobSummary.openCount === 1 ? "" : "s"}`
+          : "Rehearse the next provider flow",
+      detail:
+        importJobSummary.openCount > 0
+          ? "An open review queue is a stronger warning than a missing connector. Finish staged decisions before expanding setup."
+          : "If the queue is clear, use rehearsal to pressure-test the next source before you let it touch the workspace.",
+      action: importJobSummary.openCount > 0
+        ? ("import-history" as SettingsPriorityAction)
+        : ("sync-plan" as SettingsPriorityAction),
+    },
+    {
+      title: "Freeze a safety checkpoint",
+      detail:
+        "Before resets, bulk imports, or workflow experiments, save one clean checkpoint so recovery stays boring and fast.",
+      action: "safety-export" as SettingsPriorityAction,
+    },
+    {
+      title: userEmail ? "Tune market controls" : "Check restore and reset tools",
+      detail: userEmail
+        ? "Once feeds and reviews are in range, the next calm move is to tighten watch preferences and saved market behavior."
+        : "In local mode, restore and reset controls are the main recovery rail if a test run goes sideways.",
+      action: userEmail
+        ? ("market-controls" as SettingsPriorityAction)
+        : ("restore" as SettingsPriorityAction),
     },
   ];
   const settingsStatusCards = [
@@ -606,6 +668,32 @@ export function DataSettings({
       value: userEmail ? "Cloud ready" : "Local only",
     },
   ];
+  const settingsVerdictLabel =
+    operationsSummary.attentionCount > 0
+      ? "The workspace is usable, but source trust matters more than adding anything new right now."
+      : importJobSummary.openCount > 0
+        ? "Your setup is healthy enough to work, but the review queue should close before the connector surface expands."
+        : operationsSummary.activeCount > 0
+          ? "The control center is in a good operating state, so the next gains come from calmer cadence and cleaner habits."
+          : "The setup is still early, so one dependable feed is worth more than a broad connector footprint.";
+  const settingsVerdictToneClass =
+    operationsSummary.attentionCount > 0
+      ? "border-amber-500/30 bg-amber-500/10"
+      : importJobSummary.openCount > 0
+        ? "border-sky-500/30 bg-sky-500/10"
+        : operationsSummary.activeCount > 0
+          ? "border-emerald-500/30 bg-emerald-500/10"
+          : "border-border/70 bg-muted/20";
+  const settingsVerdictBadgeVariant =
+    operationsSummary.attentionCount > 0 || importJobSummary.openCount > 0 ? "outline" : "secondary";
+  const settingsVerdictDetail =
+    operationsSummary.attentionCount > 0
+      ? "A connector that keeps asking for manual rescue usually deserves attention before any new live lane gets added."
+      : importJobSummary.openCount > 0
+        ? "Open reviews are still unfinished decisions. Closing them keeps the portfolio, journal, and sync plan trustworthy."
+        : operationsSummary.activeCount > 0
+          ? "This is the point where boring process wins: steady cadence, clean reviews, and fresh checkpoints."
+          : "The shortest path to a dependable workspace is one feed, one proof cycle, and one clean export.";
   const connectorLaneMix = useMemo(
     () => ({
       brokerConnectedCount: brokerConnections.filter(
@@ -634,10 +722,54 @@ export function DataSettings({
     () => ({
       charCount: exportedSnapshot.length,
       lineCount: exportedSnapshot.split("\n").length,
-      watchlistCount: marketPreferences.watchlist.length,
+      watchlistCount: safeMarketPreferences.watchlist.length,
     }),
-    [exportedSnapshot, marketPreferences.watchlist.length],
+    [exportedSnapshot, safeMarketPreferences.watchlist.length],
   );
+  const connectorVerdictLabel =
+    importJobSummary.openCount > 0
+      ? "The connector stack should pause here until the review queue is cleaner."
+      : operationsSummary.attentionCount > 0
+        ? "Your lanes exist, but one unstable source is stronger signal than another successful connection."
+        : connectorLaneMix.autoLaneCount > 0
+          ? "The connector setup is mature enough to favor cadence and proof over expansion."
+          : "You are still proving the first lanes, so review quality matters more than total coverage.";
+  const connectorVerdictToneClass =
+    importJobSummary.openCount > 0 || operationsSummary.attentionCount > 0
+      ? "border-amber-500/30 bg-amber-500/10"
+      : connectorLaneMix.autoLaneCount > 0
+        ? "border-emerald-500/30 bg-emerald-500/10"
+        : "border-border/70 bg-muted/20";
+  const connectorVerdictBadgeVariant =
+    importJobSummary.openCount > 0 || operationsSummary.attentionCount > 0 ? "outline" : "secondary";
+  const connectorVerdictDetail =
+    importJobSummary.openCount > 0
+      ? "Until staged imports are resolved, every extra connector increases noise faster than it increases confidence."
+      : operationsSummary.attentionCount > 0
+        ? "Use the active lanes as evidence. Fix the one that needs help before trusting a wider sync perimeter."
+        : connectorLaneMix.autoLaneCount > 0
+          ? "A boring connector stack is a strong one. Once proof is in place, the next useful move is usually maintenance."
+          : "One rehearsed lane with a clean first import beats several half-trusted connectors.";
+  const controlsVerdictLabel =
+    safeMarketPreferences.watchlist.length === 0
+      ? "The controls are functional, but the market layer is still too generic until the watchlist reflects real sectors."
+      : marketPreferences.preferredSource === "alpha-vantage" && marketPreferences.autoRefresh
+        ? "This is the liveliest market posture, so only keep it if fresh motion genuinely helps decisions."
+        : "The controls are in a calm, trustworthy posture that fits demos and repeat review sessions well.";
+  const controlsVerdictToneClass =
+    safeMarketPreferences.watchlist.length === 0
+      ? "border-amber-500/30 bg-amber-500/10"
+      : marketPreferences.preferredSource === "alpha-vantage" && marketPreferences.autoRefresh
+        ? "border-sky-500/30 bg-sky-500/10"
+        : "border-emerald-500/30 bg-emerald-500/10";
+  const controlsVerdictBadgeVariant =
+    safeMarketPreferences.watchlist.length === 0 ? "outline" : "secondary";
+  const controlsVerdictDetail =
+    safeMarketPreferences.watchlist.length === 0
+      ? "A saved watchlist turns the market page from a broad scan into a repeatable lens."
+      : marketPreferences.preferredSource === "alpha-vantage" && marketPreferences.autoRefresh
+        ? "Live polling is only a win when the feed is configured well enough that movement feels informative rather than distracting."
+        : "Slower or fallback market posture is usually the easiest one to trust during planning, review, and walkthroughs.";
   const settingsOperatingLenses = [
     {
       label: "Source posture",
@@ -793,6 +925,67 @@ export function DataSettings({
 
   function scrollToSection(ref: { current: HTMLDivElement | null }) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const settingsNavigatorOptions = [
+    ["settings-connected-sources", "Sources: connected feeds"],
+    ["settings-import-history", "History: import reviews"],
+    ["settings-sync-plan", "Workflow: sync plan"],
+    ["settings-broker", "Setup: broker connectors"],
+    ["settings-inbox", "Setup: inbox connectors"],
+    ["settings-email-intake", "Setup: email intake"],
+    ["settings-market-controls", "Controls: live market"],
+    ["settings-export-preview", "Safety: export preview"],
+  ] as Array<[string, string]>;
+  function handleSettingsNavigatorChange(value: string) {
+    setNavigatorValue(value);
+    if (value === "settings-connected-sources") {
+      scrollToSection(connectedSourcesSectionRef);
+      return;
+    }
+    if (value === "settings-import-history") {
+      scrollToSection(importHistorySectionRef);
+      return;
+    }
+    if (value === "settings-sync-plan") {
+      scrollToSection(syncPlanSectionRef);
+      return;
+    }
+    if (value === "settings-broker") {
+      scrollToSection(brokerSectionRef);
+      return;
+    }
+    if (value === "settings-inbox") {
+      scrollToSection(inboxSectionRef);
+      return;
+    }
+    if (value === "settings-email-intake") {
+      scrollToSection(emailIntakeSectionRef);
+      return;
+    }
+    document.getElementById(value)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleSettingsPriorityAction(action: SettingsPriorityAction) {
+    if (action === "market-controls") {
+      document
+        .getElementById("settings-market-controls")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const focusMap: Record<
+      Exclude<SettingsPriorityAction, "market-controls">,
+      { current: HTMLDivElement | null }
+    > = {
+      "connected-sources": connectedSourcesSectionRef,
+      "import-history": importHistorySectionRef,
+      "reset": resetSectionRef,
+      "restore": restoreSectionRef,
+      "safety-export": safetyExportSectionRef,
+      "sync-plan": syncPlanSectionRef,
+    };
+
+    scrollToSection(focusMap[action]);
   }
 
   function handleConnectorPriorityAction(action: ConnectorPriorityAction) {
@@ -1770,8 +1963,8 @@ export function DataSettings({
   });
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-      <Card>
+    <div className="settings-page grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+          <Card id="settings-market-controls" className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Data control center</CardTitle>
           <CardDescription>
@@ -1779,7 +1972,7 @@ export function DataSettings({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-4 rounded-md border bg-muted/30 p-4">
+          <div className="wealth-muted-block grid gap-4 p-4">
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary">{syncStatus}</Badge>
               <Badge variant="outline">{userEmail || "Browser workspace"}</Badge>
@@ -1798,7 +1991,7 @@ export function DataSettings({
                     const Icon = item.icon;
 
                     return (
-                      <div key={item.title} className="rounded-md border bg-background p-3">
+                      <div key={item.title} className="wealth-inset p-3">
                         <div className="flex items-center gap-2">
                           <Icon className="h-4 w-4 text-primary" />
                           <p className="text-sm font-medium">{item.title}</p>
@@ -1811,14 +2004,14 @@ export function DataSettings({
               </div>
 
               <div className="grid gap-3">
-                <div className="rounded-md border bg-background p-4">
+                <div className="wealth-inset p-4">
                   <p className="text-sm font-medium">Best next move</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {settingsTrack?.items[0] ??
                       "Add one dependable source, then use import review to keep the portfolio clean."}
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-4">
+                <div className="wealth-inset p-4">
                   <p className="text-sm font-medium">Pipeline read</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {operationsSummary.attentionCount > 0
@@ -1830,16 +2023,16 @@ export function DataSettings({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
-            <div className="rounded-md border bg-background p-4">
+          <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
+            <div className="wealth-inset p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Use this page for
+                Use this lane for
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">
                 Connecting feeds, reviewing staged imports, protecting the workspace, and keeping sync behavior understandable.
               </p>
             </div>
-            <div className="rounded-md border bg-background p-4">
+            <div className="wealth-inset p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Watch closely
               </p>
@@ -1847,17 +2040,25 @@ export function DataSettings({
                 A connected source is only useful if the review lane stays clean. Bad automation is just faster confusion.
               </p>
             </div>
-            <div className="rounded-md border bg-background p-4">
+            <div className="wealth-inset p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best operating rhythm
+                Read this with
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">
                 Add one dependable source, rehearse it once, review the first output carefully, then let cadence take over.
               </p>
             </div>
           </div>
+          <div className={`rounded-md border p-4 ${settingsVerdictToneClass}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-foreground">Settings verdict</p>
+              <Badge variant={settingsVerdictBadgeVariant}>{syncStatus}</Badge>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-foreground">{settingsVerdictLabel}</p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{settingsVerdictDetail}</p>
+          </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div className="wealth-muted-block grid gap-3 p-4">
             <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
               <div>
                 <p className="text-sm font-medium">Control tower</p>
@@ -1866,6 +2067,22 @@ export function DataSettings({
                 </p>
               </div>
               <Badge variant="outline">Settings navigator</Badge>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {settingsPriorityQueue.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => handleSettingsPriorityAction(item.action)}
+                  className="wealth-data-card p-4 text-left transition hover:border-primary/40 hover:bg-primary/5"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Next move
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.detail}</p>
+                </button>
+              ))}
             </div>
             <div className="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1913,7 +2130,7 @@ export function DataSettings({
             </div>
             <div className="rounded-md border border-border/70 bg-background p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Working order
+                Reading order
               </p>
               <ul className="mt-3 grid gap-2 text-sm leading-6 text-foreground">
                 {settingsWorkingOrder.map((item) => (
@@ -1923,7 +2140,7 @@ export function DataSettings({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div className="wealth-muted-block grid gap-3 p-4">
             <div>
               <p className="text-sm font-medium">MVP setup checklist</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -1932,7 +2149,7 @@ export function DataSettings({
             </div>
             <div className="grid gap-3">
               {setupChecklist.map((item) => (
-                <div key={item.label} className="rounded-md border bg-background p-3">
+                  <div key={item.label} className="wealth-inset p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-medium">{item.label}</p>
                     <Badge variant={item.done ? "secondary" : "outline"}>
@@ -1945,7 +2162,7 @@ export function DataSettings({
             </div>
           </div>
 
-          <div className="rounded-md border bg-muted/30 p-4">
+          <div className="wealth-muted-block p-4">
             <div className="flex items-center gap-2">
               <Cloud className="h-4 w-4 text-primary" />
               <p className="text-sm font-medium">Sync status</p>
@@ -1957,7 +2174,7 @@ export function DataSettings({
             <p className="mt-3 text-sm leading-6 text-muted-foreground">{syncMessage}</p>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div ref={safetyExportSectionRef} className="wealth-muted-block grid gap-3 p-4">
             <div>
               <p className="text-sm font-medium">Safety export</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -1965,22 +2182,22 @@ export function DataSettings({
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Best use</p>
                 <p className="mt-1 text-sm font-medium">Freeze a clean checkpoint</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Export before major imports, demo walkthroughs, or allocation experiments.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">What it saves</p>
                 <p className="mt-1 text-sm font-medium">Portfolio plus learning state</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   The file captures not just holdings, but risk context, goals, and workflow history too.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
-                <p className="text-xs text-muted-foreground">Best next move</p>
+              <div className="wealth-inset p-3">
+                <p className="text-xs text-muted-foreground">Recovery habit</p>
                 <p className="mt-1 text-sm font-medium">Keep one stable demo copy</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   A clean export makes it easy to recover from rough test imports without losing momentum.
@@ -1994,13 +2211,13 @@ export function DataSettings({
               </Button>
               <Button type="button" variant="outline" onClick={handleDownloadSnapshot}>
                 <Download className="h-4 w-4" />
-                Download file
+                Download checkpoint
               </Button>
             </div>
             <p className="text-xs leading-5 text-muted-foreground">{actionMessage}</p>
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div ref={restoreSectionRef} className="wealth-muted-block grid gap-3 p-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
                 <p className="text-sm font-medium">Restore from checkpoint</p>
@@ -2010,26 +2227,26 @@ export function DataSettings({
               </div>
               <Button type="button" variant="outline" onClick={handleImportWorkspace}>
                 <Upload className="h-4 w-4" />
-                Restore file
+                Restore checkpoint
               </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Use this when</p>
                 <p className="mt-1 text-sm font-medium">You want a full restore</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Imports replace the current working posture more broadly than a single portfolio upload.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Check before restore</p>
                 <p className="mt-1 text-sm font-medium">Source and recency</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Confirm the file belongs to the right investor profile and includes the latest goal state.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
-                <p className="text-xs text-muted-foreground">Best next move</p>
+              <div className="wealth-inset p-3">
+                <p className="text-xs text-muted-foreground">Safest sequence</p>
                 <p className="mt-1 text-sm font-medium">Export before restoring</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   That gives you an immediate rollback point if you only meant to compare states.
@@ -2044,7 +2261,7 @@ export function DataSettings({
             />
           </div>
 
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+          <div ref={resetSectionRef} className="wealth-muted-block grid gap-3 p-4">
             <div>
               <p className="text-sm font-medium">Reset and restore</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -2052,22 +2269,22 @@ export function DataSettings({
               </p>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Portfolio reset</p>
                 <p className="mt-1 text-sm font-medium">Narrow cleanup</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Use this when imports or manual edits need a quick holdings-only reset.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
+              <div className="wealth-inset p-3">
                 <p className="text-xs text-muted-foreground">Demo workspace reset</p>
                 <p className="mt-1 text-sm font-medium">Full workspace restore</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   This is the fastest path back to a polished walkthrough state across pages.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-3">
-                <p className="text-xs text-muted-foreground">Use carefully</p>
+              <div className="wealth-inset p-3">
+                <p className="text-xs text-muted-foreground">Safety rule</p>
                 <p className="mt-1 text-sm font-medium">Snapshot first</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Reset actions are safest when paired with a fresh export you can restore in seconds.
@@ -2088,10 +2305,17 @@ export function DataSettings({
         </CardContent>
       </Card>
 
+      <PageNavigatorBar
+        label="Settings navigator"
+        options={settingsNavigatorOptions}
+        value={navigatorValue}
+        onChange={handleSettingsNavigatorChange}
+      />
+
       <div className="grid gap-5">
-        <Card>
+          <Card id="settings-export-preview" className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Workspace snapshot</CardTitle>
+            <CardTitle>Safety: workspace snapshot</CardTitle>
             <CardDescription>
               A quick read on what is already saved, tracked, and ready to move with the account.
             </CardDescription>
@@ -2111,11 +2335,11 @@ export function DataSettings({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Pipeline pulse</CardTitle>
+            <CardTitle>Workflow: pipeline pulse</CardTitle>
             <CardDescription>
-              See which feeds are healthy, which ones are due, and which imports still need your sign-off.
+              See which feeds are healthy, which ones are due, and which imports still need review before they change the workspace.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -2128,20 +2352,20 @@ export function DataSettings({
               <MetricMini label="Open imports" value={`${importJobSummary.openCount}`} />
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-sm font-medium">Connector queue</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   Next scheduled activity {formatSyncTimeLabel(schedulerPlan.nextRunAt)} with {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} waiting on a first check and {schedulerPlan.pausedCount} paused.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <p className="text-sm font-medium">Import queue</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {importJobSummary.completedCount} completed, {importJobSummary.failedCount} failed, and {importJobSummary.ocrCount} OCR-backed import{importJobSummary.ocrCount === 1 ? "" : "s"} recorded so far.
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-3">
+            <div className="wealth-inset grid gap-3 p-3">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-primary" />
                 <p className="text-sm font-medium">Needs attention now</p>
@@ -2149,7 +2373,7 @@ export function DataSettings({
               {attentionItems.length ? (
                 <div className="grid gap-2">
                   {attentionItems.map((item) => (
-                    <div key={item.id} className="rounded-md border bg-muted/30 p-3">
+                    <div key={item.id} className="wealth-muted-block p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-medium">{item.providerName}</p>
                         <Badge variant={item.severity === "error" ? "secondary" : "outline"}>
@@ -2169,21 +2393,31 @@ export function DataSettings({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Connect your data feeds</CardTitle>
+          <CardTitle>Sources: connected feeds</CardTitle>
             <CardDescription>
-              Bring broker, inbox, and statement sources into one review pipeline with clear cadence and ownership.
+              Bring broker, inbox, and statement sources into one review pipeline with clear cadence, proof, and ownership.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className={`rounded-md border p-4 ${connectorVerdictToneClass}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">Connector verdict</p>
+                <Badge variant={connectorVerdictBadgeVariant}>
+                  {operationsSummary.activeCount} active source{operationsSummary.activeCount === 1 ? "" : "s"}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-foreground">{connectorVerdictLabel}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{connectorVerdictDetail}</p>
+            </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {connectorPriorityQueue.map((item) => (
                 <button
                   key={item.title}
                   type="button"
                   onClick={() => handleConnectorPriorityAction(item.action)}
-                  className="rounded-md border bg-background p-4 text-left transition hover:bg-muted/40"
+                  className="wealth-data-card p-4 text-left transition hover:bg-muted/40"
                 >
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Next move
@@ -2193,7 +2427,7 @@ export function DataSettings({
                 </button>
               ))}
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="wealth-muted-block grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div>
                 <p className="text-sm font-medium text-foreground">Connector rollout plan</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2201,7 +2435,7 @@ export function DataSettings({
                 </p>
               </div>
               <div className="grid gap-2">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-inset p-3">
                   <p className="text-xs text-muted-foreground">Suggested first lane</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {userEmail ? "Live-source path" : "Manual-source path"}
@@ -2212,7 +2446,7 @@ export function DataSettings({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.05fr_0.95fr]">
               <div>
                 <p className="text-sm font-medium text-foreground">Start one lane, prove it, then expand.</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2235,7 +2469,7 @@ export function DataSettings({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Setup posture
                 </p>
@@ -2248,7 +2482,7 @@ export function DataSettings({
                     : "The highest-value move is still getting one dependable source through a full reviewed cycle."}
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Review pressure
                 </p>
@@ -2263,7 +2497,7 @@ export function DataSettings({
                     : "A clear queue is the best time to introduce the next source because you can inspect it with full attention."}
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Scale only when
                 </p>
@@ -2279,7 +2513,7 @@ export function DataSettings({
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="wealth-muted-block grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div>
                 <p className="text-sm font-medium text-foreground">Connector operating order</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2292,7 +2526,7 @@ export function DataSettings({
                   "Run one proof cycle and inspect the review queue before trusting cadence.",
                   "Add the next lane only after the current one feels boring and dependable.",
                 ].map((step, index) => (
-                  <div key={step} className="flex items-start gap-3 rounded-md border bg-background p-3">
+                  <div key={step} className="wealth-inset flex items-start gap-3 p-3">
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold text-muted-foreground">
                       {index + 1}
                     </span>
@@ -2302,7 +2536,7 @@ export function DataSettings({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-4">
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Broker lanes
                 </p>
@@ -2313,7 +2547,7 @@ export function DataSettings({
                   Best for direct holdings sync and recurring live proof.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Inbox lanes
                 </p>
@@ -2324,7 +2558,7 @@ export function DataSettings({
                   Best for statement emails that naturally arrive without manual chasing.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Manual lanes
                 </p>
@@ -2335,7 +2569,7 @@ export function DataSettings({
                   Good for exported statements, OCR review, and first-pass rehearsals.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Auto lanes
                 </p>
@@ -2347,8 +2581,8 @@ export function DataSettings({
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-4">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Start here
                 </p>
@@ -2356,7 +2590,7 @@ export function DataSettings({
                   Pick one connector lane first: broker sync, inbox OAuth, or manual statement rehearsal.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Do not assume
                 </p>
@@ -2364,7 +2598,7 @@ export function DataSettings({
                   A connected badge is not the finish line. The first useful proof is a clean reviewed import.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -2374,7 +2608,7 @@ export function DataSettings({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-primary" />
                   <p className="text-sm font-medium">Email-ready intake</p>
@@ -2385,7 +2619,7 @@ export function DataSettings({
                     : "Sign in later to connect inbox-based workflows. For now, forwarded statement text and attachments can be pasted or uploaded manually."}
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-4">
+              <div className="wealth-muted-block p-4">
                 <div className="flex items-center gap-2">
                   <ScanSearch className="h-4 w-4 text-primary" />
                   <p className="text-sm font-medium">Review before import</p>
@@ -2396,7 +2630,7 @@ export function DataSettings({
               </div>
             </div>
 
-            <div ref={brokerSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={brokerSectionRef} className="wealth-muted-block grid gap-3 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Broker API connectors</p>
@@ -2406,25 +2640,25 @@ export function DataSettings({
                 </div>
                 <Button type="button" size="sm" variant="outline" onClick={() => void loadBrokerConnections()}>
                   <Database className="h-4 w-4" />
-                  {isBrokerLoading ? "Loading..." : "Refresh"}
+                  {isBrokerLoading ? "Refreshing..." : "Refresh"}
                 </Button>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Best use</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Live holdings refresh</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Use broker APIs when you want direct holdings sync instead of repeated manual exports.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Watch closely</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Connection trust</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Reconnect, auth expiry, and failed checks matter more here than formatting cleanup.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Best next move</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Connect then sync once</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2440,7 +2674,7 @@ export function DataSettings({
                   <div
                     id={`broker-connector-${provider.id}`}
                     key={provider.id}
-                    className={`grid gap-3 rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedBrokerProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                    className={`wealth-data-card grid gap-3 p-3 transition-[box-shadow,transform] duration-700 ${highlightedBrokerProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -2472,7 +2706,7 @@ export function DataSettings({
                       {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
                     </div>
                     {syncHistory.length ? (
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                           Recent checks
                         </p>
@@ -2502,7 +2736,7 @@ export function DataSettings({
                         onClick={() => void handleSyncZerodha()}
                       >
                         <Cloud className="h-4 w-4" />
-                        Sync holdings
+                        Run holding sync
                       </Button>
                     </div>
                   </div>
@@ -2510,7 +2744,7 @@ export function DataSettings({
               })}
             </div>
 
-            <div ref={inboxSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={inboxSectionRef} className="wealth-muted-block grid gap-3 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Inbox OAuth connectors</p>
@@ -2520,25 +2754,25 @@ export function DataSettings({
                 </div>
                 <Button type="button" size="sm" variant="outline" onClick={() => void loadInboxConnections()}>
                   <Mail className="h-4 w-4" />
-                  {isInboxLoading ? "Loading..." : "Refresh"}
+                  {isInboxLoading ? "Refreshing..." : "Refresh"}
                 </Button>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Best use</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Statement capture</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Use inbox access when statements naturally arrive by email and you want less manual forwarding.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">What matters most</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Readiness and review</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     OAuth success is step one. The real win is a clean parsed statement moving into review.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Best next move</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Run one inbox check</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2547,19 +2781,19 @@ export function DataSettings({
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Coverage</p>
                   <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.providerCoverageLabel}</p>
                   <p className="mt-2 text-xs text-muted-foreground">{inboxOperationsSummary.nextActionLabel}.</p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Readiness</p>
                   <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.connectedCount} connected</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {inboxOperationsSummary.needsAuthCount} waiting on OAuth setup.
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-3">
+                <div className="wealth-data-card p-3">
                   <p className="text-xs text-muted-foreground">Attention</p>
                   <p className="mt-1 text-sm font-semibold">{inboxOperationsSummary.attentionCount} need follow-up</p>
                   <p className="mt-2 text-xs text-muted-foreground">
@@ -2577,7 +2811,7 @@ export function DataSettings({
                     <div
                       id={`inbox-connector-${provider.id}`}
                       key={provider.id}
-                      className={`grid gap-3 rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedInboxProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                      className={`wealth-data-card grid gap-3 p-3 transition-[box-shadow,transform] duration-700 ${highlightedInboxProviderId === provider.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -2610,7 +2844,7 @@ export function DataSettings({
                           ) : null}
                         </div>
                       ) : null}
-                      <div className="rounded-md border bg-muted/40 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs font-medium">{health.title}</p>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">{health.detail}</p>
                       </div>
@@ -2631,7 +2865,7 @@ export function DataSettings({
                         {connection?.errorMessage ? <span>{connection.errorMessage}</span> : null}
                       </div>
                       {syncHistory.length ? (
-                        <div className="rounded-md border bg-muted/30 p-3">
+                        <div className="wealth-stat-tile p-3">
                           <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                             Recent checks
                           </p>
@@ -2661,7 +2895,7 @@ export function DataSettings({
                           onClick={() => void handleSyncInbox(provider.id)}
                         >
                           <Cloud className="h-4 w-4" />
-                          Run inbox check
+                          Check inbox now
                         </Button>
                         <Button
                           type="button"
@@ -2670,7 +2904,7 @@ export function DataSettings({
                           onClick={() => scrollToSection(emailIntakeSectionRef)}
                         >
                           <FileText className="h-4 w-4" />
-                          Use simulator
+                          Open rehearsal
                         </Button>
                       </div>
                     </div>
@@ -2679,7 +2913,7 @@ export function DataSettings({
               </div>
             </div>
 
-            <div ref={emailIntakeSectionRef} className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div ref={emailIntakeSectionRef} className="wealth-muted-block grid gap-3 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <p className="text-sm font-medium">Email ingestion simulator</p>
@@ -2854,28 +3088,28 @@ export function DataSettings({
                       Build a lane in this order: pick the provider template, confirm cadence and channel, add the source, then use one small proof run before trusting it in the background.
                     </p>
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">1. Template first</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">Load a known playbook</p>
                       </div>
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">2. Proof second</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">Run or rehearse once</p>
                       </div>
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">3. Cadence last</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">Let the schedule take over</p>
                       </div>
                     </div>
                   </div>
                   <div className="grid gap-3">
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-data-card p-4">
                       <p className="text-sm font-medium">Feed mix</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {connectorLaneMix.autoLaneCount} auto lane{connectorLaneMix.autoLaneCount === 1 ? "" : "s"}, {connectorLaneMix.manualLaneCount} manual lane{connectorLaneMix.manualLaneCount === 1 ? "" : "s"}, and {schedulerPlan.readyCount} source{schedulerPlan.readyCount === 1 ? "" : "s"} still waiting on a first real check.
                       </p>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-data-card p-4">
                       <p className="text-sm font-medium">Best next move</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {schedulerPlan.readyCount > 0
@@ -2887,22 +3121,22 @@ export function DataSettings({
                     </div>
                   </div>
                 </div>
-                <div className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-3">
-                  <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-inset grid gap-3 p-3 md:grid-cols-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-xs text-muted-foreground">Read first</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">Lane status</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
                       Start with posture, cadence, and the next scheduled check before you open diagnostics.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-xs text-muted-foreground">Then decide</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">One next move</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
                       Sync now, review history, or open rehearsal. Do the smallest useful action first.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-xs text-muted-foreground">Escalate only if needed</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">Open deeper diagnostics later</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -2910,7 +3144,7 @@ export function DataSettings({
                     </p>
                   </div>
                 </div>
-                <div className="grid gap-3 rounded-md border bg-background p-3">
+                <div className="wealth-inset grid gap-3 p-3">
                   <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
                     <div>
                       <p className="text-sm font-medium">Provider templates</p>
@@ -2926,7 +3160,7 @@ export function DataSettings({
                     />
                   </div>
                   <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-data-card p-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary">{selectedTemplate.providerName}</Badge>
                         <Badge variant="outline">{selectedTemplateMeta.readinessLabel}</Badge>
@@ -2944,7 +3178,7 @@ export function DataSettings({
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-data-card p-4">
                       <p className="text-sm font-medium">Setup playbook</p>
                       <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
                         {selectedTemplate.setupSteps.map((step, index) => (
@@ -2965,13 +3199,13 @@ export function DataSettings({
                     </div>
                   </div>
                 </div>
-              <div className="grid gap-3 rounded-md border bg-background p-3">
+              <div className="wealth-data-card grid gap-3 p-3">
                 <ConnectionFields
                   connection={draftIntegration}
                   onChange={setDraftIntegration}
                 />
               </div>
-              <div className="grid gap-3 rounded-md border bg-background p-3">
+              <div className="wealth-data-card grid gap-3 p-3">
                 <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-sm font-medium">Scheduler readiness</p>
@@ -2984,19 +3218,19 @@ export function DataSettings({
                   </Badge>
                 </div>
                 <div className="grid gap-2 text-xs md:grid-cols-4">
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-muted-foreground">First checks pending</p>
                     <p className="mt-2 font-semibold text-foreground">{schedulerPlan.readyCount}</p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-muted-foreground">Due now</p>
                     <p className="mt-2 font-semibold text-foreground">{schedulerPlan.dueCount}</p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-muted-foreground">Paused</p>
                     <p className="mt-2 font-semibold text-foreground">{schedulerPlan.pausedCount}</p>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile p-3">
                     <p className="text-muted-foreground">Need fixes</p>
                     <p className="mt-2 font-semibold text-foreground">{schedulerPlan.errorCount}</p>
                   </div>
@@ -3007,7 +3241,7 @@ export function DataSettings({
                       .filter((entry) => entry.shouldRunNow)
                       .slice(0, 3)
                       .map((entry) => (
-                        <div key={entry.id} className="flex flex-col justify-between gap-1 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center">
+                        <div key={entry.id} className="wealth-stat-tile flex flex-col justify-between gap-1 p-3 text-xs sm:flex-row sm:items-center">
                           <span className="font-medium text-foreground">{entry.providerName}</span>
                           <span className="text-muted-foreground">{entry.reason}</span>
                         </div>
@@ -3015,7 +3249,7 @@ export function DataSettings({
                   </div>
                 )}
               </div>
-              <div className="grid gap-3 rounded-md border bg-background p-3">
+              <div className="wealth-data-card grid gap-3 p-3">
                 <div className="grid gap-3 md:grid-cols-[0.9fr_1.1fr]">
                   <SegmentedControl
                     label="Source focus"
@@ -3036,7 +3270,7 @@ export function DataSettings({
                   />
                 </div>
                 {(integrationSearch.trim() || integrationFilter !== "all") && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3">
+                  <div className="wealth-stat-tile flex flex-wrap items-center justify-between gap-2 p-3">
                     <p className="text-xs text-muted-foreground">
                       Showing{" "}
                       <span className="font-medium text-foreground">{filteredIntegrations.length}</span>{" "}
@@ -3063,12 +3297,12 @@ export function DataSettings({
                         setIntegrationSearch("");
                       }}
                     >
-                      Clear filters
+                      Reset filters
                     </Button>
                   </div>
                 )}
               </div>
-              <div className="grid gap-3 rounded-md border bg-background p-3">
+              <div className="wealth-data-card grid gap-3 p-3">
                 <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-sm font-medium">Recent connector activity</p>
@@ -3081,7 +3315,7 @@ export function DataSettings({
                   </Badge>
                 </div>
                 {highlightedActivityProviderId && highlightedActivityProviderName ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background p-3">
+                  <div className="wealth-data-card flex flex-wrap items-center justify-between gap-2 p-3">
                     <p className="text-xs text-muted-foreground">
                       Showing connector activity for{" "}
                       <span className="font-medium text-foreground">{highlightedActivityProviderName}</span>.
@@ -3134,7 +3368,7 @@ export function DataSettings({
                     {filteredConnectorActivityFeed.map((event) => (
                       <div
                         key={`${event.sourceType}-${event.id}`}
-                        className={`rounded-md border bg-muted/30 p-3 transition-[box-shadow,transform] duration-700 ${highlightedActivityProviderId === event.providerId ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                        className={`wealth-stat-tile p-3 transition-[box-shadow,transform] duration-700 ${highlightedActivityProviderId === event.providerId ? "ring-2 ring-primary ring-offset-2" : ""}`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
@@ -3187,7 +3421,7 @@ export function DataSettings({
                 )}
               </div>
               <div className="grid gap-3">
-                <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
                   <div className="grid gap-3">
                     <div>
                       <p className="text-base font-semibold text-foreground">
@@ -3198,21 +3432,21 @@ export function DataSettings({
                       </p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-3">
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">1. Read the lane</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">Status and cadence</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
                           Start with sync posture, source type, and next scheduled check.
                         </p>
                       </div>
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">2. Take the next move</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">One action at a time</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
                           Use sync plan, history, or sync now depending on what the lane needs next.
                         </p>
                       </div>
-                      <div className="rounded-md border bg-muted/30 p-3">
+                      <div className="wealth-stat-tile p-3">
                         <p className="text-xs text-muted-foreground">3. Escalate only if needed</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">Open diagnostics later</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3222,13 +3456,13 @@ export function DataSettings({
                     </div>
                   </div>
                   <div className="grid gap-3">
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-muted-block p-4">
                       <p className="text-sm font-medium">Feed summary</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {filteredIntegrations.length} source{filteredIntegrations.length === 1 ? "" : "s"} in view, {operationsSummary.attentionCount} needing attention, and the next scheduled check is {formatSyncTimeLabel(schedulerPlan.nextRunAt)}.
                       </p>
                     </div>
-                    <div className="rounded-md border bg-muted/30 p-4">
+                    <div className="wealth-muted-block p-4">
                       <p className="text-sm font-medium">Best next move</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {operationsSummary.attentionCount > 0
@@ -3287,7 +3521,7 @@ export function DataSettings({
                     <div
                       id={`integration-source-${integration.id}`}
                       key={integration.id}
-                      className={`rounded-md border bg-background p-3 transition-[box-shadow,transform] duration-700 ${highlightedIntegrationId === integration.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
+                      className={`wealth-data-card p-3 transition-[box-shadow,transform] duration-700 ${highlightedIntegrationId === integration.id ? "ring-2 ring-primary ring-offset-2" : ""}`}
                     >
                       {isEditing ? (
                         <ConnectionFields
@@ -3344,7 +3578,7 @@ export function DataSettings({
                             </p>
                           )}
                           <div className="grid gap-3 md:grid-cols-3">
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Lane mode</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{laneModeLabel}</p>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3355,12 +3589,12 @@ export function DataSettings({
                                     : "This lane depends on fresh exported statements more than scheduled checks."}
                               </p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Latest proof</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{proofLabel}</p>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">{proofDetail}</p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Trust read</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{laneRiskLabel}</p>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3373,12 +3607,12 @@ export function DataSettings({
                             </div>
                           </div>
                           <div className="grid gap-3 md:grid-cols-[1fr_0.95fr]">
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">What this means</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{syncState.label}</p>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">{laneRead}</p>
                             </div>
-                            <div className={`rounded-md border p-3 ${primaryAction ? "border-primary/20 bg-primary/5" : "bg-muted/30"}`}>
+                            <div className={`p-3 ${primaryAction ? "rounded-md border border-primary/20 bg-primary/5" : "wealth-stat-tile"}`}>
                               <p className="text-xs text-muted-foreground">Do this now</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {primaryAction ? primaryAction.label : "Stay on cadence"}
@@ -3405,7 +3639,7 @@ export function DataSettings({
                             </div>
                           </div>
                           <div className="grid gap-3 md:grid-cols-4">
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Last sync</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleDateString() : "Not yet"}
@@ -3414,21 +3648,21 @@ export function DataSettings({
                                 {integration.lastSyncStatus} · files {integration.lastImportedFileCount}
                               </p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Success rate</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{healthMetrics.successRate}%</p>
                               <p className="mt-2 text-xs text-muted-foreground">
                                 Avg files {healthMetrics.averageImportedFiles.toFixed(1)}
                               </p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Next check</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">{formatSyncTimeLabel(nextSyncAt)}</p>
                               <p className="mt-2 text-xs text-muted-foreground">
                                 every {integration.syncCadenceMinutes} min
                               </p>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-xs text-muted-foreground">Latest import</p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {latestImportMeta ? latestImportMeta.label : "No review yet"}
@@ -3439,7 +3673,7 @@ export function DataSettings({
                             </div>
                           </div>
                           <div className="grid gap-3 md:grid-cols-3">
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Sync health
                               </p>
@@ -3474,7 +3708,7 @@ export function DataSettings({
                                 </span>
                               </div>
                             </div>
-                            <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-stat-tile p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Scheduler
                               </p>
@@ -3513,7 +3747,7 @@ export function DataSettings({
                               </div>
                             </div>
                           </div>
-                          <div className="rounded-md border bg-muted/30 p-3">
+                          <div className="wealth-stat-tile p-3">
                             <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                               Provider detection
                             </p>
@@ -3522,7 +3756,7 @@ export function DataSettings({
                             </p>
                           </div>
                           {latestImportJob && latestImportMeta && (
-                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-muted-block mt-2 grid gap-2 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                   Latest import outcome
@@ -3552,7 +3786,7 @@ export function DataSettings({
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="outline"
+                                  variant="ghost"
                                   onClick={() => handleOpenImportHistoryForProvider(integration)}
                                 >
                                   <FileText className="h-4 w-4" />
@@ -3562,7 +3796,7 @@ export function DataSettings({
                             </div>
                           )}
                           {diagnosticsSummary.timeline.length > 0 && (
-                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-muted-block mt-2 grid gap-2 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Recent sync events
                               </p>
@@ -3584,7 +3818,7 @@ export function DataSettings({
                             </div>
                           )}
                           {secondaryActionItems.length > 0 && (
-                            <div className="mt-2 grid gap-2 rounded-md border bg-muted/30 p-3">
+                            <div className="wealth-muted-block mt-2 grid gap-2 p-3">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
                                 Supporting moves
                               </p>
@@ -3600,7 +3834,7 @@ export function DataSettings({
                                       variant="outline"
                                       onClick={() => void handleIntegrationActionClick(integration, item)}
                                     >
-                                      Use
+                                      Open
                                     </Button>
                                   </div>
                                   <p>{item.detail}</p>
@@ -3627,7 +3861,7 @@ export function DataSettings({
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
+                          variant="ghost"
                           onClick={() => void handlePreviewSyncPlan(integration)}
                         >
                           <ScanSearch className="h-4 w-4" />
@@ -3636,7 +3870,7 @@ export function DataSettings({
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
+                          variant="ghost"
                           onClick={() => handleOpenImportHistoryForProvider(integration)}
                         >
                           <FileText className="h-4 w-4" />
@@ -3645,7 +3879,7 @@ export function DataSettings({
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
+                          variant="ghost"
                           onClick={() =>
                             setEditingIntegrationId(isEditing ? null : integration.id)
                           }
@@ -3693,9 +3927,9 @@ export function DataSettings({
         </Card>
 
         <div ref={importHistorySectionRef}>
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Review queue</CardTitle>
+            <CardTitle>History: import reviews</CardTitle>
             <CardDescription>
               Track statement reviews, completed imports, and failures so the intake workflow stays clean over time.
             </CardDescription>
@@ -3709,7 +3943,7 @@ export function DataSettings({
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-stat-tile p-3">
                   <p className="text-xs text-muted-foreground">Queue pressure</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {importJobSummary.openCount > 0 ? `${importJobSummary.openCount} open reviews` : "Queue is clear"}
@@ -3720,7 +3954,7 @@ export function DataSettings({
                       : "Use history mainly for auditability and replays now."}
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-stat-tile p-3">
                   <p className="text-xs text-muted-foreground">Failure pressure</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {importJobSummary.failedCount > 0 ? `${importJobSummary.failedCount} failed runs` : "No failed runs"}
@@ -3733,8 +3967,8 @@ export function DataSettings({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-4">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Use this queue for
                 </p>
@@ -3742,7 +3976,7 @@ export function DataSettings({
                   Final review before holdings or transactions merge into the tracked workspace.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Most common mistake
                 </p>
@@ -3750,7 +3984,7 @@ export function DataSettings({
                   Applying a run because the provider was recognized, even though warnings or duplicates still need a look.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -3759,7 +3993,7 @@ export function DataSettings({
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="grid gap-3">
                 <div>
                   <p className="text-base font-semibold text-foreground">
@@ -3774,21 +4008,21 @@ export function DataSettings({
                   </p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-data-card p-3">
                     <p className="text-xs text-muted-foreground">1. Triage</p>
                     <p className="mt-1 text-sm font-semibold">Filter the queue</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
                       Start with `Open` or search one provider before diving into raw payloads.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-data-card p-3">
                     <p className="text-xs text-muted-foreground">2. Rehearse</p>
                     <p className="mt-1 text-sm font-semibold">Open in source rehearsal</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
                       Reuse the saved text, inspect warnings, and decide whether the parser needs a cleaner source.
                     </p>
                   </div>
-                  <div className="rounded-md border bg-background p-3">
+                  <div className="wealth-data-card p-3">
                     <p className="text-xs text-muted-foreground">3. Apply</p>
                     <p className="mt-1 text-sm font-semibold">Merge only clean output</p>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3798,7 +4032,7 @@ export function DataSettings({
                 </div>
               </div>
               <div className="grid gap-3">
-                <div className="rounded-md border bg-background p-4">
+                <div className="wealth-data-card p-4">
                   <p className="text-sm font-medium">Queue read</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {importJobSummary.failedCount > 0
@@ -3806,7 +4040,7 @@ export function DataSettings({
                       : "No failed imports are blocking the queue right now."}
                   </p>
                 </div>
-                <div className="rounded-md border bg-background p-4">
+                <div className="wealth-data-card p-4">
                   <p className="text-sm font-medium">Best next move</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {importJobSummary.openCount > 0
@@ -3816,7 +4050,7 @@ export function DataSettings({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+            <div className="wealth-muted-block grid gap-3 p-4">
               <div className="grid gap-3 md:grid-cols-4">
                 <MetricMini label="Open review" value={`${importJobSummary.openCount}`} />
                 <MetricMini label="Completed" value={`${importJobSummary.completedCount}`} />
@@ -3842,7 +4076,7 @@ export function DataSettings({
                 />
               </div>
               {jobSearch.trim() && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background p-3">
+                <div className="wealth-data-card flex flex-wrap items-center justify-between gap-2 p-3">
                   <p className="text-xs text-muted-foreground">
                     Showing imports matching <span className="font-medium text-foreground">{jobSearch.trim()}</span>.
                   </p>
@@ -3852,7 +4086,7 @@ export function DataSettings({
                     variant="ghost"
                     onClick={() => setJobSearch("")}
                   >
-                    Clear filter
+                    Reset filter
                   </Button>
                 </div>
               )}
@@ -3909,7 +4143,7 @@ export function DataSettings({
                 }
               />
             )) : (
-              <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
+              <div className="wealth-empty-state">
                 {importJobs.length === 0
                   ? "No import jobs yet. Stage a sync plan, ingest an email, or import a statement to start building review history."
                   : jobSearch.trim()
@@ -3924,65 +4158,65 @@ export function DataSettings({
         </div>
 
         <div ref={syncPlanSectionRef}>
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Source rehearsal</CardTitle>
+            <CardTitle>Workflow: sync plan</CardTitle>
             <CardDescription>
               Preview how one source will move through the WealthCompass pipeline before you run or apply it.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-3 md:grid-cols-4">
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Rehearsal status
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {syncPreview ? "Provider loaded" : "Awaiting provider"}
+                  {syncPreview ? "Provider ready" : "Choose a provider"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Start by opening one source lane into rehearsal before you paste any text.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Input quality
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {syncInputText.trim() ? "Sample loaded" : "No sample yet"}
+                  {syncInputText.trim() ? "Sample ready" : "Add a sample"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   The fastest useful proof is one realistic statement body, table, or extracted PDF text.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Warning pressure
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {syncExecution ? `${syncExecution.reviewedWarnings.length} warning${syncExecution.reviewedWarnings.length === 1 ? "" : "s"}` : "No run yet"}
+                  {syncExecution ? `${syncExecution.reviewedWarnings.length} warning${syncExecution.reviewedWarnings.length === 1 ? "" : "s"}` : "Not run yet"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Warnings do not always block progress, but they usually mean stage-first is the safer path.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-data-card p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Decision lane
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
                   {syncExecutionOverview?.canApply
-                    ? "Apply-ready"
+                    ? "Ready to apply"
                     : syncExecutionOverview?.canStage
-                      ? "Stage-first"
-                      : "Inspect-first"}
+                      ? "Stage first"
+                      : "Inspect first"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Let the execution read decide whether this belongs in history, apply, or another cleanup pass.
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.05fr_0.95fr]">
               <div>
                 <p className="text-sm font-medium text-foreground">Rehearse first, automate second</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -3990,10 +4224,10 @@ export function DataSettings({
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Execution read</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
-                    {syncExecutionOverview ? syncExecutionOverview.importReadyLabel : "Awaiting sample"}
+                    {syncExecutionOverview ? syncExecutionOverview.importReadyLabel : "Waiting for a sample"}
                   </p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {syncExecutionOverview
@@ -4001,7 +4235,7 @@ export function DataSettings({
                       : "Load one realistic sample so the runner can prove the exact path it will take."}
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Best decision rule</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {syncExecution?.reviewedWarnings.length
@@ -4018,8 +4252,8 @@ export function DataSettings({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
-              <div className="rounded-md border bg-background p-4">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Best use
                 </p>
@@ -4027,7 +4261,7 @@ export function DataSettings({
                   Dry-run a provider with real input before trusting live cadence or manual apply.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   What matters most
                 </p>
@@ -4035,7 +4269,7 @@ export function DataSettings({
                   Parsed output quality, warning count, duplicate handling, and whether the job belongs in history or straight to apply.
                 </p>
               </div>
-              <div className="rounded-md border bg-background p-4">
+              <div className="wealth-inset p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Best next move
                 </p>
@@ -4046,7 +4280,7 @@ export function DataSettings({
             </div>
             {syncPreview ? (
               <>
-                <div className="grid gap-3 rounded-md border bg-muted/30 p-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="wealth-muted-block grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]">
                   <div className="grid gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{syncPreview.providerName}</Badge>
@@ -4065,21 +4299,21 @@ export function DataSettings({
                       </p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-3">
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">1. Feed the runner</p>
                         <p className="mt-1 text-sm font-semibold">Paste the source text</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
                           Use an email body, extracted PDF text, or statement table from this provider.
                         </p>
                       </div>
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">2. Inspect the output</p>
                         <p className="mt-1 text-sm font-semibold">Review warnings and duplicates</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
                           Check parsed holdings, transactions, cleanup counts, and watchouts before staging.
                         </p>
                       </div>
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">3. Choose the lane</p>
                         <p className="mt-1 text-sm font-semibold">Stage, apply, or run live</p>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4089,7 +4323,7 @@ export function DataSettings({
                     </div>
                   </div>
                   <div className="grid gap-3">
-                    <div className="rounded-md border bg-background p-4">
+                    <div className="wealth-data-card p-4">
                       <p className="text-sm font-medium">Best next move</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {syncExecutionOverview
@@ -4097,20 +4331,20 @@ export function DataSettings({
                           : "Feed this provider one real source sample, then review the execution preview before deciding whether it belongs in history or the portfolio."}
                       </p>
                     </div>
-                    <div className="rounded-md border bg-background p-4">
+                    <div className="wealth-data-card p-4">
                       <p className="text-sm font-medium">Rehearsal status</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {syncExecution
                           ? `${syncExecution.parsedAssetCount} holdings, ${syncExecution.parsedTransactionCount} transactions, ${syncExecution.reviewedWarnings.length} warning${syncExecution.reviewedWarnings.length === 1 ? "" : "s"}, and ${syncExecution.duplicateCount} duplicate${syncExecution.duplicateCount === 1 ? "" : "s"} found in the latest pass.`
-                          : "No live execution yet. Load a provider sample or paste a source text block to see the exact pipeline path."}
+                          : "No rehearsal run yet. Load a provider sample or paste source text to see the exact pipeline path."}
                       </p>
                     </div>
                   </div>
                 </div>
                 {syncExecution && (
-                  <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+                  <div className="wealth-muted-block grid gap-3 p-4">
                     {syncExecutionOverview ? (
-                      <div className="rounded-md border bg-background p-4">
+                      <div className="wealth-data-card p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium">{syncExecutionOverview.headline}</p>
@@ -4125,12 +4359,12 @@ export function DataSettings({
                       </div>
                     ) : null}
                     <div className="grid gap-3 md:grid-cols-4">
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">Execution status</p>
                         <p className="mt-1 text-sm font-semibold">{syncExecution.connectorStatus}</p>
                         <p className="mt-2 text-xs text-muted-foreground">{syncExecution.jobStatus}</p>
                       </div>
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">Parsed output</p>
                         <p className="mt-1 text-sm font-semibold">
                           {syncExecution.parsedAssetCount} holdings
@@ -4139,7 +4373,7 @@ export function DataSettings({
                           {syncExecution.parsedTransactionCount} transactions
                         </p>
                       </div>
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">Cleanup</p>
                         <p className="mt-1 text-sm font-semibold">
                           {syncExecution.normalizationCount} normalization
@@ -4150,7 +4384,7 @@ export function DataSettings({
                           {syncExecution.duplicateCount === 1 ? "" : "s"}
                         </p>
                       </div>
-                      <div className="rounded-md border bg-background p-3">
+                      <div className="wealth-data-card p-3">
                         <p className="text-xs text-muted-foreground">Review</p>
                         <p className="mt-1 text-sm font-semibold">
                           {syncExecution.reviewedWarnings.length} warning
@@ -4168,7 +4402,7 @@ export function DataSettings({
                   <SyncPlanCombinedOverviewCard overview={syncPlanCombinedOverview} />
                 ) : null}
                 {syncPlanLatestImportJob && syncPlanLatestImportMeta && syncPlanLatestImportStats ? (
-                  <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+                  <div className="wealth-muted-block grid gap-3 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium">Latest saved review for this provider</p>
@@ -4215,7 +4449,7 @@ export function DataSettings({
                     </div>
                   </div>
                 ) : null}
-                <div className="grid gap-3 rounded-md border bg-muted/30 p-4">
+                <div className="wealth-muted-block grid gap-3 p-4">
                   <div>
                     <p className="text-sm font-medium">Live runner input</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -4238,7 +4472,7 @@ export function DataSettings({
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-md border bg-muted/30 p-4">
+                  <div className="wealth-stat-tile p-4">
                     <p className="text-sm font-medium">Recommended inputs</p>
                     <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
                       {syncPreview.recommendedFiles.map((item) => (
@@ -4246,7 +4480,7 @@ export function DataSettings({
                       ))}
                     </div>
                   </div>
-                  <div className="rounded-md border bg-muted/30 p-4">
+                  <div className="wealth-stat-tile p-4">
                     <p className="text-sm font-medium">Watchouts</p>
                     <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
                       {syncPreview.risks.map((item) => (
@@ -4280,14 +4514,14 @@ export function DataSettings({
                       onClick={() => onRunIntegrationSync(syncPreviewConnection.id)}
                     >
                       <Cloud className="h-4 w-4" />
-                      Run connector sync
+                      Run sync now
                     </Button>
                   ) : null}
                 </div>
                 {syncExecution?.artifacts.length ? (
                   <div className="grid gap-3 md:grid-cols-2">
                     {syncExecution.artifacts.map((artifact) => (
-                      <div key={`${artifact.kind}-${artifact.label}`} className="rounded-md border bg-muted/30 p-4">
+                      <div key={`${artifact.kind}-${artifact.label}`} className="wealth-data-card p-4">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-sm font-medium">{artifact.label}</p>
                           <Badge variant="outline">{artifact.kind}</Badge>
@@ -4301,7 +4535,7 @@ export function DataSettings({
                 ) : null}
                 <div className="grid gap-3">
                   {(syncExecution?.steps ?? syncPreview.steps).map((step, index) => (
-                    <div key={`${step.stage}-${step.title}`} className="rounded-md border bg-background p-4">
+                    <div key={`${step.stage}-${step.title}`} className="wealth-data-card p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-medium">
@@ -4320,7 +4554,7 @@ export function DataSettings({
                   ))}
                 </div>
                 {syncExecution?.reviewedWarnings.length ? (
-                  <div className="grid gap-2 rounded-md border bg-muted/30 p-4 text-xs text-muted-foreground">
+                  <div className="wealth-muted-block grid gap-2 p-4 text-xs text-muted-foreground">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-medium text-foreground">Execution warnings</p>
                       {syncExecutionOverview ? (
@@ -4333,7 +4567,7 @@ export function DataSettings({
                   </div>
                 ) : null}
                 {syncExecution?.sourceLineage.length ? (
-                  <div className="grid gap-2 rounded-md border bg-muted/30 p-4 text-xs text-muted-foreground">
+                  <div className="wealth-muted-block grid gap-2 p-4 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">Source lineage</p>
                     {syncExecution.sourceLineage.map((item) => (
                       <p key={item}>{item}</p>
@@ -4342,7 +4576,7 @@ export function DataSettings({
                 ) : null}
               </>
             ) : (
-              <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
+              <div className="wealth-empty-state">
                 Pick any connected source and open its sync plan to inspect the exact execution path we expect for that provider.
               </div>
             )}
@@ -4350,15 +4584,27 @@ export function DataSettings({
         </Card>
         </div>
 
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <div id="settings-market-controls" />
           <CardHeader>
-            <CardTitle>Live market controls</CardTitle>
+            <CardTitle>Controls: live market</CardTitle>
             <CardDescription>
-              Control continuous market polling and how often the market dashboard refreshes.
+              Tune live market behavior so the market page stays useful, believable, and calm enough to trust.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className={`rounded-md border p-4 ${controlsVerdictToneClass}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">Controls verdict</p>
+                <Badge variant={controlsVerdictBadgeVariant}>
+                  {safeMarketPreferences.watchlist.length
+                    ? `${safeMarketPreferences.watchlist.length} tracked`
+                    : "watchlist empty"}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-foreground">{controlsVerdictLabel}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{controlsVerdictDetail}</p>
+            </div>
             <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-md border bg-background p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -4398,14 +4644,14 @@ export function DataSettings({
                   Watchlist coverage
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {marketPreferences.watchlist.length} tracked sector{marketPreferences.watchlist.length === 1 ? "" : "s"}
+                  {safeMarketPreferences.watchlist.length} tracked sector{safeMarketPreferences.watchlist.length === 1 ? "" : "s"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Suggested sectors become more useful when the watchlist reflects the lanes you actually care to revisit.
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="wealth-inset grid gap-3 p-4 lg:grid-cols-[1.05fr_0.95fr]">
               <div>
                 <p className="text-sm font-medium text-foreground">Pick the market posture you can trust</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4413,7 +4659,7 @@ export function DataSettings({
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Current source mode</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {marketPreferences.preferredSource === "alpha-vantage" ? "Live source" : "Fallback only"}
@@ -4424,7 +4670,7 @@ export function DataSettings({
                       : "Use this when demo stability matters more than live feed freshness."}
                   </p>
                 </div>
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="wealth-muted-block p-3">
                   <p className="text-xs text-muted-foreground">Refresh posture</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">
                     {marketPreferences.autoRefresh
@@ -4440,21 +4686,21 @@ export function DataSettings({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Use this for</p>
                 <p className="mt-1 text-sm font-medium">Confidence in timing</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   These controls decide whether the market page feels live, conservative, or demo-safe.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Best demo posture</p>
                 <p className="mt-1 text-sm font-medium">Fallback plus watchlist on</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   That keeps the screen dependable even when external pricing feeds are noisy.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Watch closely</p>
                 <p className="mt-1 text-sm font-medium">Polling speed</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4462,7 +4708,7 @@ export function DataSettings({
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-muted/20 p-4 md:grid-cols-3">
+            <div className="wealth-muted-block grid gap-3 p-4 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   First question
@@ -4543,35 +4789,35 @@ export function DataSettings({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="wealth-panel-strong overflow-hidden">
           <CardHeader>
-            <CardTitle>Export preview</CardTitle>
-            <CardDescription>Readable backup format for demos and debugging.</CardDescription>
+            <CardTitle>Safety: export preview</CardTitle>
+            <CardDescription>Readable backup format for demos, checks, and recovery.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-3 md:grid-cols-4">
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Snapshot size</p>
                 <p className="mt-1 text-sm font-medium">{exportPreviewStats.charCount.toLocaleString()} chars</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Quick signal for whether you are exporting a full working state or a very sparse shell.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Readable lines</p>
                 <p className="mt-1 text-sm font-medium">{exportPreviewStats.lineCount.toLocaleString()} lines</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   A useful sanity check before sharing or restoring the workspace elsewhere.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Portfolio story</p>
                 <p className="mt-1 text-sm font-medium">{assets.length} holdings · {transactions.length} transactions</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Make sure the saved asset story and the journal story still match.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Market context</p>
                 <p className="mt-1 text-sm font-medium">{exportPreviewStats.watchlistCount} watch item{exportPreviewStats.watchlistCount === 1 ? "" : "s"}</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4579,7 +4825,7 @@ export function DataSettings({
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border bg-background p-4 md:grid-cols-3">
+            <div className="wealth-inset grid gap-3 p-4 md:grid-cols-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   First question
@@ -4606,21 +4852,21 @@ export function DataSettings({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Why this matters</p>
                 <p className="mt-1 text-sm font-medium">Readable before downloadable</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   You can inspect the exact snapshot shape before sharing it or restoring it elsewhere.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Best use</p>
                 <p className="mt-1 text-sm font-medium">Spot-check the story</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Review whether goals, risk posture, and portfolio state all reflect the same narrative.
                 </p>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3">
+              <div className="wealth-muted-block p-3">
                 <p className="text-xs text-muted-foreground">Best next move</p>
                 <p className="mt-1 text-sm font-medium">Use it before resets</p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4781,12 +5027,12 @@ function ImportJobCard({
         <Badge variant="outline">{outcomeStats.ocrLabel}</Badge>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-[1fr_0.9fr]">
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">What this run means</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{importReadLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{suggestedAction.detail}</p>
         </div>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="wealth-stat-tile p-3">
           <p className="text-xs text-muted-foreground">Best next move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{suggestedAction.title}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -4807,7 +5053,7 @@ function ImportJobCard({
           Last action {job.lastActionAt ? new Date(job.lastActionAt).toLocaleString() : "not yet"}
         </span>
       </div>
-      <div className="mt-3 grid gap-3 rounded-md border bg-muted/30 p-3 md:grid-cols-[0.8fr_1.2fr]">
+      <div className="wealth-muted-block mt-3 grid gap-3 p-3 md:grid-cols-[0.8fr_1.2fr]">
         <div>
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" />
@@ -4833,7 +5079,7 @@ function ImportJobCard({
         </div>
       </div>
       {parserProfile && (
-        <div className="mt-3 rounded-md border bg-muted/30 p-3">
+        <div className="wealth-muted-block mt-3 p-3">
           <p className="text-xs font-medium">Parser profile: {parserProfile.name}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Best input: {parserProfile.bestInputs[0]}
@@ -4847,7 +5093,7 @@ function ImportJobCard({
         <p className="mt-2 text-xs text-muted-foreground">{job.notes}</p>
       )}
       {job.rowWarnings.length > 0 && (
-        <div className="mt-3 grid gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <div className="wealth-muted-block mt-3 grid gap-2 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Warnings</p>
           {job.rowWarnings.map((warning) => (
             <p key={warning}>{warning}</p>
@@ -4855,7 +5101,7 @@ function ImportJobCard({
         </div>
       )}
       {job.reviewedCorrections.length > 0 && (
-        <div className="mt-3 grid gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <div className="wealth-muted-block mt-3 grid gap-2 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Reviewed corrections</p>
           {job.reviewedCorrections.map((correction) => (
             <p key={correction}>{correction}</p>
@@ -5028,7 +5274,7 @@ function SyncPlanCombinedOverviewCard({
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {items.map(([label, value]) => (
-          <div key={label} className="rounded-md border bg-muted/30 p-3">
+          <div key={label} className="wealth-stat-tile p-3">
             <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
             <p className="mt-1 text-sm font-semibold">{value}</p>
           </div>

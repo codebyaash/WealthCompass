@@ -12,10 +12,10 @@ export function HealthCheck({
   const tone = getHealthCheckTone(status);
 
   return (
-    <div className={`flex items-center justify-between gap-4 rounded-md border bg-background p-3 ${tone.containerClassName}`}>
+    <div className={`wealth-data-card flex items-center justify-between gap-4 p-3 ${tone.containerClassName}`}>
       <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{status}</p>
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="text-xs leading-5 text-muted-foreground">{status}</p>
       </div>
       <Badge variant="secondary" className={tone.badgeClassName}>
         {value}
