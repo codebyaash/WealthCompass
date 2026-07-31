@@ -358,6 +358,10 @@ export function MarketDashboard({
     profile.actionBaskets?.find((basket) => basket.id === "understand") ??
     profile.actionBaskets?.[0] ??
     fallbackMarketTrack;
+  const breadthTotal =
+    sectorBreadth.advancing + sectorBreadth.declining + sectorBreadth.flat;
+  const breadthAdvanceRatio =
+    breadthTotal > 0 ? (sectorBreadth.advancing / breadthTotal) * 100 : 0;
   const marketFocusHeadline =
     holdingsWatchSummary.trackedTotal > 0
       ? "Watch the market through your portfolio, not through random headlines"
@@ -378,7 +382,7 @@ export function MarketDashboard({
         : marketActionFeedback.tone === "remove"
           ? "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300"
           : "border-border bg-background text-muted-foreground";
-  const sectorSelectorOptions = useMemo(
+  const sectorSelectorOptions = useMemo<Array<[string, string]>>(
     () => [
       ["all-suggested", "All suggested sectors"],
       ...sectorGroups.map((group) => [group.id, group.name] as [string, string]),
@@ -771,7 +775,7 @@ export function MarketDashboard({
       {
         detail:
           holdingsWatchSummary.trackedTotal > 0
-            ? `${holdingsWatchSummary.trackedCount} tracked holding${holdingsWatchSummary.trackedCount === 1 ? "" : "s"} are feeding the live market lens.`
+            ? `${holdingsWatchSummary.items.length} tracked holding${holdingsWatchSummary.items.length === 1 ? "" : "s"} are feeding the live market lens.`
             : "Add more tracked holdings if you want the market page to feel more personal than generic.",
         label: "Portfolio link",
         value:
@@ -996,7 +1000,7 @@ export function MarketDashboard({
             toneClass: "border-emerald-500/30 bg-emerald-500/10",
           };
   const heatmapVerdict =
-    sectorBreadth.advanceRatio < 45
+    breadthAdvanceRatio < 45
       ? {
           badge: "Breadth is soft",
           badgeVariant: "outline" as const,
@@ -1005,7 +1009,7 @@ export function MarketDashboard({
           move: "Start with the strongest and weakest lanes to understand whether the move is broad or narrowing.",
           toneClass: "border-amber-500/30 bg-amber-500/10",
         }
-      : sectorBreadth.advanceRatio > 60
+      : breadthAdvanceRatio > 60
         ? {
             badge: "Breadth is supportive",
             badgeVariant: "secondary" as const,
@@ -1022,34 +1026,8 @@ export function MarketDashboard({
             move: "Treat this as a sorting lane, then move into compare or suggested fit for a clearer next read.",
             toneClass: "border-sky-500/30 bg-sky-500/10",
           };
-  const compareVerdict = compareSummary
-    ? {
-        badge:
-          compareSummary.takeawayTone === "fit-over-momentum"
-            ? "Fit matters more than tape"
-            : "Momentum and fit align",
-        badgeVariant:
-          compareSummary.takeawayTone === "fit-over-momentum" ? "outline" as const : "secondary" as const,
-        detail:
-          compareSummary.takeawayTone === "fit-over-momentum"
-            ? `${compareSummary.studySector.name} is the better learning lane even if it is not the strongest mover on screen right now.`
-            : `${compareSummary.studySector.name} is strong both on tape and in portfolio relevance, so the comparison is helping you prioritize rather than second-guess.`,
-        move: compareSummary.studyVerdict,
-        toneClass:
-          compareSummary.takeawayTone === "fit-over-momentum"
-            ? "border-sky-500/30 bg-sky-500/10"
-            : "border-emerald-500/30 bg-emerald-500/10",
-      }
-    : {
-        badge: compareAutoSync ? "Comparison following selection" : "Comparison pending",
-        badgeVariant: "outline" as const,
-        detail:
-          "The compare strip becomes most useful when two sectors both still matter and you need help separating market strength from portfolio usefulness.",
-        move: "Load one study lane and one contrast lane before reading too much into any single sector.",
-        toneClass: "border-sky-500/30 bg-sky-500/10",
-      };
   const marketPriorityQueue = [
-    sectorBreadth.advanceRatio < 45
+    breadthAdvanceRatio < 45
       ? {
           action: "open-overview" as const,
           detail:
@@ -1191,6 +1169,32 @@ export function MarketDashboard({
     sectorBreadth.strongest,
     suggestedSectorIds,
   ]);
+  const compareVerdict = compareSummary
+    ? {
+        badge:
+          compareSummary.takeawayTone === "fit-over-momentum"
+            ? "Fit matters more than tape"
+            : "Momentum and fit align",
+        badgeVariant:
+          compareSummary.takeawayTone === "fit-over-momentum" ? "outline" as const : "secondary" as const,
+        detail:
+          compareSummary.takeawayTone === "fit-over-momentum"
+            ? `${compareSummary.studySector.name} is the better learning lane even if it is not the strongest mover on screen right now.`
+            : `${compareSummary.studySector.name} is strong both on tape and in portfolio relevance, so the comparison is helping you prioritize rather than second-guess.`,
+        move: compareSummary.studyVerdict,
+        toneClass:
+          compareSummary.takeawayTone === "fit-over-momentum"
+            ? "border-sky-500/30 bg-sky-500/10"
+            : "border-emerald-500/30 bg-emerald-500/10",
+      }
+    : {
+        badge: compareAutoSync ? "Comparison following selection" : "Comparison pending",
+        badgeVariant: "outline" as const,
+        detail:
+          "The compare strip becomes most useful when two sectors both still matter and you need help separating market strength from portfolio usefulness.",
+        move: "Load one study lane and one contrast lane before reading too much into any single sector.",
+        toneClass: "border-sky-500/30 bg-sky-500/10",
+      };
   const selectedSectorCompareRole = useMemo(
     () =>
       selectedSectorId === "all-suggested"
@@ -1239,7 +1243,17 @@ export function MarketDashboard({
 
   function handleToggleSectorWatchlist(
     sectorId: string,
-    source: "compare" | "explorer" | "watchlist" | "suggested" = "explorer",
+    source:
+      | "compare"
+      | "conversation"
+      | "explorer"
+      | "overview"
+      | "overview-grid"
+      | "suggested"
+      | "suggested-overlay"
+      | "suggested-shortlist"
+      | "suggested-trend"
+      | "watchlist" = "explorer",
   ) {
     const sectorLabel =
       sectorGroups.find((group) => group.id === sectorId)?.name ?? "This sector";
@@ -1251,18 +1265,32 @@ export function MarketDashboard({
       const addedMessage =
         source === "compare"
           ? `${sectorLabel} saved for review from this sector comparison.`
-          : source === "suggested"
+          : source === "suggested" ||
+              source === "suggested-overlay" ||
+              source === "suggested-shortlist" ||
+              source === "suggested-trend"
             ? `${sectorLabel} saved from the suggested sector view.`
-            : source === "watchlist"
-              ? `${sectorLabel} added back to your saved market watchlist.`
+          : source === "watchlist"
+            ? `${sectorLabel} added back to your saved market watchlist.`
+            : source === "overview" || source === "overview-grid"
+              ? `${sectorLabel} saved from the market overview.`
+              : source === "conversation"
+                ? `${sectorLabel} saved from the guided market conversation.`
               : `${sectorLabel} saved from the sector explorer.`;
       const removedMessage =
         source === "compare"
           ? `${sectorLabel} removed from your saved market watchlist after this comparison.`
-          : source === "suggested"
+          : source === "suggested" ||
+              source === "suggested-overlay" ||
+              source === "suggested-shortlist" ||
+              source === "suggested-trend"
             ? `${sectorLabel} removed from your saved list from the suggested sector view.`
-            : source === "watchlist"
-              ? `${sectorLabel} removed from your saved market watchlist.`
+          : source === "watchlist"
+            ? `${sectorLabel} removed from your saved market watchlist.`
+            : source === "overview" || source === "overview-grid"
+              ? `${sectorLabel} removed from your saved list from the market overview.`
+              : source === "conversation"
+                ? `${sectorLabel} removed from your saved list from the guided market conversation.`
               : `${sectorLabel} removed from your saved list from the sector explorer.`;
 
       setMarketActionFeedback({
@@ -1620,7 +1648,7 @@ export function MarketDashboard({
                 </p>
                 <div className="mt-3">
                   <AskMentorLink
-                    label="Ask AI mentor about this market read"
+                    label="Open AI mentor for this market read"
                     mentorPrompt={`The current market tone is ${marketData.sentiment}. ${marketPortfolioNote.title}. Help me understand what matters for my portfolio and risk fit right now.`}
                     mentorQuestionId="allocation"
                     onOpenMentor={onOpenMentor}
@@ -1663,7 +1691,7 @@ export function MarketDashboard({
           <div className="wealth-chart-frame grid gap-3 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Priority queue</p>
+                <p className="text-sm font-medium text-foreground">Action lanes</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   Use this when you want the shortest route from market context to the next useful study or compare move.
                 </p>
@@ -1946,7 +1974,7 @@ export function MarketDashboard({
                 </div>
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">
                   {holdingsWatchSummary.trackedTotal > 0
-                    ? `${holdingsWatchSummary.trackedCount} tracked holding${holdingsWatchSummary.trackedCount === 1 ? "" : "s"} are already feeding the market lens.`
+                    ? `${holdingsWatchSummary.items.length} tracked holding${holdingsWatchSummary.items.length === 1 ? "" : "s"} are already feeding the market lens.`
                     : "Map more of the portfolio so this page can compare live market tone with your actual holdings."}
                 </p>
               </button>
@@ -2378,14 +2406,14 @@ export function MarketDashboard({
                     variant="outline"
                     className={getSectorPriorityBadgeClass(
                       getSectorPriorityLabel({
-                        fitStatus: topSuggestedSector.fitStatus,
+                        fitStatus: topSuggestedFit?.status ?? null,
                         isLeader: sectorBreadth.strongest === topSuggestedSector.name,
                         isSuggested: true,
                       }),
                     )}
                   >
                     {getSectorPriorityLabel({
-                      fitStatus: topSuggestedSector.fitStatus,
+                      fitStatus: topSuggestedFit?.status ?? null,
                       isLeader: sectorBreadth.strongest === topSuggestedSector.name,
                       isSuggested: true,
                     })}
@@ -3053,6 +3081,7 @@ export function MarketDashboard({
                   { fit: compareLeftFit, sector: compareLeftSector },
                   { fit: compareRightFit, sector: compareRightSector },
                 ].map(({ fit, sector }) => {
+                  if (!sector) return null;
                   const bestPocket =
                     [...sector.subSectors].sort((left, right) => right.value - left.value)[0] ??
                     null;
@@ -3411,8 +3440,8 @@ export function MarketDashboard({
                         : "Compare the leader with your current fit"}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {marketRegime.strongest
-                        ? `${marketRegime.strongest} is leading the tape right now.`
+                      {marketRegime.leader
+                        ? `${marketRegime.leader} is leading the tape right now.`
                         : "Sector leadership will surface here once the snapshot settles."}
                     </p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -3636,22 +3665,18 @@ export function MarketDashboard({
                         Best use today
                       </p>
                       <p className="mt-2 text-sm font-medium">
-                        {selectedSectorPriority === "Track actively"
-                          ? "Track actively"
-                          : selectedSectorPriority === "Study first"
-                            ? "Study before acting"
-                            : selectedSectorPriority === "Hold, do not chase"
-                              ? "Do not chase"
-                              : "Use as context"}
+                        {selectedSectorPriority === "Study"
+                          ? "Study before acting"
+                          : selectedSectorPriority === "Watch"
+                            ? "Track actively"
+                            : "Use as context"}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {selectedSectorPriority === "Track actively"
+                        {selectedSectorPriority === "Watch"
                           ? "Keep this sector in your compare strip and watchlist so you can follow it with intention."
-                          : selectedSectorPriority === "Study first"
+                          : selectedSectorPriority === "Study"
                             ? "Learn the structure and sub-sector breadth first, then decide whether it deserves a place in your plan."
-                            : selectedSectorPriority === "Hold, do not chase"
-                              ? "Read it, compare it, and resist turning short-term tape into a rushed allocation."
-                              : "Let this sector sharpen your market understanding even if it does not demand a move today."}
+                            : "Let this sector sharpen your market understanding even if it does not demand a move today."}
                       </p>
                     </div>
                   </div>
@@ -3662,7 +3687,7 @@ export function MarketDashboard({
                           Suggested next move
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Review it in compare, save it to your watchlist, or pull AI Mentor in when
+                          Review it in compare, save it to your watchlist, or pull AI mentor in when
                           you want help separating signal from noise.
                         </p>
                       </div>
@@ -3800,12 +3825,15 @@ export function MarketDashboard({
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium">{subSector.name}</p>
                             <Badge
+                              className={
+                                subSector.tone === "soft"
+                                  ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                  : undefined
+                              }
                               variant={
                                 subSector.tone === "leader"
                                   ? "secondary"
-                                  : subSector.tone === "soft"
-                                    ? "destructive"
-                                    : "outline"
+                                  : "outline"
                               }
                             >
                               {subSector.tone === "leader"
@@ -4493,12 +4521,15 @@ export function MarketDashboard({
                         </p>
                       </div>
                       <Badge
+                        className={
+                          row.status === "missing" || row.status === "underweight"
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : undefined
+                        }
                         variant={
                           row.status === "aligned"
                             ? "secondary"
-                            : row.status === "ahead"
-                              ? "outline"
-                              : "destructive"
+                            : "outline"
                         }
                       >
                         {row.status === "missing"
@@ -4822,7 +4853,7 @@ export function MarketDashboard({
                   {marketConversation[0]?.sectorId ? "Review the first useful lane" : "Use compare or mentor"}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  Start with the first note that still feels actionable, then either open the lane, load compare, or ask AI Mentor if the takeaway still feels fuzzy.
+                  Start with the first note that still feels actionable, then either open the lane, load compare, or ask AI mentor if the takeaway still feels fuzzy.
                 </p>
               </div>
             </div>

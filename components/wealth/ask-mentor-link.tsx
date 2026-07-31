@@ -8,7 +8,7 @@ export function AskMentorLink({
   className,
   contextLabel,
   contextNote,
-  label = "Ask AI mentor",
+  label = "Open AI mentor",
   mentorPrompt,
   mentorQuestionId,
   onOpenMentor,

@@ -57,7 +57,7 @@ const viewMeta: Record<
     summary: "Read sectors, trends, and suggested market pockets with a steadier portfolio-first lens.",
   },
   mentor: {
-    eyebrow: "AI Mentor",
+    eyebrow: "AI mentor",
     heroTitle: "Turn confusion into one calmer next move",
     laneLabel: "Mentor lane",
     quickActionLabel: "Open dashboard lane",
@@ -68,7 +68,7 @@ const viewMeta: Record<
     eyebrow: "Onboarding",
     heroTitle: "Set the baseline the rest of the app can trust",
     laneLabel: "Baseline lane",
-    quickActionLabel: "Open AI Mentor",
+    quickActionLabel: "Open AI mentor",
     quickActionTarget: "mentor",
     summary: "Set your starting point so the rest of the workspace can personalize around your real intent and risk posture.",
   },

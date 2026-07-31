@@ -77,7 +77,11 @@ import {
   describeImportHistoryApplyResult,
   filterNewImportedTransactions,
 } from "@/lib/import-jobs";
-import { buildImportDiagnostics, type ImportDiagnostics } from "@/lib/import-diagnostics";
+import {
+  buildImportDiagnostics,
+  type ImportDiagnosticRow,
+  type ImportDiagnostics,
+} from "@/lib/import-diagnostics";
 import {
   getImportJobFlowMeta,
   getImportJobHistoryActions,
@@ -1482,9 +1486,9 @@ export function Portfolio({
     `The provider confidence is ${importReview?.providerConfidence ?? "unknown"} and parse readiness is ${importReview?.parseReadiness ?? "unknown"}.`,
     `The current file is ${uploadedFileLabel ?? "manual text"}.`,
     `The preview currently has ${importPreview.assets.length} holdings, ${importPreview.duplicates.length} duplicate holdings, ${transactionImportPreview.transactions.length} parsed transactions, and ${newTransactionImportPreview.length} transaction rows ready after deduping.`,
-    importReview?.warnings?.length
-      ? `Warnings: ${importReview.warnings.join(" ")}`
-      : "There are no parser warnings right now.",
+    importReview?.guidance?.length
+      ? `Review guidance: ${importReview.guidance.join(" ")}`
+      : "There are no review guidance flags right now.",
     `Tell me what looks reliable, what needs a manual check, and what I should do next.`,
   ].join(" ");
 
@@ -2042,7 +2046,7 @@ export function Portfolio({
             <div className="wealth-inset grid gap-3 p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Priority queue</p>
+                  <p className="text-sm font-medium text-foreground">Action lanes</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Start here if you want the fastest path to a cleaner, more decision-useful portfolio read.
                   </p>
@@ -2106,7 +2110,7 @@ export function Portfolio({
               </Button>
               <Button type="button" variant="outline" onClick={handleCopyCsv}>
                 <Copy className="h-4 w-4" />
-                Copy export
+                Copy CSV
               </Button>
               <Button type="button" variant="outline" onClick={handleDownloadCsv}>
                 <Download className="h-4 w-4" />
@@ -2181,7 +2185,7 @@ export function Portfolio({
             </div>
             <div className="wealth-muted-block p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Best next move
+                Next portfolio move
               </p>
               <p className="mt-3 text-sm leading-6 text-foreground">{importTrack.items[0]}</p>
             </div>
@@ -3706,7 +3710,7 @@ export function Portfolio({
                       <p className="mt-2 leading-5 text-muted-foreground">{holdingReview.detail}</p>
                     </div>
                     <div className="wealth-muted-block p-3 text-xs">
-                      <p className="text-muted-foreground">Best next move</p>
+                      <p className="text-muted-foreground">Next row move</p>
                       <p className="mt-1 font-medium text-foreground">{holdingReview.nextStepLabel}</p>
                       <p className="mt-2 leading-5 text-muted-foreground">{holdingReview.nextStepDetail}</p>
                     </div>
@@ -3899,7 +3903,7 @@ export function Portfolio({
               </div>
               <div className="wealth-inset p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
+                  Next allocation check
                 </p>
                 <p className="mt-2 text-sm leading-6">
                   {allocationInsights[0]?.status ??
@@ -3964,7 +3968,7 @@ export function Portfolio({
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">{focusedBucketReadDetail}</p>
                   </div>
                   <div className="wealth-data-card p-3">
-                    <p className="text-xs text-muted-foreground">Best next move</p>
+                    <p className="text-xs text-muted-foreground">Next bucket move</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">
                       {activeAllocationBucketName ? "Inspect the top holding inside this bucket" : "Choose one bucket to inspect"}
                     </p>
@@ -4311,7 +4315,7 @@ export function Portfolio({
               </div>
               <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
+                  Next health fix
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   Fix the coverage or concentration issue that would make the biggest difference to the rest of the page.
@@ -4507,7 +4511,7 @@ export function Portfolio({
               </div>
               <div className="wealth-inset p-3">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Best next move
+                  Best move here
                 </p>
                 <p className="mt-2 text-sm text-foreground">
                   Solve the loudest missing or overweight bucket first before making smaller rebalancing decisions.
@@ -4547,7 +4551,7 @@ export function Portfolio({
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">{alignmentFocusedReadDetail}</p>
                   </div>
                   <div className="wealth-inset p-3">
-                    <p className="text-xs text-muted-foreground">Best next move</p>
+                    <p className="text-xs text-muted-foreground">Next drift check</p>
                     <p className="mt-1 text-sm font-semibold text-foreground">
                       {activeAlignmentInsight ? "Trace the drift to real holdings" : "Choose one bucket to inspect"}
                     </p>
@@ -5131,7 +5135,7 @@ function TransactionImportPreview({
           </p>
         </div>
         <div className="wealth-data-card p-3">
-          <p className="text-xs text-muted-foreground">Best next move</p>
+          <p className="text-xs text-muted-foreground">Next journal move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{transactionReadinessLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{transactionReadinessDetail}</p>
         </div>
@@ -5301,7 +5305,7 @@ function ImportReconciliationCard({
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{mergeModeDetail}</p>
         </div>
         <div className="wealth-stat-tile p-3">
-          <p className="text-xs text-muted-foreground">Best next move</p>
+          <p className="text-xs text-muted-foreground">Merge decision</p>
           <p className="mt-1 text-sm font-semibold text-foreground">Decide row by row</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
             Use the imported row only when it is clearly the fresher truth. Keep the tracked row when the import looks partial, rounded, or mismatched.
@@ -5831,7 +5835,7 @@ function ImportPreview({
           </p>
         </div>
         <div className="wealth-stat-tile p-3">
-          <p className="text-xs text-muted-foreground">Best next move</p>
+          <p className="text-xs text-muted-foreground">Next import move</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{previewActionLabel}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
             {previewActionDetail}

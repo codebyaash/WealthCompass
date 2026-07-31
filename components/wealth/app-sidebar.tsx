@@ -22,7 +22,7 @@ export const navItems = [
   { id: "goals", label: "Goals", icon: Goal, detail: "Targets and funding" },
   { id: "history", label: "History", icon: History, detail: "Progress trail" },
   { id: "market", label: "Market", icon: Newspaper, detail: "Sectors and trends" },
-  { id: "mentor", label: "AI Mentor", icon: MessageCircleQuestion, detail: "Ask and clarify" },
+  { id: "mentor", label: "AI mentor", icon: MessageCircleQuestion, detail: "Ask and clarify" },
   { id: "settings", label: "Settings", icon: Settings, detail: "Connectors and control" },
 ] as const;
 

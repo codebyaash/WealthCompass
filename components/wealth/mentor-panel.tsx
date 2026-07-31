@@ -174,7 +174,7 @@ export function MentorPanel({
   const starterPrompts = useMemo(() => {
     const followUpLabels = answer.followUps
       .map((questionId) => mentorQuestions.find((question) => question.id === questionId)?.label)
-      .filter((value): value is string => Boolean(value));
+      .filter((value): value is (typeof mentorQuestions)[number]["label"] => Boolean(value));
     const normalizedLaunchSource = activeLaunchSourceLabel?.trim().toLowerCase() ?? "";
     const contextualPrompts = (() => {
       if (normalizedLaunchSource.includes("onboarding")) {
@@ -556,8 +556,8 @@ export function MentorPanel({
                 : "Up to date";
         const freshnessTone =
           freshnessLabel === "Needs action" || freshnessLabel === "Needs unblock"
-            ? "secondary"
-            : "outline";
+            ? ("secondary" as const)
+            : ("outline" as const);
 
         return {
           freshnessLabel,
@@ -648,6 +648,10 @@ export function MentorPanel({
         : mentorSessionStats.activeLanes <= 3
           ? "The thread library is doing its job, but only one lane should own today's attention."
           : "This many active lanes usually means the mentor is becoming a notebook. Use it more like an operator desk.";
+  const pinnedInsight =
+    savedInsights.find((insight) => insight.isPinned) ??
+    groupedSavedInsights["do-now"][0] ??
+    null;
   const conversationVerdictLabel =
     chatMessages.length === 0
       ? "Open with one plain-language question instead of a long situation dump."
@@ -672,10 +676,6 @@ export function MentorPanel({
         : pinnedInsight
           ? "A pinned takeaway means the conversation already produced something usable. The next turn should help you execute or pressure-test it."
           : "Before leaving the chat, save, pin, or act on the reply that feels most useful right now.";
-  const pinnedInsight =
-    savedInsights.find((insight) => insight.isPinned) ??
-    groupedSavedInsights["do-now"][0] ??
-    null;
   const pinnedInsightWhyNow = pinnedInsight
     ? getMentorInsightWhyNow({
         answers,
@@ -1180,7 +1180,7 @@ export function MentorPanel({
 
   return (
     <div className="grid gap-5">
-      <Card id="mentor-overview" className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-overview" className="wealth-panel-strong overflow-hidden">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
           <div className="grid gap-4">
             <div className="flex flex-wrap gap-2">
@@ -1301,7 +1301,7 @@ export function MentorPanel({
       />
 
       <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-      <Card id="mentor-library" className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-library" className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Library: question lanes</CardTitle>
           <CardDescription>
@@ -1706,7 +1706,7 @@ export function MentorPanel({
                               className="h-8"
                               onClick={() => handleSaveTopicNote(topic.id)}
                             >
-                              Save note
+                              Save topic note
                             </Button>
                           </div>
                         </div>
@@ -1741,7 +1741,7 @@ export function MentorPanel({
         </CardContent>
       </Card>
 
-      <Card id="mentor-answer" className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-answer" className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{profile.personality}</Badge>
@@ -1890,7 +1890,7 @@ export function MentorPanel({
       </Card>
       </div>
 
-      <Card id="mentor-conversation" className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="mentor-conversation" className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle>Chat: live conversation</CardTitle>

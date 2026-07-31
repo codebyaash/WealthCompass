@@ -552,7 +552,7 @@ export function Onboarding({
           <div className="wealth-inset grid gap-3 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Priority queue</p>
+                <p className="text-sm font-medium text-foreground">Action lanes</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   Use this when you want the simplest next move instead of rereading the whole assessment page.
                 </p>
@@ -618,7 +618,7 @@ export function Onboarding({
             </div>
             <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Best next move
+                Next step
               </p>
               <p className="mt-2 text-sm leading-6 text-foreground">{currentStepGuide.bestMove}</p>
             </div>
@@ -1147,7 +1147,7 @@ export function Onboarding({
             </div>
             <div className="wealth-muted-block p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Best next move
+                First result move
               </p>
               <p className="mt-2 text-sm font-semibold text-foreground">
                 {displayedProfile
@@ -1312,7 +1312,7 @@ export function Onboarding({
                 </div>
                 <div className="wealth-data-card">
                   <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                    Best next move
+                    First unlock move
                   </p>
                   <p className="mt-2 text-sm text-foreground">
                     Get to the first complete result, then refine from something concrete instead of guessing what the app will say.

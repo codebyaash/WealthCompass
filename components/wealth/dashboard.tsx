@@ -110,6 +110,7 @@ export function Dashboard({
   integrations,
   importJobs,
   mentorRevision,
+  monthlyInvestment,
   monthlyGoal,
   onNavigate,
   onOpenMentor,
@@ -125,6 +126,7 @@ export function Dashboard({
   integrations: IntegrationConnection[];
   importJobs: ImportJob[];
   mentorRevision: number;
+  monthlyInvestment: number;
   monthlyGoal: number;
   onNavigate: (view: DashboardNavigationTarget) => void;
   onOpenMentor: (request: MentorLaunchRequest) => void;
@@ -166,6 +168,7 @@ export function Dashboard({
   const connectorSchedulerPlan = buildIntegrationSchedulerPlan(integrations);
   const connectorOperations = buildIntegrationOperationsSummary(integrations);
   const connectorMetrics = integrations.map(getIntegrationHealthMetrics);
+  const connectorAttentionCount = connectorOperations.attentionCount;
   const averageConnectorSuccess = connectorMetrics.length
     ? Math.round(
         connectorMetrics.reduce((sum, metric) => sum + metric.successRate, 0) /
@@ -210,7 +213,7 @@ export function Dashboard({
     filter: connectorFilter,
   }).length;
   const importOutcomes = buildDashboardImportOutcomes(importJobs, 3);
-  const totalMonthlyContributions = monthlyGoal + profile.monthlyInvestment;
+  const totalMonthlyContributions = monthlyGoal + monthlyInvestment;
   const dashboardReadinessLabel = isFreshWorkspace
     ? "Setup in progress"
     : connectorAttention.severity === "healthy"
@@ -283,8 +286,8 @@ export function Dashboard({
           : "Source lane not started",
       label: "Data trust",
       value:
-        connectorAttention.count > 0
-          ? `${connectorAttention.count} need review`
+        connectorAttentionCount > 0
+          ? `${connectorAttentionCount} need review`
           : integrations.length > 0
             ? "Stable"
             : "Not started",
@@ -301,7 +304,7 @@ export function Dashboard({
   const openImportReviewCount = importJobs.filter(
     (job) => job.status === "received" || job.status === "reviewed",
   ).length;
-  const fundingGap = Math.max(monthlyGoal - profile.monthlyInvestment, 0);
+  const fundingGap = Math.max(monthlyGoal - monthlyInvestment, 0);
   const dashboardPulseCards = [
     {
       detail: isFreshWorkspace ? "Finish onboarding first" : profile.band,
@@ -354,9 +357,9 @@ export function Dashboard({
           section: "Today",
           tone: "urgent" as const,
         },
-    connectorAttention.count > 0
+    connectorAttentionCount > 0
       ? {
-          detail: `${connectorAttention.count} connector or import workflow item${connectorAttention.count === 1 ? "" : "s"} can still distort what the portfolio and market sections are telling you.`,
+          detail: `${connectorAttentionCount} connector or import workflow item${connectorAttentionCount === 1 ? "" : "s"} can still distort what the portfolio and market sections are telling you.`,
           label: "Repair data trust first",
           onClick: () =>
             onOpenConnectorFocus({
@@ -426,8 +429,8 @@ export function Dashboard({
     totalMonthlyContributions > 0
       ? `${formatMoney(totalMonthlyContributions)} is moving monthly across goals and investing.`
       : "I do not yet have a stable monthly investing rhythm.",
-    connectorAttention.count > 0
-      ? `${connectorAttention.count} connector or import workflow items currently need attention.`
+    connectorAttentionCount > 0
+      ? `${connectorAttentionCount} connector or import workflow items currently need attention.`
       : "No connector workflows are asking for attention right now.",
     goals.length > 0
       ? `Goal progress is ${goalProgress}% against a total target of ${formatMoney(totalGoalTarget)}.`
@@ -470,7 +473,7 @@ export function Dashboard({
     {
       description:
         integrations.length > 0
-          ? `${connectorAttention.count} feed${connectorAttention.count === 1 ? "" : "s"} need attention across ${integrations.length} source${integrations.length === 1 ? "" : "s"}.`
+          ? `${connectorAttentionCount} feed${connectorAttentionCount === 1 ? "" : "s"} need attention across ${integrations.length} source${integrations.length === 1 ? "" : "s"}.`
           : "Connect one broker, inbox, or statement workflow to keep this workspace fresh.",
       icon: DatabaseZap,
       label: "Data feeds",
@@ -480,8 +483,8 @@ export function Dashboard({
         }),
       value:
         integrations.length > 0
-          ? connectorAttention.count > 0
-            ? `${connectorAttention.count} to review`
+          ? connectorAttentionCount > 0
+            ? `${connectorAttentionCount} to review`
             : "Healthy"
           : "No feeds linked",
     },
@@ -541,14 +544,14 @@ export function Dashboard({
     },
     {
       detail:
-        connectorAttention.count > 0
-          ? `${connectorAttention.count} feed issue${connectorAttention.count === 1 ? "" : "s"} can still distort downstream reads.`
+        connectorAttentionCount > 0
+          ? `${connectorAttentionCount} feed issue${connectorAttentionCount === 1 ? "" : "s"} can still distort downstream reads.`
           : integrations.length > 0
             ? "Connector health is stable enough that portfolio and market cards are more trustworthy."
             : "No source lane is linked yet, so data freshness still depends on manual updates.",
       label: "Data freshness",
       value:
-        connectorAttention.count > 0
+        connectorAttentionCount > 0
           ? connectorAttention.badge
           : integrations.length > 0
             ? "Stable"
@@ -559,7 +562,7 @@ export function Dashboard({
     {
       detail: isFreshWorkspace
         ? "The dashboard still needs a real baseline, so onboarding and the first tracked source matter more than deeper optimization."
-        : connectorAttention.count > 0
+        : connectorAttentionCount > 0
           ? "The workspace is useful, but data quality is still shaping what you can trust downstream."
           : "The workspace is stable enough that decisions can shift from setup toward allocation, goals, and execution.",
       label: "Workspace posture",
@@ -575,14 +578,14 @@ export function Dashboard({
     },
     {
       detail:
-        connectorAttention.count > 0
+        connectorAttentionCount > 0
           ? "Clear the data blockers before treating portfolio and market reads as fully trustworthy."
           : hasTrajectory
             ? "You have enough transaction path to read behavior, not just static value snapshots."
             : "Transaction coverage is still thin, so the next best import can materially improve how the dashboard reads.",
       label: "Trust anchor",
       value:
-        connectorAttention.count > 0
+        connectorAttentionCount > 0
           ? "Review feeds"
           : hasTrajectory
             ? "Behavior read"
@@ -611,7 +614,7 @@ export function Dashboard({
     isFreshWorkspace
       ? "Finish onboarding so the dashboard stops operating on assumptions."
       : `Start with ${action.cta.toLowerCase()} before opening secondary pages.`,
-    connectorAttention.count > 0
+    connectorAttentionCount > 0
       ? "Resolve the active connector or import review items before trusting deeper portfolio and market cues."
       : "Use the live data read to decide whether the next move belongs in portfolio, goals, or learning.",
     fundingGap > 0
@@ -640,7 +643,7 @@ export function Dashboard({
       ? `${topAllocationBucket.name} is currently your largest bucket at ${formatMoney(topAllocationBucket.value)}.`
       : "Allocation is ready for review."
     : "Allocation becomes useful once at least one tracked holding is live.";
-  const mentorCtaLabel = "Ask AI mentor";
+  const mentorCtaLabel = "Open AI mentor";
   const dashboardBoardVerdict = isFreshWorkspace
     ? {
         badge: "Setup first",
@@ -650,7 +653,7 @@ export function Dashboard({
         move: "Finish onboarding, add one real holding or goal, and link one dependable source.",
         toneClass: "border-sky-500/30 bg-sky-500/10",
       }
-    : connectorAttention.count > 0
+    : connectorAttentionCount > 0
       ? {
           badge: "Trust is constrained",
           badgeVariant: "outline" as const,
@@ -1373,7 +1376,7 @@ export function Dashboard({
               <div className="wealth-inset grid gap-3 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Priority queue</p>
+                    <p className="text-sm font-medium text-foreground">Action lanes</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
                       Use this when you want the shortest path from overview to the next worthwhile move.
                     </p>
@@ -1430,14 +1433,14 @@ export function Dashboard({
                 <ArrowRight className="h-4 w-4" />
               </Button>
               <AskMentorLink
-                label={mentorCtaLabel}
+                label="Open AI mentor"
                 mentorPrompt={dashboardMentorPrompt}
                 mentorQuestionId="first-investment"
                 onOpenMentor={onOpenMentor}
                 sourceLabel="Dashboard summary"
               />
               <Button type="button" variant="outline" onClick={() => onNavigate("portfolio")}>
-                Review portfolio
+                Open portfolio lane
               </Button>
               <Button
                 type="button"
@@ -1447,7 +1450,7 @@ export function Dashboard({
                     section: "connected-sources",
                   })}
               >
-                Review data feeds
+                Open data feeds
               </Button>
             </div>
             <MentorOpenCue
@@ -1530,7 +1533,7 @@ export function Dashboard({
                 <div>
                   <p className="text-xs text-muted-foreground">Monthly investing</p>
                   <p className="mt-1 text-lg font-semibold text-foreground">
-                    {formatMoney(profile.monthlyInvestment)}
+                    {formatMoney(monthlyInvestment)}
                   </p>
                 </div>
                 <div>
@@ -2408,7 +2411,7 @@ export function Dashboard({
                   <AskMentorLink
                     label={`${mentorCtaLabel} about goal tradeoffs`}
                     mentorPrompt={`My dashboard shows ${goals.length} active goals, ${goalProgress}% total goal progress, and ${formatMoney(monthlyGoal)} of monthly goal pressure. Help me decide how to prioritize and fund them.`}
-                    mentorQuestionId="goal-priority"
+                    mentorQuestionId="sip"
                     onOpenMentor={onOpenMentor}
                     sourceLabel="Dashboard goals"
                   />

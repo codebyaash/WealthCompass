@@ -26,6 +26,7 @@ import { Portfolio } from "@/components/wealth/portfolio";
 import type { PortfolioFocusTarget, PortfolioReturnState } from "@/components/wealth/portfolio";
 import { RiskHistory } from "@/components/wealth/risk-history";
 import {
+  defaultMarketPreferences,
   defaultRiskAnswers,
   portfolioAssets,
   portfolioTransactions,
@@ -129,12 +130,8 @@ export function WealthCompassApp() {
   const [goals, setGoals] = useState<WealthGoal[]>(defaultGoals);
   const [integrations, setIntegrations] = useState<IntegrationConnection[]>([]);
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
-  const [marketPreferences, setMarketPreferences] = useState<MarketPreferences>({
-    autoRefresh: true,
-    includeHoldingsWatch: true,
-    pollingIntervalSeconds: 60,
-    preferredSource: "alpha-vantage",
-  });
+  const [marketPreferences, setMarketPreferences] =
+    useState<MarketPreferences>(defaultMarketPreferences);
   const [transactions, setTransactions] = useState<PortfolioTransaction[]>([]);
   const [riskHistory, setRiskHistory] = useState<RiskHistoryItem[]>([]);
   const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState(false);
@@ -791,12 +788,7 @@ export function WealthCompassApp() {
       }),
     ]);
     setImportJobs([]);
-    setMarketPreferences({
-      autoRefresh: true,
-      includeHoldingsWatch: true,
-      pollingIntervalSeconds: 60,
-      preferredSource: "alpha-vantage",
-    });
+    setMarketPreferences(defaultMarketPreferences);
     setTransactions(portfolioTransactions);
     setRiskHistory([]);
     saveRiskHistory([]);
@@ -1080,6 +1072,7 @@ export function WealthCompassApp() {
               integrations={safeIntegrations}
               importJobs={importJobs}
               mentorRevision={mentorRevision}
+              monthlyInvestment={answers.monthlyInvestment}
               monthlyGoal={monthlyGoal}
               onNavigate={(view) => setActiveView(view)}
               onOpenMentor={handleOpenMentor}

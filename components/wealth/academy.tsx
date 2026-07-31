@@ -743,7 +743,7 @@ export function Academy({
       <Card id="academy-priority-queue" className="wealth-panel-strong overflow-hidden">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Priority queue</Badge>
+            <Badge variant="secondary">Action lanes</Badge>
             <Badge variant="outline">{academyReadinessLabel}</Badge>
           </div>
           <CardTitle>What to do next on this page</CardTitle>

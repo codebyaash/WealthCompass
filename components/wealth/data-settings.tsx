@@ -508,7 +508,7 @@ export function DataSettings({
     [userEmail],
   );
   const settingsTrack =
-    profile.actionBaskets.find((track) => track.id === "track") ?? profile.actionBaskets[0];
+    profile.actionBaskets.find((track) => track.id === "activate") ?? profile.actionBaskets[0];
   const settingsHeadline =
     operationsSummary.attentionCount > 0
       ? "Tighten the feeds that still need a review before they touch your portfolio."
@@ -811,7 +811,11 @@ export function DataSettings({
     | "inbox"
     | "import-history"
     | "sync-plan";
-  const connectorPriorityQueue = [
+  const connectorPriorityQueue: Array<{
+    action: ConnectorPriorityAction;
+    detail: string;
+    title: string;
+  }> = [
     {
       title:
         operationsSummary.attentionCount > 0
@@ -2066,7 +2070,7 @@ export function DataSettings({
                   Use the current posture first, then jump straight into the lane that needs action.
                 </p>
               </div>
-              <Badge variant="outline">Settings navigator</Badge>
+              <Badge variant="outline">Action lanes</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {settingsPriorityQueue.map((item) => (
@@ -2209,7 +2213,7 @@ export function DataSettings({
                 <Copy className="h-4 w-4" />
                 Copy checkpoint
               </Button>
-              <Button type="button" variant="outline" onClick={handleDownloadSnapshot}>
+              <Button type="button" variant="secondary" onClick={handleDownloadSnapshot}>
                 <Download className="h-4 w-4" />
                 Download checkpoint
               </Button>
@@ -2225,7 +2229,7 @@ export function DataSettings({
                   Paste a saved `wealthcompass-data.json` file here to restore the full workspace state.
                 </p>
               </div>
-              <Button type="button" variant="outline" onClick={handleImportWorkspace}>
+              <Button type="button" onClick={handleImportWorkspace}>
                 <Upload className="h-4 w-4" />
                 Restore checkpoint
               </Button>
@@ -2292,11 +2296,11 @@ export function DataSettings({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={handleResetPortfolio}>
+              <Button type="button" variant="ghost" onClick={handleResetPortfolio}>
                 <RotateCcw className="h-4 w-4" />
                 Reset portfolio
               </Button>
-              <Button type="button" variant="secondary" onClick={handleRestoreDemoWorkspace}>
+              <Button type="button" variant="outline" onClick={handleRestoreDemoWorkspace}>
                 <RotateCcw className="h-4 w-4" />
                 Restore workspace
               </Button>
@@ -2455,16 +2459,16 @@ export function DataSettings({
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <Button type="button" variant="outline" onClick={() => scrollToSection(brokerSectionRef)}>
-                  Broker lane
+                  Open broker lane
                 </Button>
                 <Button type="button" variant="outline" onClick={() => scrollToSection(inboxSectionRef)}>
-                  Inbox lane
+                  Open inbox lane
                 </Button>
                 <Button type="button" variant="outline" onClick={() => scrollToSection(syncPlanSectionRef)}>
-                  Rehearse flow
+                  Open sync plan
                 </Button>
                 <Button type="button" variant="outline" onClick={() => scrollToSection(importHistorySectionRef)}>
-                  Review queue
+                  Open review queue
                 </Button>
               </div>
             </div>
@@ -3504,7 +3508,8 @@ export function DataSettings({
                   const laneModeLabel =
                     integration.importStrategy === "sync-ready"
                       ? "Live-sync lane"
-                      : integration.importStrategy === "manual-review"
+                      : integration.importStrategy === "csv-upload" ||
+                          integration.importStrategy === "email-forward"
                         ? "Review-first lane"
                         : "Statement lane";
                   const laneRiskLabel =
@@ -3584,7 +3589,8 @@ export function DataSettings({
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">
                                 {integration.importStrategy === "sync-ready"
                                   ? "This source can usually move from connector check to reusable sync cadence."
-                                  : integration.importStrategy === "manual-review"
+                                  : integration.importStrategy === "csv-upload" ||
+                                      integration.importStrategy === "email-forward"
                                     ? "This source is healthiest when you review staged output before each apply."
                                     : "This lane depends on fresh exported statements more than scheduled checks."}
                               </p>
@@ -4505,7 +4511,7 @@ export function DataSettings({
                     disabled={!syncExecutionOverview || !syncExecutionOverview.canStage}
                   >
                     <FileText className="h-4 w-4" />
-                    Stage in import history
+                    Stage for review
                   </Button>
                   {syncPreviewConnection?.importStrategy === "sync-ready" ? (
                     <Button

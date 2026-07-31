@@ -452,7 +452,7 @@ export function Goals({
       <Card
         id="goals-overview"
         ref={prioritiesRef}
-        className="overflow-hidden border-border/70 bg-card/95 shadow-sm"
+        className="wealth-panel-strong overflow-hidden"
       >
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1.15fr_0.85fr] lg:p-7">
           <div className="grid gap-4">
@@ -582,7 +582,7 @@ export function Goals({
             <div className="grid gap-3 rounded-md border border-border/70 bg-background/80 p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Priority queue</p>
+                  <p className="text-sm font-medium text-foreground">Action lanes</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Use this when you want the shortest route from a goal overview to the next planning move.
                   </p>
@@ -706,7 +706,7 @@ export function Goals({
         onChange={handleGoalsNavigatorChange}
       />
 
-      <Card id="goals-list" ref={goalListRef} className="border-border/70 bg-card/95 shadow-sm">
+      <Card id="goals-list" ref={goalListRef} className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{goals.length || 0} goals</Badge>
@@ -718,9 +718,9 @@ export function Goals({
               <CardTitle>Editor: goal list</CardTitle>
               <CardDescription>Plan essential, lifestyle, and long-term goals in one funding stack.</CardDescription>
             </div>
-            <Button type="button" variant="outline" onClick={onAddGoal}>
+            <Button type="button" onClick={onAddGoal}>
               <Plus className="h-4 w-4" />
-              Add Goal
+              Add goal
             </Button>
           </div>
         </CardHeader>
@@ -780,7 +780,7 @@ export function Goals({
         </CardContent>
       </Card>
 
-      <Card className="border-border/70 bg-card/95 shadow-sm">
+      <Card className="wealth-panel-strong overflow-hidden">
         <CardHeader>
           <CardTitle>Overview: goal pressure</CardTitle>
           <CardDescription>{planningHeadline}</CardDescription>
@@ -895,7 +895,7 @@ export function Goals({
       <div className="grid gap-5 xl:grid-cols-[1fr_0.75fr]">
         <div ref={goalListRef} className="grid gap-4">
           {goals.length === 0 ? (
-            <Card className="border-border/70 bg-card/95 shadow-sm">
+            <Card className="wealth-panel-strong overflow-hidden">
               <CardHeader>
                 <CardTitle>Start with one real goal</CardTitle>
                 <CardDescription>
@@ -992,7 +992,7 @@ export function Goals({
         </div>
 
         <div className="grid gap-5">
-          <Card id="goals-monthly-split" ref={monthlySplitRef} className="border-border/70 bg-card/95 shadow-sm">
+          <Card id="goals-monthly-split" ref={monthlySplitRef} className="wealth-panel-strong overflow-hidden">
             <CardHeader>
               <CardTitle>Funding: monthly split</CardTitle>
               <CardDescription>See which goals are competing for the same monthly money.</CardDescription>
@@ -1097,7 +1097,7 @@ export function Goals({
             </CardContent>
           </Card>
 
-          <Card id="goals-planning-checks" className="border-border/70 bg-card/95 shadow-sm">
+          <Card id="goals-planning-checks" className="wealth-panel-strong overflow-hidden">
             <CardHeader>
               <CardTitle>Checks: plan stress</CardTitle>
               <CardDescription>Catch timelines, assumptions, and funding loads that are drifting out of range.</CardDescription>
@@ -1163,7 +1163,7 @@ export function Goals({
             </CardContent>
           </Card>
 
-          <Card id="goals-funding-posture" className="border-border/70 bg-card/95 shadow-sm">
+          <Card id="goals-funding-posture" className="wealth-panel-strong overflow-hidden">
             <CardHeader>
               <CardTitle>Read: funding posture</CardTitle>
               <CardDescription>Read the plan before the plan reads you.</CardDescription>
