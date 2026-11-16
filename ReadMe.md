@@ -6,6 +6,14 @@ WealthCompass is a free-first investment companion MVP built with Next.js,
 TypeScript, Tailwind, shadcn-style components, Recharts, and Supabase-ready
 data modeling.
 
+## Product screenshots
+
+The local demo is documented across every primary workspace: dashboard, onboarding, academy, portfolio, goals, history, market, AI mentor, and settings. See the complete [screenshot index](docs/screenshots/README.md).
+
+| Command center | Portfolio | Goals | Market |
+| --- | --- | --- | --- |
+| ![Dashboard showing an investor command center](docs/screenshots/wealthcompass-dashboard.png) | ![Portfolio showing holdings and allocation context](docs/screenshots/wealthcompass-portfolio.png) | ![Goals showing monthly funding planning](docs/screenshots/wealthcompass-goals.png) | ![Market showing sector context](docs/screenshots/wealthcompass-market.png) |
+
 ## Phase 1: Foundation
 
 - Dashboard-first product shell
